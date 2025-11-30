@@ -46,18 +46,27 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message: ChatMessage) -> CompletionResponse:
+    async def run_chat(self, chat_message: ChatMessage |None = None) -> CompletionResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
+        その後、後処理を実施し、CompletionResponseを返す.
+        chat_messageがNoneの場合は、chat_historyから最後のユーザーメッセージを取得して処理を実施する.
 
         Args:
             chat_message (ChatMessage): チャットメッセージ
         Returns:
             CompletionResponse: LLMからの応答
         '''
-        # 前処理を実行
-        preprocessed_messages: list[ChatMessage] = [chat_message]
+        if not chat_message:
+            chat_messages = self.chat_history.get_last_user_messages()
+            if len(chat_messages) == 0:
+                raise ValueError("No chat messages to process.")
+        else:
+            chat_messages = [chat_message]
+
+             # 前処理を実行
+        preprocessed_messages: list[ChatMessage] = chat_messages
         preprocessed_messages = self.__preprocess_text_message(preprocessed_messages, self.request_context)
         preprocessed_messages = self.__preprocess_image_urls(preprocessed_messages, self.request_context)
 

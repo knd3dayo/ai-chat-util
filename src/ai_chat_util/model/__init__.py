@@ -79,6 +79,23 @@ class CompletionRequest(BaseModel):
         else:
             logger.debug("No messages to update.")
 
+    def get_last_user_messages(self) -> list["ChatMessage"]:
+        """
+        Get all ChatMessages with role 'user' in the messages after the last assistant message.
+        
+        Returns:
+            list[ChatMessage]: List of chat messages with role 'user'.
+        """
+        last_assistant_index = -1
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == self.assistant_role_name:
+                last_assistant_index = i
+                break
+        user_messages = [msg for msg in self.messages[last_assistant_index + 1:] if msg.role == self.user_role_name]
+        logger.debug(f"User messages retrieved: {len(user_messages)} messages found.")
+        return user_messages
+    
+
 class CompletionResponse(BaseModel):
     output: str = Field(default="", description="The output text from the chat model.")
     total_tokens: int = Field(default=0, description="The total number of tokens used in the chat interaction.")

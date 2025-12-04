@@ -103,34 +103,46 @@ class ChatResponse(BaseModel):
 
 
 
+from typing import Dict, Any
+from pydantic import model_validator
+
 class ChatContent(BaseModel):
     type: str = Field(default="text", description="The type of content (e.g., 'text', 'image_url').")
     text: Optional[str] = Field(default=None, description="The text content, if type is 'text'.")
-    image_url: Optional[dict] = Field(default=None, description="The image URL content, if type is 'image_url'.")
+    image_url: Optional[Dict[str, str]] = Field(default=None, description="The image URL content, if type is 'image_url'.")
+    extra: Dict[str, Any] = Field(default_factory=dict, description="Additional arbitrary arguments (e.g., response_format).")
+
+    @model_validator(mode="after")
+    def validate_content(self):
+        if self.type == "text" and not self.text:
+            raise ValueError("text content is required when type='text'")
+        if self.type == "image_url" and not self.image_url:
+            raise ValueError("image_url is required when type='image_url'")
+        return self
+
+    def model_dump(self, *args, **kwargs) -> dict:
+        base = super().model_dump(*args, **kwargs)
+        for k, v in self.extra.items():
+            if k not in base:
+                base[k] = v
+        return base
 
     @classmethod
-    def create_image_content_from_file(cls, role: str, content: str, image_path: str) -> 'ChatContent':
+    def create_image_content_from_file(cls, image_path: str, **extra) -> 'ChatContent':
         """
-        Create a ChatMessage with an image from a local file path.
-        
+        Create a ChatContent with an image from a local file path.
         Args:
-            role (str): The role of the message sender (e.g., 'user', 'assistant').
-            content (str): The text content of the message.
-            image_path (str): The local file path to the image. 
+            image_path (str): The local file path to the image.
+            **extra: Arbitrary keyword arguments to include.
         Returns:
-            ChatMessage: The created chat message with image content.
-        # Convert local image path to data URL
+            ChatContent: The created chat content with image data.
         """
         with open(image_path, "rb") as image_file:
             image_data = image_file.read()
-        # Encode the image data to base64
-        if isinstance(image_data, bytes):
-            image_data = base64.b64encode(image_data).decode('utf-8')
-        # Create the image URL in data URL format
-        mime_type = "image/jpeg"  # Assuming JPEG, adjust as necessary
+        image_data = base64.b64encode(image_data).decode('utf-8')
+        mime_type = "image/jpeg"  # Adjust as needed
         image_url = f"data:{mime_type};base64,{image_data}"
-        chat_content = ChatContent(type="image_url", image_url={"url": image_url})
-        return chat_content
+        return cls(type="image_url", image_url={"url": image_url}, extra=extra)
 
 
 class ChatMessage(BaseModel):

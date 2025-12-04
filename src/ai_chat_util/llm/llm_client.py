@@ -47,7 +47,7 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message: ChatMessage |None = None, **kwargs) -> ChatResponse:
+    async def run_chat(self, chat_message_list: list[ChatMessage], **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -59,12 +59,12 @@ class LLMClient(ABC):
         Returns:
             CompletionResponse: LLMからの応答
         '''
-        if not chat_message:
+        if len(chat_message_list) == 0:
             chat_messages = self.chat_history.get_last_user_messages()
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
-            chat_messages = [chat_message]
+            chat_messages = chat_message_list
 
              # 前処理を実行
         preprocessed_messages: list[ChatMessage] = chat_messages
@@ -291,7 +291,7 @@ class LLMClient(ABC):
             role=ChatHistory.user_role_name,
             content=[ChatContent(type="text", text=summmarize_request_text)]
         )
-        summarize_response = await client.run_chat(message)
+        summarize_response = await client.run_chat([message])
         return summarize_response
 
 class AzureOpenAIClient(LLMClient):
@@ -360,8 +360,8 @@ if __name__ == "__main__":
             role=ChatHistory.user_role_name,
             content=[ChatContent(type="text", text=input_text)]
         )
-        response = await client.run_chat(message)
-        print(response.output)\
+        response = await client.run_chat([message])
+        print(response.output)
 
 
 

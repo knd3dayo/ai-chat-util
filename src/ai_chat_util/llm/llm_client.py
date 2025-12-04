@@ -1,5 +1,6 @@
-# 抽象クラス
 
+from typing import Any
+# 抽象クラス
 from abc import ABC, abstractmethod
 import copy
 import tiktoken
@@ -46,7 +47,7 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message: ChatMessage |None = None) -> ChatResponse:
+    async def run_chat(self, chat_message: ChatMessage |None = None, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -76,7 +77,7 @@ class LLMClient(ABC):
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=self.request_context)
             
             client.chat_history.add_message(message)
-            chat_response =  await client._chat_completion()
+            chat_response =  await client._chat_completion(**kwargs)
             return (message_num, chat_response)
             
         chat_response_tuples: list[tuple[int, ChatResponse]] = []
@@ -95,7 +96,7 @@ class LLMClient(ABC):
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=self.request_context)
             
             client.chat_history.add_message(preprocessed_message)
-            chat_response =  await client._chat_completion()
+            chat_response =  await client._chat_completion(**kwargs)
             chat_responses.append(chat_response)
 
         # 後処理を実行
@@ -312,6 +313,7 @@ class AzureOpenAIClient(LLMClient):
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
             messages=self.chat_history.messages,
+            **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
@@ -332,6 +334,7 @@ class OpenAIClient(LLMClient):
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
             messages=self.chat_history.messages,
+            **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 

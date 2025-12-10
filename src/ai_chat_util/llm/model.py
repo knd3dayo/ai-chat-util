@@ -1,9 +1,11 @@
+import base64, os
+# 抽象クラス
+from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 from typing import ClassVar, Optional, Any
 from pydantic import BaseModel, Field
-
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -103,61 +105,16 @@ class ChatResponse(BaseModel):
 
 
 from typing import Dict, Any
-from pydantic import model_validator
 
-class ChatContent(BaseModel):
-    type: str = Field(default="text", description="The type of content (e.g., 'text', 'image_url').")
-    text: Optional[str] = Field(default=None, description="The text content, if type is 'text'.")
-    image_url: Optional[Dict[str, str]] = Field(default=None, description="The image URL content, if type is 'image_url'.")
-    extra: Dict[str, Any] = Field(default_factory=dict, description="Additional arbitrary arguments (e.g., response_format).")
-
-    @model_validator(mode="after")
-    def validate_content(self):
-        if self.type == "text" and not self.text:
-            raise ValueError("text content is required when type='text'")
-        if self.type == "image_url" and not self.image_url:
-            raise ValueError("image_url is required when type='image_url'")
-        return self
-
-    def model_dump(self, *args, **kwargs) -> dict:
-        base = super().model_dump(*args, **kwargs)
-        for k, v in self.extra.items():
-            if k not in base:
-                base[k] = v
-        return base
-
-    def add_extra(self, key: str, value: Any) -> None:
-        """
-        Add an extra key-value pair to the extra dictionary.
-        
-        Args:
-            key (str): The key for the extra data.
-            value (Any): The value for the extra data.
-        """
-        self.extra[key] = value
+class ChatContent:
+    def __init__(self, params: dict[str, Any]):
+        self.params = params
 
 
 class ChatMessage(BaseModel):
     role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
     content: list[ChatContent] = Field(default=[], description="The content of the message, which can be text or other types.")
-    extra: dict[str, Any] = Field(default_factory=dict, description="Additional arbitrary arguments for ChatMessage.")
 
-    def model_dump(self, *args, **kwargs) -> dict:
-        base = super().model_dump(*args, **kwargs)
-        for k, v in self.extra.items():
-            if k not in base:
-                base[k] = v
-        return base
-
-    def add_extra(self, key: str, value: Any) -> None:
-        """
-        Add an extra key-value pair to the extra dictionary.
-        
-        Args:
-            key (str): The key for the extra data.
-            value (Any): The value for the extra data.
-        """
-        self.extra[key] = value
 
     def get_last_user_content(self) -> Optional[ChatContent]:
         """

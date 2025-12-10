@@ -6,7 +6,7 @@ openai
 tiktoken
 
 # For MCP
-fastmcp
+fastmcp == 2.12.4
 
 # For API
 fastapi

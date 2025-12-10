@@ -1,6 +1,6 @@
 {
     "mcpServers": {
-        "ai_chat_mcp": {
+        "AIChatUtil": {
             "timeout": 60,
             "type": "stdio",
             "command": "uv",
@@ -9,11 +9,11 @@
                 "<PATH_TO_VENV>",
                 "run",
                 "-m",
-                "ai_chat_mcp.mcp.mcp_server"
+                "ai_chat_util.mcp.mcp_server"
             ],
             "env": {
+                "LLM_PROVIDER": "openai",
                 "OPENAI_API_KEY": "sk-****",
-                "AZURE_OPENAI": "false",
                 "OPENAI_COMPLETION_MODEL": "gpt-4.1",
                 "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small"
             }

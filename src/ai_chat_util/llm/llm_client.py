@@ -1,5 +1,5 @@
 
-from typing import Any
+from typing import Sequence
 # 抽象クラス
 from abc import ABC, abstractmethod
 import os
@@ -24,20 +24,50 @@ class LLMClient(ABC):
     @abstractmethod
     async def _chat_completion(self, **kwargs) ->  ChatResponse:
         pass
+
+    @abstractmethod
+    def _create_image_content_from_url_(cls, image_url: str) -> "ChatContent":
+        pass
+
+    @abstractmethod
+    def _create_image_content_from_bytes_(cls, image_data: bytes) -> "ChatContent":
+        pass
     
     @abstractmethod
-    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
+    def _create_pdf_content_from_url_(self, file_url: str, filename: str) -> "ChatContent":
         pass
-
+    
     @abstractmethod
-    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
+    def _create_pdf_content_from_bytes_(self, file_data: bytes, filename: str) -> "ChatContent":
         pass
 
-    def create_image_content_from_file(self, file_path: str) -> ChatContent:
-        return self._create_image_content_from_file(file_path)
+    @classmethod
+    def create_text_content(cls, text: str) -> "ChatContent":
+        params = {"type": "text", "text": text}
+        return ChatContent(params=params)
+    
+    def create_image_content_from_url(self, image_url: str) -> "ChatContent":
+        return self._create_image_content_from_url_(image_url)
 
-    def create_pdf_content_from_file(self, file_path: str) -> ChatContent:
-        return self._create_pdf_content_from_file(file_path)
+    def create_image_content_from_bytes(self, image_data: bytes) -> "ChatContent":
+        return self._create_image_content_from_bytes_(image_data)
+
+    def create_image_content_from_file(self, file_path: str) -> "ChatContent":
+        with open(file_path, "rb") as image_file:
+            image_data = image_file.read()
+        return self.create_image_content_from_bytes(image_data)
+   
+    def create_pdf_content_from_url(self, file_url: str, filename: str) -> "ChatContent":
+        return self._create_pdf_content_from_url_(file_url, filename)
+
+    def create_pdf_content_from_bytes(self, file_data: bytes, filename: str) -> "ChatContent":
+        return self._create_pdf_content_from_bytes_(file_data, filename)
+
+    def create_pdf_content_from_file(self, file_path: str) -> "ChatContent":
+        with open(file_path, "rb") as pdf_file:
+            file_data = pdf_file.read()
+        filename = os.path.basename(file_path)
+        return self.create_pdf_content_from_bytes(file_data, filename)
 
     @classmethod
     def create_llm_client(
@@ -62,6 +92,35 @@ class LLMClient(ABC):
             encoder = tiktoken.encoding_for_model(model)
         # token数を取得する
         return len(encoder.encode(input_text))
+
+    async def analyze_image_files(self, image_path_list: list[str], prompt: str) -> str:
+        '''
+        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        image_content_list = []
+        for image_path in image_path_list:
+            image_content = self.create_image_content_from_file(image_path)
+            image_content_list.append(image_content)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
+        chat_response: ChatResponse = await self.run_chat([chat_message],  request_context=None)
+        return chat_response.output
+
+
+    async def analyze_pdf_files(self, pdf_path_list: list[str], prompt: str) -> str:
+        '''
+        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_content_list = []
+        for pdf_path in pdf_path_list:
+            pdf_content = self.create_pdf_content_from_file(pdf_path)
+            pdf_content_list.append(pdf_content)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
+        chat_response: ChatResponse = await self.run_chat([chat_message],  request_context=None)
+        return chat_response.output
 
     async def run_chat(self, chat_message_list: list[ChatMessage] = [], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
         '''
@@ -106,9 +165,10 @@ class LLMClient(ABC):
         for chat_message in chat_messages:
             self.chat_history.add_message(chat_message)
         chat_response =  await self._chat_completion(**kwargs)
+        text_content = self.create_text_content(chat_response.output)
         self.chat_history.add_message(ChatMessage(
             role=ChatHistory.assistant_role_name,
-            content=[ChatContent(type="text", text=chat_response.output)]
+            content=[text_content]
         ))
         return chat_response
 
@@ -170,9 +230,11 @@ class LLMClient(ABC):
         # chat_historyにpreprocessed_messageとpostprocessed_responseを追加する
         for preprocessed_message in preprocessed_messages:
             self.chat_history.add_message(preprocessed_message)
+
+        text_content = self.create_text_content(postprocessed_response.output)
         response_message = ChatMessage(
             role=ChatHistory.assistant_role_name,
-            content=[ChatContent(type="text", text=postprocessed_response.output)]
+            content=[text_content]
         )
         self.chat_history.add_message(response_message)
 
@@ -203,10 +265,7 @@ class LLMClient(ABC):
             result_chat_message_list: list[ChatMessage] = []
             for chat_message in chat_message_list:
                 if request_context.prompt_template_text:
-                    prompt_template_content = ChatContent(
-                        type = "text",
-                        text = request_context.prompt_template_text
-                    )
+                    prompt_template_content = self.create_text_content(request_context.prompt_template_text)
                     chat_message.content.insert(0, prompt_template_content)
                 result_chat_message_list.append(chat_message)
             return result_chat_message_list
@@ -225,23 +284,23 @@ class LLMClient(ABC):
 
         # textタイプのcontentを抽出する
         text_type_contents = [ 
-            content for chat_message in chat_message_list for content in chat_message.content if content.type == "text"
+            content for chat_message in chat_message_list for content in chat_message.content if content.params.get("type") == "text"
             ]
         if len(text_type_contents) == 0:
             return __insert_prompt_template(chat_message_list, request_context)
 
         # text以外のcontentを抽出する
         non_text_contents = [
-            content for chat_message in chat_message_list for content in chat_message.content if content.type != "text"
+            content for chat_message in chat_message_list for content in chat_message.content if content.params.get("type") != "text"
         ]
 
         text_result_chat_message_list: list[ChatMessage] = []        
         # textを結合
-        combined_text = "\n".join([content.text for content in text_type_contents if content.text])
+        combined_text = "\n".join([text_content.params.get("text", "") for text_content in text_type_contents] )
         # 文字数で分割する
         for i in range(0, len(combined_text), split_message_length):
             split_text = combined_text[i:i + split_message_length]
-            split_contents = [ChatContent(type="text", text=f"{request_context.prompt_template_text}\n{split_text}")]
+            split_contents = [self.create_text_content(f"{request_context.prompt_template_text}\n{split_text}")]
             for split_content in split_contents:
                 chat_message = ChatMessage(
                     role=ChatHistory.user_role_name,
@@ -284,7 +343,7 @@ class LLMClient(ABC):
         # messageごとに処理を実施
         for chat_message in chat_message_list:
             image_url_contents = [
-                content for content in chat_message.content if content.type == "image_url"
+                content for content in chat_message.content if content.params.get("type") == "image_url"
             ]
             if len(image_url_contents) == 0:
                 # chat_messageをそのまま追加
@@ -292,16 +351,15 @@ class LLMClient(ABC):
                 continue
 
             # image_urlタイプのcontentを抽出する
-            image_urls = [content.image_url for content in image_url_contents if content.image_url]
+            image_urls = [content.params.get("image_url") for content in image_url_contents if content.params.get("image_url")]
 
             # textタイプのcontentを抽出する
             text_contents = [
-                content for content in chat_message.content if content.type == "text" and content.text
+                content for content in chat_message.content if content.params.get("type") == "text" and content.params.get("text")
             ]
             for i in range(0, len(image_urls), max_images):
-                split_image_urls = image_urls[i:i + max_images]
-                
-                split_contents = text_contents + [ChatContent(type="image_url", image_url=url) for url in split_image_urls]
+                split_image_urls: list[str|None] = image_urls[i:i + max_images]
+                split_contents = text_contents + [self.create_image_content_from_url(url) for url in split_image_urls if url]
                 
                 split_chat_message = ChatMessage(
                     role=chat_message.role,
@@ -351,15 +409,57 @@ class LLMClient(ABC):
             split_mode=ChatRequestContext.split_mode_name_none,
             summarize_prompt_text=request_context.summarize_prompt_text
         )
+
         client = LLMClient.create_llm_client(self.llm_config, request_context=request_context)
+        text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
             role=ChatHistory.user_role_name,
-            content=[ChatContent(type="text", text=summmarize_request_text)]
+            content=[text_content]
         )
         summarize_response = await client.run_chat([message])
         return summarize_response
 
-class AzureOpenAIClient(LLMClient):
+
+class OpenAIClient(LLMClient):
+    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
+        if llm_config.base_url:
+            self.client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
+        else:
+            self.client = AsyncOpenAI(api_key=llm_config.api_key)
+
+        self.model = llm_config.completion_model
+
+        self.chat_history = chat_history
+        self.request_context = request_context
+
+    async def _chat_completion(self,  **kwargs) -> ChatResponse:
+        response = await self.client.chat.completions.create(
+            model=self.chat_history.model,
+            messages=self.chat_history.messages,
+            **kwargs
+        )
+        return ChatResponse(output=response.choices[0].message.content or "")
+
+    def _create_image_content_from_url_(self, image_url: str) -> "ChatContent":
+        params = {"type": "image_url", "image_url": image_url}
+        return ChatContent(params=params)
+    
+    def _create_image_content_from_bytes_(self, image_data: bytes) -> "ChatContent":
+        base64_image = base64.b64encode(image_data).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        return self._create_image_content_from_url_(image_url)
+
+    def _create_pdf_content_from_url_(self, file_url: str, filename: str) -> "ChatContent":
+        params = {"type": "file", "file": {"file_data": file_url, "filename": filename}}
+        return ChatContent(params=params)
+    
+    def _create_pdf_content_from_bytes_(self, file_data: bytes, filename: str) -> ChatContent:
+        base64_file = base64.b64encode(file_data).decode('utf-8')
+        file_url = f"data:application/pdf;base64,{base64_file}"    
+        return self._create_pdf_content_from_url_(file_url, filename)
+
+
+class AzureOpenAIClient(OpenAIClient):
     def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
         if llm_config.base_url:
             self.client = AsyncAzureOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
@@ -382,73 +482,7 @@ class AzureOpenAIClient(LLMClient):
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
-    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
-        return LLMClieuntUtil.openai_create_image_content_from_file(file_path)
-    
-    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
-        return LLMClieuntUtil.openai_create_pdf_content_from_file(file_path)
 
-class OpenAIClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
-        if llm_config.base_url:
-            self.client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-        else:
-            self.client = AsyncOpenAI(api_key=llm_config.api_key)
-
-        self.model = llm_config.completion_model
-
-        self.chat_history = chat_history
-        self.request_context = request_context
-
-    async def _chat_completion(self,  **kwargs) -> ChatResponse:
-        response = await self.client.chat.completions.create(
-            model=self.chat_history.model,
-            messages=self.chat_history.messages,
-            **kwargs
-        )
-        return ChatResponse(output=response.choices[0].message.content or "")
-
-    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
-        return LLMClieuntUtil.openai_create_image_content_from_file(file_path)
-    
-    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
-        return LLMClieuntUtil.openai_create_pdf_content_from_file(file_path)
-
-class LLMClieuntUtil:
-    @classmethod
-    def openai_create_image_content_from_file(cls, image_path: str, **extra) -> 'ChatContent':
-        """
-        Create a ChatContent with an image from a local file path.
-        Args:
-            image_path (str): The local file path to the image.
-            **extra: Arbitrary keyword arguments to include.
-        Returns:
-            ChatContent: The created chat content with image data.
-        """
-        with open(image_path, "rb") as image_file:
-            image_data = image_file.read()
-        image_data = base64.b64encode(image_data).decode('utf-8')
-        mime_type = "image/jpeg"  # Adjust as needed
-        image_url = f"data:{mime_type};base64,{image_data}"
-        return ChatContent(type="image_url", image_url={"url": image_url}, **extra)
-
-    @classmethod
-    def openai_create_pdf_content_from_file(cls, pdf_path: str) -> 'ChatContent':
-        """
-        Create a ChatContent with an image from a local file path.
-        Args:
-            pdf_path (str): The local file path to the PDF.
-            **extra: Arbitrary keyword arguments to include.
-        Returns:
-            ChatContent: The created chat content with PDF data.
-        """
-        with open(pdf_path, "rb") as pdf_file:
-            pdf_data = pdf_file.read()
-        pdf_data = base64.b64encode(pdf_data).decode('utf-8')
-        extra = {
-            "file": {"url": pdf_data, "filename": os.path.basename(pdf_path)}
-            }
-        return ChatContent(type="file", extra=extra)
 
 if __name__ == "__main__":
     import sys
@@ -467,9 +501,10 @@ if __name__ == "__main__":
         request_context.split_message_length = 1000
         request_context.prompt_template_text = promt_template_text
 
+        text_content = client.create_text_content(input_text)
         message = ChatMessage(
             role=ChatHistory.user_role_name,
-            content=[ChatContent(type="text", text=input_text)]
+            content=[text_content]
         )
         response = await client.run_chat([message], request_context=request_context)
         print(response.output)

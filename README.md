@@ -16,14 +16,15 @@
 - 対話型のAIチャットを実現。
 - LLM（大規模言語モデル）との自然な会話をサポート。
 - コンテキストを保持した継続的な会話が可能。
+- OpenAI、Azure OpenAIのみ対応
 
 ### ⚙️ バッチクライアント
 - 複数の入力をまとめてAIに処理させるバッチ実行機能。
 - 自動化スクリプトやデータ処理パイプラインに組み込みやすい設計。
 
-### 🖼️ 画像・PDF解析
-- 画像ファイルやPDFファイルをAIに渡して内容を解析。
-- 画像認識や文書要約などの高度な処理をサポート。
+### 🖼️ 画像・PDF・Office解析
+- 画像ファイル、PDFファイル、Officeドキュメント（Word, Excel, PowerPointなど）をAIに渡して内容を解析。
+- 画像認識、文書要約、表データ抽出などの高度な処理をサポート。
 
 ### 🧩 MCPサーバー連携
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
@@ -79,10 +80,7 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=your_api_key_here
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_COMPLETION_MODEL=gpt-5
-MCP_SERVER_CONFIG_FILE_PATH=cline_settings.json
-CUSTOM_INSTRUCTIONS_FILE_PATH=.cline_rules
-WORKING_DIRECTORY=work
-ALLOW_OUTSIDE_MODIFICATIONS=false
+LIBREOFFICE_PATH=C:\\Program Files\\LibreOffice\\program\\soffice.exe
 ```
 
 ### 主な環境変数の説明
@@ -93,10 +91,7 @@ ALLOW_OUTSIDE_MODIFICATIONS=false
 | `OPENAI_API_KEY` | OpenAI APIキー |
 | `OPENAI_EMBEDDING_MODEL` | 埋め込みモデル名 |
 | `OPENAI_COMPLETION_MODEL` | テキスト生成モデル名 |
-| `MCP_SERVER_CONFIG_FILE_PATH` | MCPサーバー設定ファイルのパス |
-| `CUSTOM_INSTRUCTIONS_FILE_PATH` | カスタム指示ファイルのパス |
-| `WORKING_DIRECTORY` | 作業ディレクトリ |
-| `ALLOW_OUTSIDE_MODIFICATIONS` | 外部ファイル変更を許可するかどうか（true/false） |
+| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（例: C:\\Program Files\\LibreOffice\\program\\soffice.exe） |
 
 ---
 
@@ -157,6 +152,22 @@ client = LLMClient.create_llm_client(llm_config)
 result = client.simple_pdf_analysis(
     ["document.pdf"],
     prompt="このPDFの要約を作成してください。"
+)
+print(result)
+```
+
+### Officeドキュメント解析の利用例（simple_office_analysis）
+
+```python
+from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.llm.llm_config import LLMConfig
+
+llm_config = LLMConfig()
+client = LLMClient.create_llm_client(llm_config)
+
+result = client.simple_office_document_analysis(
+    "data.xlsx",
+    prompt="これらのドキュメントの内容を要約してください。"
 )
 print(result)
 ```

@@ -7,11 +7,13 @@ import copy
 import tiktoken
 import asyncio
 import base64
+import tempfile
 
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent
+from ai_chat_util.util.office2pdf import Office2PDFUtil
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -122,6 +124,27 @@ class LLMClient(ABC):
         chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response.output
 
+    async def analyze_office_document_files(self, file_path_list: list[str], prompt: str) -> str:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_content_list = []
+        for file_path in file_path_list:
+            # Officeドキュメントを一時的にPDFに変換する
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_pdf_path = os.path.join(temp_dir, "temp_converted.pdf")
+                Office2PDFUtil.create_pdf_from_document(
+                    input_path=file_path,
+                    output_path=temp_pdf_path
+                )
+                pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
+                pdf_content_list.append(pdf_content)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
+        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        return chat_response.output
+
     async def simple_image_analysis(self, image_path: str, prompt: str) -> ChatResponse:
         '''
         簡易的な画像解析を実行する.
@@ -161,6 +184,33 @@ class LLMClient(ABC):
             content=[prompt_content, pdf_content]
         )
         return await self.chat([chat_message], request_context=None)
+
+    async def simple_office_document_analysis(self, file_path: str, prompt: str) -> ChatResponse:
+        '''
+        簡易的なOfficeドキュメント解析を実行する.
+        引数として渡されたOfficeドキュメントファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
+        その後、CompletionResponseを返す.
+
+        Args:
+            file_path (str): Officeドキュメントファイルのパス
+            prompt (str): プロンプト文字列
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        # Officeドキュメントを一時的にPDFに変換する
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_pdf_path = os.path.join(temp_dir, "temp_converted.pdf")
+            Office2PDFUtil.create_pdf_from_document(
+                input_path=file_path,
+                output_path=temp_pdf_path
+            )
+            pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
+            chat_message = ChatMessage(
+                role=ChatHistory.user_role_name,
+                content=[prompt_content, pdf_content]
+            )
+            return await self.chat([chat_message], request_context=None)
 
     async def simple_chat(self, prompt: str) -> ChatResponse:
         '''

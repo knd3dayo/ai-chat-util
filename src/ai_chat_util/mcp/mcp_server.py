@@ -8,7 +8,7 @@ from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse
 from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util.llm.llm_config import LLMConfig
 
-mcp = FastMCP("ai_chat_mcp") #type :ignore
+mcp = FastMCP("ai_chat_util") #type :ignore
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
@@ -45,6 +45,17 @@ async def analyze_pdf_files_mcp(
     """
     client = LLMClient.create_llm_client(llm_config=LLMConfig())
     response = await client.analyze_pdf_files(pdf_path_list, prompt)
+    return response
+
+async def analyze_office_files_mcp(
+    office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
+    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
+    ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
+    """
+    This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
+    """ 
+    client = LLMClient.create_llm_client(llm_config=LLMConfig())
+    response = await client.analyze_office_document_files(office_path_list, prompt)
     return response
 
 # 引数解析用の関数
@@ -86,7 +97,7 @@ async def main():
         mcp.tool()(run_chat_mcp)
         mcp.tool()(analyze_image_files_mcp)
         mcp.tool()(analyze_pdf_files_mcp)
-
+        mcp.tool()(analyze_office_files_mcp)
 
     if mode == "stdio":
         await mcp.run_async()

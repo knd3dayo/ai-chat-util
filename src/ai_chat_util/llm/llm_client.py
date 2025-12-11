@@ -1,5 +1,4 @@
 
-from typing import Sequence
 # 抽象クラス
 from abc import ABC, abstractmethod
 import os
@@ -8,7 +7,7 @@ import tiktoken
 import asyncio
 import base64
 import tempfile
-
+import uuid
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
@@ -28,11 +27,11 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def _create_image_content_from_url_(cls, image_url: str) -> "ChatContent":
+    def _create_image_content_from_url_(cls, image_url: str, detail: str) -> "ChatContent":
         pass
 
     @abstractmethod
-    def _create_image_content_from_bytes_(cls, image_data: bytes) -> "ChatContent":
+    def _create_image_content_from_bytes_(cls, image_data: bytes, detail: str) -> "ChatContent":
         pass
     
     @abstractmethod
@@ -48,16 +47,16 @@ class LLMClient(ABC):
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
     
-    def create_image_content_from_url(self, image_url: str) -> "ChatContent":
-        return self._create_image_content_from_url_(image_url)
+    def create_image_content_from_url(self, image_url: str, detail: str) -> "ChatContent":
+        return self._create_image_content_from_url_(image_url, detail)
 
-    def create_image_content_from_bytes(self, image_data: bytes) -> "ChatContent":
-        return self._create_image_content_from_bytes_(image_data)
+    def create_image_content_from_bytes(self, image_data: bytes, detail: str) -> "ChatContent":
+        return self._create_image_content_from_bytes_(image_data, detail)
 
-    def create_image_content_from_file(self, file_path: str) -> "ChatContent":
+    def create_image_content_from_file(self, file_path: str, detail: str) -> "ChatContent":
         with open(file_path, "rb") as image_file:
             image_data = image_file.read()
-        return self.create_image_content_from_bytes(image_data)
+        return self.create_image_content_from_bytes(image_data, detail)
    
     def create_pdf_content_from_url(self, file_url: str, filename: str) -> "ChatContent":
         return self._create_pdf_content_from_url_(file_url, filename)
@@ -95,14 +94,14 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def analyze_image_files(self, image_path_list: list[str], prompt: str) -> str:
+    async def analyze_image_files(self, image_path_list: list[str], prompt: str, detail: str) -> str:
         '''
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
         prompt_content = self.create_text_content(text=prompt)
         image_content_list = []
         for image_path in image_path_list:
-            image_content = self.create_image_content_from_file(image_path)
+            image_content = self.create_image_content_from_file(image_path, detail)
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
@@ -123,6 +122,34 @@ class LLMClient(ABC):
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
         chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response.output
+
+    # Azureの場合は、CompletionでのPDF処理が未対応の模様。PDFファイルからテキストと画像を抽出して、
+    # 生成AIに渡すという独自実装を行う。
+    async def analyze_pdf_files_custom(self, pdf_path_list: list[str], prompt: str, detail: str) -> str:
+        import ai_chat_util.util.pdf_util as pdf_util
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_messages = []
+        for pdf_path in pdf_path_list:
+            # PDFからテキストと画像を抽出
+            pdf_elements = pdf_util.extract_pdf_content(pdf_path)
+            pdf_contents = []
+            for element in pdf_elements:
+                if element["type"] == "text":
+                    text_content = self.create_text_content(text=element["text"])
+                    pdf_contents.append(text_content)
+                elif element["type"] == "image":
+                    image_content = self.create_image_content_from_bytes(element["bytes"], detail)
+                    pdf_contents.append(image_content)
+
+            page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(pdf_path)} の内容を以下に示します。")
+            pdf_messages.append(ChatMessage(
+                role=ChatHistory.user_role_name,
+                content=[page_info_content] + pdf_contents
+            ))
+        chat_message = ChatMessage(role="user", content=[prompt_content])
+        response: ChatResponse = await self.chat([chat_message] + pdf_messages,  request_context=None)
+        return response.output
+
 
     async def analyze_office_document_files(self, file_path_list: list[str], prompt: str) -> str:
         '''
@@ -145,7 +172,26 @@ class LLMClient(ABC):
         chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response.output
 
-    async def simple_image_analysis(self, image_path: str, prompt: str) -> ChatResponse:
+    async def analyze_office_document_files_custom(self, file_path_list: list[str], prompt: str, detail: str) -> str:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_file_list = []
+        temp_dir = tempfile.TemporaryDirectory()
+        for file_path in file_path_list:
+            # Officeドキュメントを一時的にPDFに変換する
+            temp_pdf_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
+            Office2PDFUtil.create_pdf_from_document(
+                input_path=file_path,
+                output_path=temp_pdf_path
+            )
+            pdf_file_list.append(temp_pdf_path)
+        response_text = await self.analyze_pdf_files_custom(pdf_file_list, prompt, detail)
+        return response_text
+
+
+    async def simple_image_analysis(self, image_path: str, prompt: str, detail: str) -> ChatResponse:
         '''
         簡易的な画像解析を実行する.
         引数として渡された画像ファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
@@ -158,7 +204,7 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         prompt_content = self.create_text_content(text=prompt)
-        image_content = self.create_image_content_from_file(image_path)
+        image_content = self.create_image_content_from_file(image_path, detail)
         chat_message = ChatMessage(
             role=ChatHistory.user_role_name,
             content=[prompt_content, image_content]
@@ -466,7 +512,7 @@ class LLMClient(ABC):
             ]
             for i in range(0, len(image_urls), max_images):
                 split_image_urls: list[str|None] = image_urls[i:i + max_images]
-                split_contents = text_contents + [self.create_image_content_from_url(url) for url in split_image_urls if url]
+                split_contents = text_contents + [self.create_image_content_from_url(url, "auto") for url in split_image_urls if url]
                 
                 split_chat_message = ChatMessage(
                     role=chat_message.role,
@@ -548,14 +594,14 @@ class OpenAIClient(LLMClient):
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
-    def _create_image_content_from_url_(self, image_url: str) -> "ChatContent":
-        params = {"type": "image_url", "image_url": {"url": image_url}}
+    def _create_image_content_from_url_(self, image_url: str, detail: str) -> "ChatContent":
+        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
         return ChatContent(params=params)
     
-    def _create_image_content_from_bytes_(self, image_data: bytes) -> "ChatContent":
+    def _create_image_content_from_bytes_(self, image_data: bytes, detail: str) -> "ChatContent":
         base64_image = base64.b64encode(image_data).decode('utf-8')
         image_url = f"data:image/png;base64,{base64_image}"
-        return self._create_image_content_from_url_(image_url)
+        return self._create_image_content_from_url_(image_url, detail)
 
     def _create_pdf_content_from_url_(self, file_url: str, filename: str) -> "ChatContent":
         params = {"type": "file", "file": {"file_data": file_url, "filename": filename}}
@@ -590,33 +636,6 @@ class AzureOpenAIClient(OpenAIClient):
             **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
-
-    # Azureの場合は、CompletionでのPDF処理が未対応の模様。PDFファイルからテキストと画像を抽出して、
-    # 生成AIに渡すという独自実装を行う。
-    async def analyze_pdf_files(self, pdf_path_list: list[str], prompt: str) -> str:
-        import ai_chat_util.util.pdf_util as pdf_util
-        prompt_content = self.create_text_content(text=prompt)
-        pdf_messages = []
-        for pdf_path in pdf_path_list:
-            # PDFからテキストと画像を抽出
-            pdf_elements = pdf_util.extract_pdf_content(pdf_path)
-            pdf_contents = []
-            for element in pdf_elements:
-                if element["type"] == "text":
-                    text_content = self.create_text_content(text=element["text"])
-                    pdf_contents.append(text_content)
-                elif element["type"] == "image_url":
-                    image_content = self.create_image_content_from_url(element["image_url"])
-                    pdf_contents.append(image_content)
-
-            page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(pdf_path)} の内容を以下に示します。")
-            pdf_messages.append(ChatMessage(
-                role=ChatHistory.user_role_name,
-                content=[page_info_content] + pdf_contents
-            ))
-        chat_message = ChatMessage(role="user", content=[prompt_content])
-        response: ChatResponse = await self.chat([chat_message] + pdf_messages,  request_context=None)
-        return response.output
 
 
 if __name__ == "__main__":

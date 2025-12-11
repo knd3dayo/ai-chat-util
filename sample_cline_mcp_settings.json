@@ -15,7 +15,8 @@
                 "LLM_PROVIDER": "openai",
                 "OPENAI_API_KEY": "sk-****",
                 "OPENAI_COMPLETION_MODEL": "gpt-4.1",
-                "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small"
+                "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
+                "USE_CUSTOM_PDF_ANALYZER": "true"
             }
         }
     }

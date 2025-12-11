@@ -1,4 +1,4 @@
-import asyncio
+import asyncio, os
 from typing import Annotated, Any
 from dotenv import load_dotenv
 import argparse
@@ -26,13 +26,14 @@ async def run_chat_mcp(
 # 複数の画像の分析を行う
 async def analyze_image_files_mcp(
     image_path_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the images")]
+    prompt: Annotated[str, Field(description="Prompt to analyze the images")],
+    detail: Annotated[str, Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
     ) -> Annotated[str, Field(description="Analysis result of the images")]:
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
     client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_image_files(image_path_list, prompt)
+    response = await client.analyze_image_files(image_path_list, prompt, detail)
     return response
 
 # 複数のPDFの分析を行う
@@ -47,6 +48,19 @@ async def analyze_pdf_files_mcp(
     response = await client.analyze_pdf_files(pdf_path_list, prompt)
     return response
 
+# 複数のPDFの分析を行う
+async def analyze_pdf_files_custom_mcp(
+    pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
+    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")],
+    detail: Annotated[str, Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+    ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
+    """
+    This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
+    """
+    client = LLMClient.create_llm_client(llm_config=LLMConfig())
+    response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail)
+    return response
+
 async def analyze_office_files_mcp(
     office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
     prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
@@ -56,6 +70,18 @@ async def analyze_office_files_mcp(
     """ 
     client = LLMClient.create_llm_client(llm_config=LLMConfig())
     response = await client.analyze_office_document_files(office_path_list, prompt)
+    return response
+
+async def analyze_office_files_custom_mcp(
+    office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
+    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")],
+    detail: Annotated[str, Field(description="Detail level for Office document analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+    ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
+    """
+    This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
+    """ 
+    client = LLMClient.create_llm_client(llm_config=LLMConfig())
+    response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail)
     return response
 
 # 引数解析用の関数
@@ -96,8 +122,13 @@ async def main():
         # デフォルトのツールを登録
         mcp.tool()(run_chat_mcp)
         mcp.tool()(analyze_image_files_mcp)
-        mcp.tool()(analyze_pdf_files_mcp)
-        mcp.tool()(analyze_office_files_mcp)
+        use_custom_pdf_analyzer = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
+        if use_custom_pdf_analyzer:
+            mcp.tool()(analyze_pdf_files_custom_mcp)
+            mcp.tool()(analyze_office_files_custom_mcp)
+        else:
+            mcp.tool()(analyze_pdf_files_mcp)
+            mcp.tool()(analyze_office_files_mcp)
 
     if mode == "stdio":
         await mcp.run_async()

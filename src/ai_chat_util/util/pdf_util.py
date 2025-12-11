@@ -24,11 +24,9 @@ def extract_pdf_content(pdf_path):
         # --- ページ全体を画像化 ---
         pix = page.get_pixmap()
         img_bytes = pix.tobytes("png")
-        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-        image_url = f"data:image/png;base64,{img_b64}"
         results.append({
-            "type": "image_url",
-            "image_url": image_url
+            "type": "image",
+            "bytes": img_bytes
         })
 
     return results

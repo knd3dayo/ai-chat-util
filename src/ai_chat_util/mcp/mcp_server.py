@@ -1,94 +1,16 @@
 import asyncio, os
-from typing import Annotated, Any
-from dotenv import load_dotenv
 import argparse
 from fastmcp import FastMCP
-from pydantic import Field
-from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
 
-mcp = FastMCP("ai_chat_util") #type :ignore
+from dotenv import load_dotenv
+import ai_chat_util.mcp.app as app_functions
 
-# toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
-# chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
-async def run_chat_mcp(
-    completion_request: Annotated[ChatHistory, Field(description="Completion request object")],
-    request_context: Annotated[ChatRequestContext, Field(description="Chat request context")]    
-) -> Annotated[ChatResponse, Field(description="List of related articles from Wikipedia")]:
-    """
-    This function searches Wikipedia with the specified keywords and returns related articles.
-    """
-    client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
-    return await client.chat()
-
-
-# 複数の画像の分析を行う
-async def analyze_image_files_mcp(
-    image_path_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the images")],
-    detail: Annotated[str, Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-    ) -> Annotated[str, Field(description="Analysis result of the images")]:
-    """
-    This function analyzes multiple images using the specified prompt and returns the analysis result.
-    """
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_image_files(image_path_list, prompt, detail)
-    return response
-
-# 複数のPDFの分析を行う
-async def analyze_pdf_files_mcp(
-    pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")]
-    ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
-    """
-    This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
-    """
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_pdf_files(pdf_path_list, prompt)
-    return response
-
-# 複数のPDFの分析を行う
-async def analyze_pdf_files_custom_mcp(
-    pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")],
-    detail: Annotated[str, Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-    ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
-    """
-    This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
-    """
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail)
-    return response
-
-async def analyze_office_files_mcp(
-    office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
-    ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
-    """
-    This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
-    """ 
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_office_document_files(office_path_list, prompt)
-    return response
-
-async def analyze_office_files_custom_mcp(
-    office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")],
-    detail: Annotated[str, Field(description="Detail level for Office document analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-    ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
-    """
-    This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
-    """ 
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail)
-    return response
 
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode and APP_DATA_PATH.")
     # -m オプションを追加
-    parser.add_argument("-m", "--mode", choices=["sse", "stdio"], default="stdio", help="Mode to run the server in: 'sse' for Server-Sent Events, 'stdio' for standard input/output.")
+    parser.add_argument("-m", "--mode", choices=["http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
     # -d オプションを追加　APP_DATA_PATH を指定する
     parser.add_argument("-d", "--app_data_path", type=str, help="Path to the application data directory.")
     # 引数を解析して返す
@@ -101,6 +23,25 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+def prepare_mcp(mcp: FastMCP, tools_option: str):
+    # tools オプションが指定されている場合は、ツールを登録
+    if tools_option:
+        tools = [tool.strip() for tool in tools_option.split(",")]
+        for tool_name in tools:
+            # app_functionsにtool_nameという名前の関数が存在する場合は登録
+            tool = getattr(app_functions, tool_name, None)
+            if tool and callable(tool):
+                mcp.tool()(tool)
+            else:
+                print(f"Warning: Tool '{tool_name}' not found or not callable. Skipping registration.")
+    else:
+        # デフォルトのツールを登録
+        mcp.tool()(app_functions.run_chat)
+        mcp.tool()(app_functions.analyze_image_files)
+        mcp.tool()(app_functions.analyze_pdf_files)
+        mcp.tool()(app_functions.analyze_office_files)
+    
+
 async def main():
     # load_dotenv() を使用して環境変数を読み込む
     load_dotenv()
@@ -108,34 +49,18 @@ async def main():
     args = parse_args()
     mode = args.mode
 
-    # tools オプションが指定されている場合は、ツールを登録
-    if args.tools:
-        tools = [tool.strip() for tool in args.tools.split(",")]
-        for tool_name in tools:
-            # tool_nameという名前の関数が存在する場合は登録
-            tool = globals().get(tool_name)
-            if tool and callable(tool):
-                mcp.tool()(tool)
-            else:
-                print(f"Warning: Tool '{tool_name}' not found or not callable. Skipping registration.")
-    else:
-        # デフォルトのツールを登録
-        mcp.tool()(run_chat_mcp)
-        mcp.tool()(analyze_image_files_mcp)
-        use_custom_pdf_analyzer = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
-        if use_custom_pdf_analyzer:
-            mcp.tool()(analyze_pdf_files_custom_mcp)
-            mcp.tool()(analyze_office_files_custom_mcp)
-        else:
-            mcp.tool()(analyze_pdf_files_mcp)
-            mcp.tool()(analyze_office_files_mcp)
+    mcp = FastMCP("ai_chat_util") 
+
+    prepare_mcp(mcp, args.tools)
+
 
     if mode == "stdio":
         await mcp.run_async()
-    elif mode == "sse":
+
+    elif mode == "http":
         # port番号を取得
         port = args.port
-        await mcp.run_async(transport="sse", port=port)
+        await mcp.run_async(transport="streamable-http", host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

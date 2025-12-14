@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+@app.get(("/use_custom_pdf_analyzer"))
 def use_custom_pdf_analyzer() -> bool:
     """
     Check if the custom PDF analyzer should be used based on the environment variable.
@@ -18,6 +19,7 @@ def use_custom_pdf_analyzer() -> bool:
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
+@app.post("/run_chat")
 async def run_chat(
     completion_request: Annotated[ChatHistory, Field(description="Completion request object")],
     request_context: Annotated[ChatRequestContext, Field(description="Chat request context")]    
@@ -30,6 +32,7 @@ async def run_chat(
 
 
 # 複数の画像の分析を行う
+@app.post("/analyze_image_files")
 async def analyze_image_files(
     image_path_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
     prompt: Annotated[str, Field(description="Prompt to analyze the images")],
@@ -43,6 +46,7 @@ async def analyze_image_files(
     return response
 
 # 複数のPDFの分析を行う
+@app.post("/analyze_pdf_files")
 async def analyze_pdf_files(
     pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
     prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")]
@@ -57,6 +61,7 @@ async def analyze_pdf_files(
         response = await client.analyze_pdf_files(pdf_path_list, prompt)
     return response
 
+@app.post("/analyze_office_files")
 async def analyze_office_files(
     office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
     prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
@@ -76,4 +81,3 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    

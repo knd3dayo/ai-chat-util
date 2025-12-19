@@ -10,7 +10,7 @@ import ai_chat_util.mcp.app as app_functions
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode and APP_DATA_PATH.")
     # -m オプションを追加
-    parser.add_argument("-m", "--mode", choices=["http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
+    parser.add_argument("-m", "--mode", choices=["sse", "http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
     # -d オプションを追加　APP_DATA_PATH を指定する
     parser.add_argument("-d", "--app_data_path", type=str, help="Path to the application data directory.")
     # 引数を解析して返す
@@ -56,6 +56,11 @@ async def main():
 
     if mode == "stdio":
         await mcp.run_async()
+
+    elif mode == "sse":
+        # port番号を取得
+        port = args.port
+        await mcp.run_async(transport="sse", host="0.0.0.0", port=port)
 
     elif mode == "http":
         # port番号を取得

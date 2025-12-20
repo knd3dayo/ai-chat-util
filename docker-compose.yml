@@ -1,0 +1,17 @@
+
+services:
+  ai-chat-util:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # docker compose はデフォルトで同ディレクトリの .env を読み込みますが、
+    # それは「composeファイル内の ${VAR} 置換」用途です。
+    # アプリ(コンテナ)へ環境変数として渡すために env_file を明示します。
+    env_file:
+      - .env
+    # HOST_PORT を指定すると、ホスト側の公開ポートだけ変更できます（コンテナ内は 5001 固定）
+    ports:
+      - "${HOST_PORT:-5001}:5001"
+    restart: unless-stopped
+    # Dockerfile の CMD と同じ（必要ならここで上書き可能）
+    command: ["uv", "run", "-m", "ai_chat_util.mcp.mcp_server", "-m", "http", "-p", "5001"]

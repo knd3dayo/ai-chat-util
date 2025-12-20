@@ -56,6 +56,26 @@ pip install -e .
 
 ---
 
+## Docker / Docker Compose で起動（MCPサーバ）
+
+`.env_template` を参考に `ai-chat-util/.env` を用意した上で、以下を実行してください。
+
+```bash
+cd ai-chat-util
+docker compose up --build
+```
+
+起動後、MCPサーバは `http://localhost:${HOST_PORT:-5001}` で待ち受けます。
+
+- ホスト側ポートを変更したい場合は `ai-chat-util/.env` に `HOST_PORT` を設定してください（例: `HOST_PORT=9000`）。
+- コンテナ内の待受ポートは 5001 固定です。
+
+> 補足: docker compose は同ディレクトリの `.env` を自動で読み込みますが、
+> それは compose ファイル内の `${VAR}` 置換用途です。
+> コンテナへ環境変数として渡すために、`docker-compose.yml` 側で `env_file: .env` を指定しています。
+
+---
+
 ## 依存関係
 
 主要な依存パッケージは `requirements.txt` に記載されています。  

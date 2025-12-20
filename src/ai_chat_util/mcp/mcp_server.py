@@ -68,6 +68,11 @@ async def main():
         port = args.port
         await mcp.run_async(transport="sse", host="0.0.0.0", port=port)
 
+    elif mode == "sse":
+        # port番号を取得
+        port = args.port
+        await mcp.run_async(transport="sse", host="0.0.0.0", port=port)
+
     elif mode == "http":
         # port番号を取得
         port = args.port

@@ -1,80 +1,47 @@
-from typing import Annotated
-import os
-from pydantic import Field
+from typing import Annotated, Any
+import os, tempfile
+import requests
+from pydantic import Field, BaseModel
 from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse
 from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util.llm.llm_config import LLMConfig
 from fastapi import FastAPI
-
+from ai_chat_util.core.app import (
+    use_custom_pdf_analyzer,
+    run_chat,
+    analyze_image_files,
+    analyze_pdf_files,
+    analyze_office_files,
+    analyze_image_urls,
+    analyze_pdf_urls,
+    analyze_office_urls
+)
 
 app = FastAPI()
 
-@app.get(("/use_custom_pdf_analyzer"))
-def use_custom_pdf_analyzer() -> bool:
-    """
-    Check if the custom PDF analyzer should be used based on the environment variable.
-    Returns True if USE_CUSTOM_PDF_ANALYZER is set to "true" (case insensitive), otherwise False.
-    """
-    return os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
+app.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
 
-# toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
-@app.post("/run_chat")
-async def run_chat(
-    completion_request: Annotated[ChatHistory, Field(description="Completion request object")],
-    request_context: Annotated[ChatRequestContext, Field(description="Chat request context")]    
-) -> Annotated[ChatResponse, Field(description="List of related articles from Wikipedia")]:
-    """
-    This function searches Wikipedia with the specified keywords and returns related articles.
-    """
-    client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
-    return await client.chat()
-
+app.add_api_route(path="/run_chat", endpoint=run_chat, methods=["POST"])
 
 # 複数の画像の分析を行う
-@app.post("/analyze_image_files")
-async def analyze_image_files(
-    image_path_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the images")],
-    detail: Annotated[str, Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-    ) -> Annotated[str, Field(description="Analysis result of the images")]:
-    """
-    This function analyzes multiple images using the specified prompt and returns the analysis result.
-    """
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    response = await client.analyze_image_files(image_path_list, prompt, detail)
-    return response
+app.add_api_route(path="/analyze_image_files", endpoint=analyze_image_files, methods=["POST"])
+
+# 複数の画像の分析を行う
+app.add_api_route(path="/analyze_image_files", endpoint=analyze_image_files, methods=["POST"])
 
 # 複数のPDFの分析を行う
-@app.post("/analyze_pdf_files")
-async def analyze_pdf_files(
-    pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")]
-    ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
-    """
-    This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
-    """
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    if use_custom_pdf_analyzer():
-        response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail="auto")
-    else:
-        response = await client.analyze_pdf_files(pdf_path_list, prompt)
-    return response
+app.add_api_route(path="/analyze_pdf_files", endpoint=analyze_pdf_files, methods=["POST"])
 
-@app.post("/analyze_office_files")
-async def analyze_office_files(
-    office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
-    ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
-    """
-    This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
-    """ 
-    client = LLMClient.create_llm_client(llm_config=LLMConfig())
-    if use_custom_pdf_analyzer():
-        response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail="auto")
-    else:
-        response = await client.analyze_office_document_files(office_path_list, prompt)
-    return response
+# 複数のOfficeドキュメントの分析を行う
+app.add_api_route(path="/analyze_office_files", endpoint=analyze_office_files, methods=["POST"])
+
+# 複数の画像の分析を行う URLから画像をダウンロードして分析する 
+app.add_api_route(path="/analyze_image_urls", endpoint=analyze_image_urls, methods=["POST"])
+# 複数のPDFの分析を行う URLからPDFをダウンロードして分析する
+app.add_api_route(path="/analyze_pdf_urls", endpoint=analyze_pdf_urls, methods=["POST"])
+# 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
+app.add_api_route(path="/analyze_office_urls", endpoint=analyze_office_urls, methods=["POST"])
 
 if __name__ == "__main__":
     import uvicorn

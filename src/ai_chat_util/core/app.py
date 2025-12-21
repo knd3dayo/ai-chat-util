@@ -5,7 +5,7 @@ from pydantic import Field, BaseModel
 from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse
 from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util.llm.llm_config import LLMConfig
-
+import os
 
 class RequestModel(BaseModel):
     url: str
@@ -16,7 +16,6 @@ def use_custom_pdf_analyzer() -> bool:
     Check if the custom PDF analyzer should be used based on the environment variable.
     Returns True if USE_CUSTOM_PDF_ANALYZER is set to "true" (case insensitive), otherwise False.
     """
-    import os
     return os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。

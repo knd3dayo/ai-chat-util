@@ -35,7 +35,7 @@ router.add_api_route(path="/analyze_pdf_urls", endpoint=analyze_pdf_urls, method
 router.add_api_route(path="/analyze_office_urls", endpoint=analyze_office_urls, methods=["POST"])
 
 # NOTE: include_router は、ルート定義が揃ってから呼ぶ（呼び出し時点の router.routes が登録される）
-app.include_router(router)
+app.include_router(prefix="/api/ai_chat_util", router=router)
 
 if __name__ == "__main__":
     import uvicorn

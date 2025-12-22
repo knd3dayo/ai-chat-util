@@ -15,3 +15,7 @@ services:
     restart: unless-stopped
     # Dockerfile の CMD と同じ（必要ならここで上書き可能）
     command: ["uv", "run", "-m", "ai_chat_util.mcp.mcp_server", "-m", "http", "-p", "5001"]
+
+    # ホスト側の work/ をコンテナの /app/work に bind mount して永続化
+    volumes:
+      - ./work:/app/work

@@ -8,7 +8,7 @@ version = "0.1.7"
 authors = [
     { name = "knd3dayo", email = "knd3dayo@gmail.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<=3.13"
 
 dynamic = ["dependencies"]
 [tool.setuptools.dynamic]

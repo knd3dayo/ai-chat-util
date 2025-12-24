@@ -67,10 +67,24 @@ async def analyze_image_files(
 
 # 複数のPDFの分析を行う URLからPDFをダウンロードして分析する
 async def analyze_pdf_urls(
-    pdf_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the PDF files to analyze. e.g., http://path/to/document2.pdf")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")]
-    ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
-    """ 
+    pdf_path_urls: Annotated[
+        list[RequestModel],
+        Field(
+            description="List of URLs to the PDF files to analyze. e.g., http://path/to/document2.pdf"
+        ),
+    ],
+    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")],
+    detail: Annotated[
+        str,
+        Field(
+            description=(
+                "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+            )
+        ),
+    ] = "auto",
+) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
+    """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -83,7 +97,7 @@ async def analyze_pdf_urls(
 
         client = LLMClient.create_llm_client(llm_config=LLMConfig())
         if use_custom_pdf_analyzer():
-            response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail="auto")
+            response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail=detail)
         else:
             response = await client.analyze_pdf_files(pdf_path_list, prompt)
     return response
@@ -91,14 +105,23 @@ async def analyze_pdf_urls(
 # 複数のPDFの分析を行う
 async def analyze_pdf_files(
     pdf_path_list: Annotated[list[str], Field(description="List of absolute paths to the PDF files to analyze. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")]
+    prompt: Annotated[str, Field(description="Prompt to analyze the PDFs")],
+    detail: Annotated[
+        str,
+        Field(
+            description=(
+                "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+            )
+        ),
+    ] = "auto",
     ) -> Annotated[str, Field(description="Analysis result of the PDFs")]:
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
     client = LLMClient.create_llm_client(llm_config=LLMConfig())
     if use_custom_pdf_analyzer():
-        response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail="auto")
+        response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail=detail)
     else:
         response = await client.analyze_pdf_files(pdf_path_list, prompt)
     return response
@@ -106,7 +129,16 @@ async def analyze_pdf_files(
 # 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
 async def analyze_office_urls(
     office_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the Office files to analyze. e.g., http://path/to/document1.docx")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
+    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")],
+    detail: Annotated[
+        str,
+        Field(
+            description=(
+                "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+            )
+        ),
+    ] = "auto",
     ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
     """ 
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
@@ -121,21 +153,30 @@ async def analyze_office_urls(
 
         client = LLMClient.create_llm_client(llm_config=LLMConfig())
         if use_custom_pdf_analyzer():
-            response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail="auto")
+            response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail=detail)
         else:
             response = await client.analyze_office_document_files(office_path_list, prompt)
     return response
 
 async def analyze_office_files(
     office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
-    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")]
+    prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")],
+    detail: Annotated[
+        str,
+        Field(
+            description=(
+                "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+            )
+        ),
+    ] = "auto",
     ) -> Annotated[str, Field(description="Analysis result of the Office documents")]:
     """
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
     client = LLMClient.create_llm_client(llm_config=LLMConfig())
     if use_custom_pdf_analyzer():
-        response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail="auto")
+        response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail=detail)
     else:
         response = await client.analyze_office_document_files(office_path_list, prompt)
     return response

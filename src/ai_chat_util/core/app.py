@@ -11,6 +11,21 @@ class RequestModel(BaseModel):
     url: str
     headers: dict[str, Any] = {}
 
+def _download_files_(urls: list[RequestModel], download_dir: str) -> list[str]:
+    """
+    Download files from the given URLs to the specified directory.
+    Returns a list of file paths where the files are saved.
+    """
+    file_paths = []
+    for item in urls:
+        res = requests.get(url=item.url, headers=item.headers)
+        file_path = os.path.join(download_dir, os.path.basename(item.url))
+        with open(file_path, "wb") as f:
+            f.write(res.content)
+        file_paths.append(file_path)
+    return file_paths
+
+
 def use_custom_pdf_analyzer() -> bool:
     """
     Check if the custom PDF analyzer should be used based on the environment variable.
@@ -40,15 +55,11 @@ async def analyze_image_urls(
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        image_path_list = []
-        for item in image_path_urls:
-            res = requests.get(url=item.url, headers=item.headers)
-            with open(os.path.join(tmpdir, os.path.basename(item.url)), "wb") as f:
-                f.write(res.content)
-            image_path_list.append(os.path.join(tmpdir, os.path.basename(item.url)))
-
+        
+        path_list = _download_files_(image_path_urls, tmpdir)
         client = LLMClient.create_llm_client(llm_config=LLMConfig())
-        response = await client.analyze_image_files(image_path_list, prompt, detail)
+        response = await client.analyze_image_files(path_list, prompt, detail)
+
     return response
 
 
@@ -88,18 +99,13 @@ async def analyze_pdf_urls(
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        pdf_path_list = []
-        for item in pdf_path_urls:
-            res = requests.get(url=item.url, headers=item.headers)
-            with open(os.path.join(tmpdir, os.path.basename(item.url)), "wb") as f:
-                f.write(res.content)
-            pdf_path_list.append(os.path.join(tmpdir, os.path.basename(item.url)))
+        path_list = _download_files_(pdf_path_urls, tmpdir)
 
         client = LLMClient.create_llm_client(llm_config=LLMConfig())
         if use_custom_pdf_analyzer():
-            response = await client.analyze_pdf_files_custom(pdf_path_list, prompt, detail=detail)
+            response = await client.analyze_pdf_files_custom(path_list, prompt, detail=detail)
         else:
-            response = await client.analyze_pdf_files(pdf_path_list, prompt)
+            response = await client.analyze_pdf_files(path_list, prompt)
     return response
 
 # 複数のPDFの分析を行う
@@ -144,13 +150,7 @@ async def analyze_office_urls(
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        office_path_list = []
-        for item in office_path_urls:
-            res = requests.get(url=item.url, headers=item.headers)
-            with open(os.path.join(tmpdir, os.path.basename(item.url)), "wb") as f:
-                f.write(res.content)
-            office_path_list.append(os.path.join(tmpdir, os.path.basename(item.url)))
-
+        office_path_list = _download_files_(office_path_urls, tmpdir)
         client = LLMClient.create_llm_client(llm_config=LLMConfig())
         if use_custom_pdf_analyzer():
             response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail=detail)
@@ -179,4 +179,25 @@ async def analyze_office_files(
         response = await client.analyze_office_document_files_custom(office_path_list, prompt, detail=detail)
     else:
         response = await client.analyze_office_document_files(office_path_list, prompt)
+    return response
+
+
+async def analyze_multi_format_files(
+    file_path_list: Annotated[list[str], Field(description="List of absolute paths to the files to analyze. e.g., [/path/to/document1.pdf, /path/to/image1.jpg]")],
+    prompt: Annotated[str, Field(description="Prompt to analyze the files")],
+    detail: Annotated[
+        str,
+        Field(
+            description=(
+                "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+            )
+        ),
+    ] = "auto",
+    ) -> Annotated[str, Field(description="Analysis result of the files")]:
+    """
+    This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
+    """
+    client = LLMClient.create_llm_client(llm_config=LLMConfig())
+    response = await client.analyze_multi_format_files(file_path_list, prompt, detail=detail)
     return response

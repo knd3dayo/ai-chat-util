@@ -176,7 +176,6 @@ class LLMClient(ABC):
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        prompt_content = self.create_text_content(text=prompt)
         pdf_file_list = []
         temp_dir = tempfile.TemporaryDirectory()
         for file_path in file_path_list:
@@ -190,7 +189,35 @@ class LLMClient(ABC):
         response_text = await self.analyze_pdf_files_custom(pdf_file_list, prompt, detail)
         return response_text
 
+    async def analyze_multi_format_files(self, file_path_list: list[str], prompt: str, detail: str) -> str:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        content_list = []
+        for file_path in file_path_list:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in [".pdf"]:
+                pdf_content = self.create_pdf_content_from_file(file_path)
+                content_list.append(pdf_content)
+            elif ext in [".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"]:
+                # Officeドキュメントを一時的にPDFに変換する
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_pdf_path = os.path.join(temp_dir, "temp_converted.pdf")
+                    Office2PDFUtil.create_pdf_from_document(
+                        input_path=file_path,
+                        output_path=temp_pdf_path
+                    )
+                    pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
+                    content_list.append(pdf_content)
+            else:
+                logger.warning(f"Unsupported file format: {file_path}")
 
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        return chat_response.output
+    
+    
     async def simple_image_analysis(self, image_path: str, prompt: str, detail: str) -> ChatResponse:
         '''
         簡易的な画像解析を実行する.

@@ -7,12 +7,12 @@ tiktoken
 
 # For MCP
 fastmcp == 2.12.4
-
 # For API
 fastapi
-
 # Microsoft Agent Framework
 agent-framework
-
 # For PDF processing
 PyMuPDF
+
+# file util
+file_util @ git+https://github.com/knd3dayo/file-util.git@main

@@ -16,3 +16,6 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+ai-chat-util = "ai_chat_util.cli.__main__:cli_main"

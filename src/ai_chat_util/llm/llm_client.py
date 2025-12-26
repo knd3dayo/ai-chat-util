@@ -1,18 +1,21 @@
 
 # 抽象クラス
 from abc import ABC, abstractmethod
+from typing import Callable
 import os
+import uuid
 import copy
 import tiktoken
 import asyncio
 import base64
 import tempfile
-import uuid
+import atexit
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent
 from ai_chat_util.util.office2pdf import Office2PDFUtil
+from file_util.model import DocumentType
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -64,11 +67,93 @@ class LLMClient(ABC):
     def create_pdf_content_from_bytes(self, file_data: bytes, filename: str) -> "ChatContent":
         return self._create_pdf_content_from_bytes_(file_data, filename)
 
-    def create_pdf_content_from_file(self, file_path: str) -> "ChatContent":
+    def create_pdf_content_from_file(self, file_path: str) -> list["ChatContent"]:
         with open(file_path, "rb") as pdf_file:
             file_data = pdf_file.read()
         filename = os.path.basename(file_path)
-        return self.create_pdf_content_from_bytes(file_data, filename)
+        return [self.create_pdf_content_from_bytes(file_data, filename)]
+
+    def create_custom_pdf_contents_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
+        '''
+        PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
+        '''
+        import ai_chat_util.util.pdf_util as pdf_util
+
+        page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(file_path)} の内容を以下に示します。")
+        pdf_contents = [page_info_content]
+        # PDFからテキストと画像を抽出
+        pdf_elements = pdf_util.extract_pdf_content(file_path)
+        for element in pdf_elements:
+            if element["type"] == "text":
+                text_content = self.create_text_content(text=element["text"])
+                pdf_contents.append(text_content)
+            elif element["type"] == "image":
+                image_content = self.create_image_content_from_bytes(element["bytes"], detail)
+                pdf_contents.append(image_content)
+
+        return pdf_contents
+
+    def create_office_content_from_file(self, file_path: str) -> list["ChatContent"]:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        # Officeドキュメントを一時的にPDFに変換する
+        temp_dir = tempfile.TemporaryDirectory()
+        atexit.register(temp_dir.cleanup)
+        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
+        Office2PDFUtil.create_pdf_from_document(
+            input_path=file_path,
+            output_path=temp_file_path
+        )
+        pdf_content = self.create_pdf_content_from_file(temp_file_path)
+        return pdf_content
+
+
+    def __create_multi_format_contents_from_file__(self, file_path: str, detail: str, pdf_func: Callable) -> list["ChatContent"]:
+        '''
+        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
+        '''
+        document_type = DocumentType(file_path=file_path)
+
+        if document_type.is_text():
+            with open(file_path, "r", encoding="utf-8") as text_file:
+                text_data = text_file.read()
+            return [self.create_text_content(text_data)]
+
+        if document_type.is_image():
+            return [self.create_image_content_from_file(file_path, detail)]
+
+        if document_type.is_pdf():
+            return pdf_func(file_path)
+
+        if document_type.is_office_document():
+            # Officeドキュメントを一時的にPDFに変換する
+            temp_dir = tempfile.TemporaryDirectory()
+            atexit.register(temp_dir.cleanup)
+            temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
+            Office2PDFUtil.create_pdf_from_document(
+                input_path=file_path,
+                output_path=temp_file_path
+            )
+            return pdf_func(temp_file_path)
+
+        raise ValueError(f"Unsupported document type for file: {file_path}")    
+
+    def create_multi_format_contents_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
+        '''
+        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
+        '''
+        return self.__create_multi_format_contents_from_file__(
+            file_path, detail, self.create_pdf_content_from_file
+        )
+    
+    def create_custom_multi_format_contents_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
+        '''
+        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
+        '''
+        return self.__create_multi_format_contents_from_file__(
+            file_path, detail, self.create_custom_pdf_contents_from_file
+        )
 
     @classmethod
     def create_llm_client(
@@ -131,91 +216,71 @@ class LLMClient(ABC):
         pdf_messages = []
         for pdf_path in pdf_path_list:
             # PDFからテキストと画像を抽出
-            pdf_elements = pdf_util.extract_pdf_content(pdf_path)
-            pdf_contents = []
-            for element in pdf_elements:
-                if element["type"] == "text":
-                    text_content = self.create_text_content(text=element["text"])
-                    pdf_contents.append(text_content)
-                elif element["type"] == "image":
-                    image_content = self.create_image_content_from_bytes(element["bytes"], detail)
-                    pdf_contents.append(image_content)
-
-            page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(pdf_path)} の内容を以下に示します。")
+            pdf_contents = self.create_custom_pdf_contents_from_file(pdf_path, detail)
             pdf_messages.append(ChatMessage(
                 role=ChatHistory.user_role_name,
-                content=[page_info_content] + pdf_contents
+                content=pdf_contents
             ))
         chat_message = ChatMessage(role="user", content=[prompt_content])
         response: ChatResponse = await self.chat([chat_message] + pdf_messages,  request_context=None)
         return response.output
 
+    async def __analyze_office_document_files__(self, file_path_list: list[str], prompt: str, pdf_func: Callable) -> str:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        pdf_content_list = []
+        for file_path in file_path_list:
+            # Officeドキュメントを一時的にPDFに変換する
+            pdf_content = self.create_office_content_from_file(file_path)
+            pdf_content_list.append(pdf_content)
+
+        response_text = await pdf_func(pdf_content_list, prompt)
+        
+        return response_text
 
     async def analyze_office_document_files(self, file_path_list: list[str], prompt: str) -> str:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        prompt_content = self.create_text_content(text=prompt)
-        pdf_content_list = []
-        for file_path in file_path_list:
-            # Officeドキュメントを一時的にPDFに変換する
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_pdf_path = os.path.join(temp_dir, "temp_converted.pdf")
-                Office2PDFUtil.create_pdf_from_document(
-                    input_path=file_path,
-                    output_path=temp_pdf_path
-                )
-                pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
-                pdf_content_list.append(pdf_content)
-
-        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
-        return chat_response.output
-
+        pdf_func = self.analyze_pdf_files
+        return await self.__analyze_office_document_files__(file_path_list, prompt, pdf_func)
+    
     async def analyze_office_document_files_custom(self, file_path_list: list[str], prompt: str, detail: str) -> str:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        pdf_file_list = []
-        temp_dir = tempfile.TemporaryDirectory()
+        pdf_func = self.analyze_pdf_files_custom
+        return await self.__analyze_office_document_files__(file_path_list, prompt, pdf_func)
+
+    async def __analyze_multi_format_files__(self, file_path_list: list[str], prompt: str, detail: str, multi_func: Callable) -> str:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+
+        content_list = []
         for file_path in file_path_list:
-            # Officeドキュメントを一時的にPDFに変換する
-            temp_pdf_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
-            Office2PDFUtil.create_pdf_from_document(
-                input_path=file_path,
-                output_path=temp_pdf_path
-            )
-            pdf_file_list.append(temp_pdf_path)
-        response_text = await self.analyze_pdf_files_custom(pdf_file_list, prompt, detail)
-        return response_text
+            contents = multi_func(file_path, detail)
+            content_list.extend(contents)
+
+        prompt_content = self.create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        return chat_response.output
 
     async def analyze_multi_format_files(self, file_path_list: list[str], prompt: str, detail: str) -> str:
         '''
         複数の形式のドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        prompt_content = self.create_text_content(text=prompt)
-        content_list = []
-        for file_path in file_path_list:
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext in [".pdf"]:
-                pdf_content = self.create_pdf_content_from_file(file_path)
-                content_list.append(pdf_content)
-            elif ext in [".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"]:
-                # Officeドキュメントを一時的にPDFに変換する
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_pdf_path = os.path.join(temp_dir, "temp_converted.pdf")
-                    Office2PDFUtil.create_pdf_from_document(
-                        input_path=file_path,
-                        output_path=temp_pdf_path
-                    )
-                    pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
-                    content_list.append(pdf_content)
-            else:
-                logger.warning(f"Unsupported file format: {file_path}")
-
-        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
-        return chat_response.output
+        multi_func = self.create_multi_format_contents_from_file
+        return await self.__analyze_multi_format_files__(file_path_list, prompt, detail, multi_func)
+    
+    async def analyze_multi_format_files_custom(self, file_path_list: list[str], prompt: str, detail: str) -> str:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        multi_func = self.create_custom_multi_format_contents_from_file
+        return await self.__analyze_multi_format_files__(file_path_list, prompt, detail, multi_func)
     
     
     async def simple_image_analysis(self, image_path: str, prompt: str, detail: str) -> ChatResponse:
@@ -254,7 +319,7 @@ class LLMClient(ABC):
         pdf_content = self.create_pdf_content_from_file(pdf_path)
         chat_message = ChatMessage(
             role=ChatHistory.user_role_name,
-            content=[prompt_content, pdf_content]
+            content=[prompt_content] + pdf_content
         )
         return await self.chat([chat_message], request_context=None)
 
@@ -281,7 +346,7 @@ class LLMClient(ABC):
             pdf_content = self.create_pdf_content_from_file(temp_pdf_path)
             chat_message = ChatMessage(
                 role=ChatHistory.user_role_name,
-                content=[prompt_content, pdf_content]
+                content=[prompt_content] + pdf_content
             )
             return await self.chat([chat_message], request_context=None)
 

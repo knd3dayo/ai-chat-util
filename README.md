@@ -117,6 +117,43 @@ LIBREOFFICE_PATH=C:\\Program Files\\LibreOffice\\program\\soffice.exe
 
 ## 使用例
 
+## CLI（コマンドライン）
+
+このリポジトリには `ai_chat_util` の簡易CLIが含まれています。
+
+### インストール（開発モード）
+
+`uv` を利用する前提:
+
+```bash
+uv sync
+uv pip install -e .
+```
+
+### ヘルプ
+
+```bash
+ai-chat-util --help
+```
+
+### チャット
+
+```bash
+ai-chat-util chat -p "ping"
+```
+
+### 画像解析
+
+```bash
+ai-chat-util analyze_image_files -i sample.png -p "内容を説明して" --detail auto
+```
+
+### MCPサーバ起動
+
+```bash
+ai-chat-util mcp_server --mode stdio
+```
+
 ### チャットクライアントの利用例
 
 ```python

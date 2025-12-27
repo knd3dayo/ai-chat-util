@@ -8,9 +8,11 @@ from ai_chat_util.core.app import (
     analyze_image_files,
     analyze_pdf_files,
     analyze_office_files,
+    analyze_multi_format_files,
     analyze_image_urls,
     analyze_pdf_urls,
-    analyze_office_urls
+    analyze_office_urls,
+    analyze_multi_format_urls
 )
 
 
@@ -20,7 +22,16 @@ def parse_args() -> argparse.Namespace:
     # -m オプションを追加
     parser.add_argument("-m", "--mode", choices=["sse", "http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
     # -t tools オプションを追加 toolsはカンマ区切りの文字列. search_wikipedia_ja_mcp, vector_search, etc. 指定されていない場合は空文字を設定
-    parser.add_argument("-t", "--tools", type=str, default="", help="Comma-separated list of tools to use, e.g., 'search_wikipedia_ja_mcp,vector_search_mcp'. If not specified, no tools are loaded.")
+    parser.add_argument(
+        "-t",
+        "--tools",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated list of tool function names to load (e.g., 'run_chat,analyze_pdf_files'). "
+            "If not specified, the default tools are loaded."
+        ),
+    )
     # -p オプションを追加　ポート番号を指定する modeがsseの場合に使用.defaultは5001
     parser.add_argument("-p", "--port", type=int, default=5001, help="Port number to run the server on. Default is 5001.")
     # -v LOG_LEVEL オプションを追加 ログレベルを指定する. デフォルトは空白文字
@@ -43,9 +54,11 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         mcp.tool()(analyze_image_files)
         mcp.tool()(analyze_pdf_files)
         mcp.tool()(analyze_office_files)
+        mcp.tool()(analyze_multi_format_files)
         mcp.tool()(analyze_image_urls)
         mcp.tool()(analyze_pdf_urls)
         mcp.tool()(analyze_office_urls)
+        mcp.tool()(analyze_multi_format_urls)
     
 
 async def main():

@@ -19,6 +19,9 @@ class LLMConfig:
         # allow_outside_modifications
         self.allow_outside_modifications: bool = os.getenv("ALLOW_OUTSIDE_MODIFICATIONS","false").lower() == "true"
 
+        # use_custom_pdf_analyzer
+        self.use_custom_pdf_analyzer: bool = os.getenv("USE_CUSTOM_PDF_ANALYZER","false").lower() == "true"
+
         self.llm_provider: str = os.getenv("LLM_PROVIDER","openai")
         self.api_key: str = ""
         self.completion_model: str = ""

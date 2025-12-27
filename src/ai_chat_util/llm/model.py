@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
+class RequestModel(BaseModel):
+    url: str
+    headers: dict[str, Any] = {}
+
 class ChatRequestContext(BaseModel):
 
     # split_mode

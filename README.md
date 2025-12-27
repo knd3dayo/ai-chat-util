@@ -49,45 +49,8 @@ src/ai_chat_util/
 ## インストール
 
 ```bash
-pip install -e .
+uv sync
 ```
-
-または、`pyproject.toml` を利用して依存関係を管理します。
-
----
-
-## Docker / Docker Compose で起動（MCPサーバ）
-
-`.env_template` を参考に `ai-chat-util/.env` を用意した上で、以下を実行してください。
-
-```bash
-cd ai-chat-util
-docker compose up --build
-```
-
-起動後、MCPサーバは `http://localhost:${HOST_PORT:-5001}` で待ち受けます。
-
-- ホスト側ポートを変更したい場合は `ai-chat-util/.env` に `HOST_PORT` を設定してください（例: `HOST_PORT=9000`）。
-- コンテナ内の待受ポートは 5001 固定です。
-
-> 補足: docker compose は同ディレクトリの `.env` を自動で読み込みますが、
-> それは compose ファイル内の `${VAR}` 置換用途です。
-> コンテナへ環境変数として渡すために、`docker-compose.yml` 側で `env_file: .env` を指定しています。
-
----
-
-## 依存関係
-
-主要な依存パッケージは `requirements.txt` に記載されています。  
-例：
-```
-openai
-pydantic
-requests
-```
-
----
-
 ## 環境変数設定
 
 このプロジェクトでは、`.env` ファイルを使用して環境変数を管理します。  
@@ -115,128 +78,146 @@ LIBREOFFICE_PATH=C:\\Program Files\\LibreOffice\\program\\soffice.exe
 
 ---
 
-## 使用例
+## コマンドラインクライアント
 
-## CLI（コマンドライン）
+`ai_chat_util` には、`argparse + subcommand` で実装されたCLIが含まれます。
 
-このリポジトリには `ai_chat_util` の簡易CLIが含まれています。
-
-### インストール（開発モード）
-
-`uv` を利用する前提:
+### 起動方法（uv）
 
 ```bash
-uv sync
-uv pip install -e .
+uv run -m ai_chat_util.cli --help
 ```
 
-### ヘルプ
+> 補足: CLI起動時に `.env` を読み込みます（`python-dotenv`）。
+
+### 共通オプション
+
+```text
+--loglevel  LOGLEVEL 環境変数を設定します（例: DEBUG, INFO）
+--logfile   LOGFILE 環境変数を設定します（ログをファイル出力）
+```
+
+### サブコマンド
+
+#### chat（テキストチャット）
 
 ```bash
-ai-chat-util --help
+uv run -m ai_chat_util.cli chat -p "こんにちは"
 ```
 
-### チャット
+#### analyze_image_files（画像解析）
 
 ```bash
-ai-chat-util chat -p "ping"
+uv run -m ai_chat_util.cli analyze_image_files \
+  -i a.png b.jpg \
+  -p "内容を説明して" \
+  --detail auto
 ```
 
-### 画像解析
+#### analyze_pdf_files（PDF解析）
 
 ```bash
-ai-chat-util analyze_image_files -i sample.png -p "内容を説明して" --detail auto
+uv run -m ai_chat_util.cli analyze_pdf_files \
+  -i document.pdf \
+  -p "このPDFの要約を作成して" \
+  --detail auto
 ```
 
-### MCPサーバ起動
+#### analyze_office_files（Office解析：PDF化→解析）
 
 ```bash
-ai-chat-util mcp_server --mode stdio
+uv run -m ai_chat_util.cli analyze_office_files \
+  -i data.xlsx slide.pptx \
+  -p "内容を要約して" \
+  --detail auto
 ```
 
-### チャットクライアントの利用例
+#### analyze_files（複数形式まとめて解析）
 
-```python
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
-
-llm_config = LLMConfig()
-client = LLMClient.create_llm_client(llm_config)
-response = client.simple_chat("こんにちは、今日の天気は？")
-print(response)
-```
-
-### バッチ処理の利用例
-
-```python
-from ai_chat_util.batch.batch_client import BatchClient
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
-
-llm_config = LLMConfig()
-client = LLMClient.create_llm_client(llm_config)
-
-batch = BatchClient(client)
-results = batch.run(["要約して", "翻訳して", "説明して"])
-for r in results:
-    print(r)
-```
-### 画像解析の利用例（simple_image_analysis）
-
-```python
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
-
-llm_config = LLMConfig()
-client = LLMClient.create_llm_client(llm_config)
-
-result = client.simple_image_analysis(
-    ["sample_image.jpg"],
-    prompt="この画像の内容を説明してください。"
-)
-print(result)
-```
-
-### PDF解析の利用例（simple_pdf_analysis）
-
-```python
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
-
-llm_config = LLMConfig()
-client = LLMClient.create_llm_client(llm_config)
-
-result = client.simple_pdf_analysis(
-    ["document.pdf"],
-    prompt="このPDFの要約を作成してください。"
-)
-print(result)
-```
-
-### Officeドキュメント解析の利用例（simple_office_analysis）
-
-```python
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
-
-llm_config = LLMConfig()
-client = LLMClient.create_llm_client(llm_config)
-
-result = client.simple_office_document_analysis(
-    "data.xlsx",
-    prompt="これらのドキュメントの内容を要約してください。"
-)
-print(result)
+```bash
+uv run -m ai_chat_util.cli analyze_files \
+  -i note.txt a.png document.pdf data.xlsx \
+  -p "これらをまとめて要約して" \
+  --detail auto
 ```
 
 ---
 
-## ライセンス
+## MCPサーバー
 
-このプロジェクトは [MIT License](LICENSE) のもとで公開されています。
+`ai_chat_util` は MCP（Model Context Protocol）サーバーを提供します。
+MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
----
+> 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
+> そのため、事前に `.env` に `OPENAI_API_KEY` 等を設定してください。
 
-## リポジトリ
+### 起動方法
 
-GitHub: [https://github.com/knd3dayo/ai_chat_util](https://github.com/knd3dayo/ai_chat_util)
+#### stdio（デフォルト）
+
+標準入出力（stdio）で起動します。MCPクライアントがサブプロセスとして起動して接続する用途を想定しています。
+
+```bash
+uv run -m ai_chat_util.mcp.mcp_server
+# または明示
+uv run -m ai_chat_util.mcp.mcp_server -m stdio
+```
+
+#### SSE
+
+SSE（Server-Sent Events）で起動します。
+
+```bash
+uv run -m ai_chat_util.mcp.mcp_server -m sse -p 5001
+```
+
+#### Streamable HTTP
+
+```bash
+uv run -m ai_chat_util.mcp.mcp_server -m http -p 5001
+```
+
+### 提供ツールの指定（任意）
+
+`-t/--tools` で、登録するツールをカンマ区切りで指定できます。
+未指定の場合は、チャット/画像/PDF/Office/複数形式（files/urls）解析系がデフォルトで登録されます。
+
+```bash
+uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
+```
+
+> 注意: 指定できる名前は `ai_chat_util.core.app` から import されている関数名です。
+
+### MCPクライアント（例: Cline）向け設定例
+
+同梱の `sample_cline_mcp_settings.json` は Cline 等のMCPクライアント設定例です。
+`<REPO_PATH>` をこのリポジトリのパスに置き換えてください（例: `c:\\Users\\user\\source\\repos\\util\\ai-chat-util`）。
+
+```json
+{
+  "mcpServers": {
+    "AIChatUtil": {
+      "timeout": 60,
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "<REPO_PATH>",
+        "run",
+        "-m",
+        "ai_chat_util.mcp.mcp_server"
+      ],
+      "env": {
+        "LLM_PROVIDER": "openai",
+        "OPENAI_API_KEY": "sk-****",
+        "OPENAI_COMPLETION_MODEL": "gpt-4.1",
+        "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
+        "USE_CUSTOM_PDF_ANALYZER": "true"
+      }
+    }
+  }
+}
+```
+
+> `.env` を使う場合は、上記 `env` は不要（または最小限）です。
+

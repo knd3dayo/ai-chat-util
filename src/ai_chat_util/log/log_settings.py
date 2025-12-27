@@ -1,6 +1,6 @@
 import logging
 import os
-default_log_level = logging.DEBUG
+default_log_level = logging.WARN
 log_format = "%(asctime)s - %(levelname)s - %(pathname)s -  %(lineno)d - %(funcName)s - %(message)s"
 
 def getLogger(name: str) -> logging.Logger:

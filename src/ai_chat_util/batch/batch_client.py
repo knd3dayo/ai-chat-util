@@ -10,8 +10,9 @@ class LLMBatchClient:
     def __init__(self, client: LLMClient):
         self.client = client
 
-
-    async def _process_row_(self, row_num: int, prompt: str, input_message: str, agent_mode, progress: tqdm_asyncio) -> tuple[int, str, str]:
+    async def _process_row_(
+            self, row_num: int, prompt: str, input_message: str, agent_mode: bool, progress: tqdm_asyncio
+            ) -> tuple[int, str, str]:
         content = f"{prompt}\n{input_message}"
         if agent_mode:
             agent_util = MSAIAgentFactory(llm_config=self.client.llm_config)
@@ -21,25 +22,30 @@ class LLMBatchClient:
                 progress.update(1)  # Update progress after processing the row
                 return (row_num, input_message, response.text)
 
-        messages = [
-            {"role": "user", "content": content}
-        ]
-        response = await self.client._chat_completion_(messages=messages)
-        progress.update(1)  # Update progress after processing the row
-        return (row_num, input_message, response.output)
+        message = f"{prompt}\n{input_message}"
+        response = await self.client.simple_chat(message)
 
-    async def run(self, prompt:str, messages: list[str], agent_mode) -> list[str]:
+        progress.update(1)  # Update progress after processing the row
+        return (row_num, input_message, response)
+
+    async def run(self, prompt: str, messages: list[str], agent_mode: bool = False, concurrency: int = 5) -> list[str]:
 
         progress = tqdm_asyncio(total=len(messages), desc="progress")
         # 進捗バーのフォーマット
         progress.bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 
+        sem = asyncio.Semaphore(concurrency)
 
-        responses = []
+        async def _run_one(i: int, msg: str):
+            # Semaphore is effective only when each task acquires it.
+            async with sem:
+                return await self._process_row_(i, prompt, msg, agent_mode, progress)
 
-        async with asyncio.Semaphore(5):
-            tasks = [self._process_row_(i, prompt, messages, agent_mode, progress) for i, messages in enumerate(messages)]
+        tasks = [asyncio.create_task(_run_one(i, msg)) for i, msg in enumerate(messages)]
+
+        try:
             responses = await asyncio.gather(*tasks)
+        finally:
             progress.close()
     
         # Sort responses by row number to maintain order

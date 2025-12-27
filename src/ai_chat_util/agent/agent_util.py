@@ -101,6 +101,12 @@ class MSAIAgentParams(BaseModel):
 
 class MSAIAgentFactory(BaseModel):
 
+    # NOTE:
+    # LLMConfig は pydantic.BaseModel ではない通常クラスのため、pydantic v2 の
+    # スキーマ生成対象にすると "Unable to generate pydantic-core schema" が発生する。
+    # ここでは最小変更として任意型を許可し、設定クラスはそのまま利用する。
+    model_config = {"arbitrary_types_allowed": True}
+
     llm_config: LLMConfig = Field(default_factory=lambda: LLMConfig())
 
     def __create_openai_dict(self) -> dict:

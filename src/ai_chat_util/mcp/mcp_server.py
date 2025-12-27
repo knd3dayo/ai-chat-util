@@ -8,11 +8,11 @@ from ai_chat_util.core.app import (
     analyze_image_files,
     analyze_pdf_files,
     analyze_office_files,
-    analyze_multi_format_files,
+    analyze_files,
     analyze_image_urls,
     analyze_pdf_urls,
     analyze_office_urls,
-    analyze_multi_format_urls
+    analyze_urls
 )
 
 
@@ -54,11 +54,11 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         mcp.tool()(analyze_image_files)
         mcp.tool()(analyze_pdf_files)
         mcp.tool()(analyze_office_files)
-        mcp.tool()(analyze_multi_format_files)
+        mcp.tool()(analyze_files)
         mcp.tool()(analyze_image_urls)
         mcp.tool()(analyze_pdf_urls)
         mcp.tool()(analyze_office_urls)
-        mcp.tool()(analyze_multi_format_urls)
+        mcp.tool()(analyze_urls)
     
 
 async def main():

@@ -41,11 +41,11 @@ async def analyze_image_urls(
     llm_client = LLMClient.create_llm_client(LLMConfig())
     response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
 
-    return response
+    return response.output
 
 # 複数の画像の分析を行う
 async def analyze_image_files(
-        image_path_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
+        file_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
         prompt: Annotated[str, Field(description="Prompt to analyze the images")],
         detail: Annotated[str, Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
     ) -> Annotated[str, Field(description="Analysis result of the images")]:
@@ -53,8 +53,8 @@ async def analyze_image_files(
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
     llm_client = LLMClient.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_image_files(image_path_list, prompt, detail)
-    return response
+    response = await llm_client.analyze_image_files(file_list, prompt, detail)
+    return response.output
 
 
 # 複数のPDFの分析を行う URLからPDFをダウンロードして分析する
@@ -84,7 +84,7 @@ async def analyze_pdf_urls(
     llm_client = LLMClient.create_llm_client(LLMConfig())
     path_list = llm_client.download_files(pdf_path_urls, tmpdir.name)
     response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
-    return response
+    return response.output
 
 # 複数のPDFの分析を行う
 async def analyze_pdf_files(
@@ -105,7 +105,7 @@ async def analyze_pdf_files(
     """
     llm_client = LLMClient.create_llm_client(LLMConfig())
     response = await llm_client.analyze_pdf_files(pdf_path_list, prompt, detail)
-    return response
+    return response.output
 
 # 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
 async def analyze_office_urls(
@@ -130,7 +130,7 @@ async def analyze_office_urls(
     path_list = llm_client.download_files(office_path_urls, tmpdir.name)
 
     response = await llm_client.analyze_office_files(path_list, prompt, detail)
-    return response
+    return response.output
 
 async def analyze_office_files(
         office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
@@ -150,9 +150,9 @@ async def analyze_office_files(
     """ 
     llm_client = LLMClient.create_llm_client(LLMConfig())
     response = await llm_client.analyze_office_files(office_path_list, prompt, detail=detail)
-    return response
+    return response.output
 
-async def analyze_multi_format_urls(
+async def analyze_urls(
         file_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the files to analyze. e.g., http://path/to/document1.pdf, http://path/to/image1.jpg")],
         prompt: Annotated[str, Field(description="Prompt to analyze the files")],
         detail: Annotated[
@@ -172,10 +172,10 @@ async def analyze_multi_format_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMClient.create_llm_client(LLMConfig())
     path_list = llm_client.download_files(file_path_urls, tmpdir.name)
-    response = await llm_client.analyze_multi_format_files(path_list, prompt, detail)
-    return response
+    response = await llm_client.analyze_files(path_list, prompt, detail)
+    return response.output
 
-async def analyze_multi_format_files(
+async def analyze_files(
         file_path_list: Annotated[list[str], Field(description="List of absolute paths to the files to analyze. e.g., [/path/to/document1.pdf, /path/to/image1.jpg]")],
         prompt: Annotated[str, Field(description="Prompt to analyze the files")],
         detail: Annotated[
@@ -192,5 +192,5 @@ async def analyze_multi_format_files(
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
     llm_client = LLMClient.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_multi_format_files(file_path_list, prompt, detail=detail)
-    return response
+    response = await llm_client.analyze_files(file_path_list, prompt, detail=detail)
+    return response.output

@@ -5,11 +5,11 @@ async def main(files):
     llm_config = LLMConfig()
     client = LLMClient.create_llm_client(llm_config)
 
-    result = await client.simple_office_document_analysis(
+    result = await client.analyze_office_files(
         file_path_list=files,
         prompt="このExcelファイルの要約を作成してください。"
     )
-    print(result)
+    print(result.output)
 
 if __name__ == "__main__":
     import sys

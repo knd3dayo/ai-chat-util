@@ -164,7 +164,9 @@ class LLMClient(ABC):
 
         return pdf_contents
 
-    def create_office_content_from_file(self, file_path: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto") -> list["ChatContent"]:
+    def create_office_content_from_file(
+            self, file_path: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
+            ) -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
@@ -176,13 +178,22 @@ class LLMClient(ABC):
             input_path=file_path,
             output_path=temp_file_path
         )
-        if use_custom_pdf_analyzer:
-            pdf_content = self.create_custom_pdf_contents_from_file(temp_file_path, detail)
-        else:
-            pdf_content = self.create_pdf_content_from_file(temp_file_path)
-        return pdf_content
+        # 元ファイルからPDFに変換した旨の説明を追加
+        explanation_text = f"""
+            {os.path.basename(temp_file_path)}は、元のOfficeドキュメント: {file_path} をPDFに変換したものです。
+            回答を行う際のファイル名は、元のファイル名を使用してください。
+            """
+        explanation_content = self.create_text_content(text=explanation_text)
+        pdf_contents = [explanation_content]
 
-    def create_office_content_from_url(self, file_url: str, filename: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto") -> list["ChatContent"]:
+        if use_custom_pdf_analyzer:
+            pdf_contents.extend(self.create_custom_pdf_contents_from_file(temp_file_path, detail))
+        else:
+            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path))
+
+        return pdf_contents
+
+    def create_office_content_from_url(self, file_url: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto") -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
@@ -223,23 +234,13 @@ class LLMClient(ABC):
                 return self.create_pdf_content_from_file(file_path)
 
         if document_type.is_office_document():
-            # Officeドキュメントを一時的にPDFに変換する
-            temp_dir = tempfile.TemporaryDirectory()
-            atexit.register(temp_dir.cleanup)
-            temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
-            Office2PDFUtil.create_pdf_from_document(
-                input_path=file_path,
-                output_path=temp_file_path
-            )
-            if use_custom_pdf_analyzer:
-                return self.create_custom_pdf_contents_from_file(temp_file_path, detail)
-            else:
-                return self.create_pdf_content_from_file(temp_file_path,)
-
+            return self.create_office_content_from_file(
+                file_path, use_custom_pdf_analyzer=use_custom_pdf_analyzer, detail=detail)
+        
         raise ValueError(f"Unsupported document type for file: {file_path}")    
 
     def create_multi_format_contents_from_url(
-            self, file_url: str, filename: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
+            self, file_url: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
             ) -> list["ChatContent"]:
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
@@ -253,13 +254,13 @@ class LLMClient(ABC):
         )
 
 
-    async def analyze_image_files(self, image_path_list: list[str], prompt: str, detail: str) -> ChatResponse:
+    async def analyze_image_files(self, file_list: list[str], prompt: str, detail: str) -> ChatResponse:
         '''
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
         prompt_content = self.create_text_content(text=prompt)
         image_content_list = []
-        for image_path in image_path_list:
+        for image_path in file_list:
             image_content = self.create_image_content_from_file(image_path, detail)
             image_content_list.append(image_content)
 
@@ -283,18 +284,18 @@ class LLMClient(ABC):
     
 
     async def analyze_pdf_files(
-            self, pdf_path_list: list[str], prompt: str, detail: str = "auto"
+            self, file_list: list[str], prompt: str, detail: str = "auto"
             ) -> ChatResponse:
         '''
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
         prompt_content = self.create_text_content(text=prompt)
         pdf_content_list = []
-        for pdf_path in pdf_path_list:
+        for file_path in file_list:
             if self.llm_config.use_custom_pdf_analyzer:
-                pdf_content = self.create_custom_pdf_contents_from_file(pdf_path, detail)
+                pdf_content = self.create_custom_pdf_contents_from_file(file_path, detail)
             else:
-                pdf_content = self.create_pdf_content_from_file(pdf_path)
+                pdf_content = self.create_pdf_content_from_file(file_path)
             pdf_content_list.extend(pdf_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
@@ -308,21 +309,21 @@ class LLMClient(ABC):
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。
         各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        pdf_contents: list[ChatContent] = []
+        office_contents: list[ChatContent] = []
         for file_path in file_path_list:
             # Officeドキュメントを一時的にPDFに変換する
             pdf_content = self.create_office_content_from_file(
                 file_path, use_custom_pdf_analyzer=self.llm_config.use_custom_pdf_analyzer, detail=detail)
 
-            pdf_contents.extend(pdf_content)
+            office_contents.extend(pdf_content)
 
         prompt_content = self.create_text_content(text=prompt)
 
-        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_contents)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
         response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return response
 
-    async def analyze_multi_format_files(
+    async def analyze_files(
             self, file_path_list: list[str], prompt: str, detail: str = "auto"
             ) -> ChatResponse:
         '''
@@ -339,83 +340,6 @@ class LLMClient(ABC):
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response
-
-    async def simple_image_analysis(self, image_path_list: list[str], prompt: str, detail: str) -> str:
-        '''
-        簡易的な画像解析を実行する.
-        引数として渡された画像ファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
-        その後、文字列を返す.
-
-        Args:
-            image_path_list (list[str]): 画像ファイルのパスリスト
-            prompt (str): プロンプト文字列
-            detail (str): 詳細レベル
-        Returns:
-            str: LLMからの応答
-        '''
-        response: ChatResponse = await self.analyze_image_files(
-            image_path_list=image_path_list,
-            prompt=prompt,
-            detail=detail
-        )
-        return response.output
-
-    async def simple_pdf_analysis(self, pdf_path_list: list[str], prompt: str, detail: str = "auto") -> str:
-        '''
-        簡易的なPDF解析を実行する.
-        引数として渡されたPDFファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
-        その後、文字列を返す.
-
-        Args:
-            pdf_path_list (list[str]): PDFファイルのパスリスト
-            prompt (str): プロンプト文字列
-        Returns:
-            str: LLMからの応答
-        '''
-        response = await self.analyze_pdf_files(
-            pdf_path_list=pdf_path_list,
-            prompt=prompt,
-            detail=detail
-        )
-        return response.output
-
-    async def simple_office_document_analysis(self, file_path_list: list[str], prompt: str, detail: str = "auto") -> str:
-        '''
-        簡易的なOfficeドキュメント解析を実行する.
-        引数として渡されたOfficeドキュメントファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
-        その後、文字列を返す.
-
-        Args:
-            file_path (str): Officeドキュメントファイルのパス
-            prompt (str): プロンプト文字列
-        Returns:
-            str: LLMからの応答
-        '''
-        response = await self.analyze_office_files(
-            file_path_list=file_path_list,
-            prompt=prompt,
-            detail=detail
-        )
-        return response.output
-
-    async def simple_multi_format_document_analysis(self, file_path_list: list[str], prompt: str, detail: str = "auto") -> str:
-        '''
-        簡易的な複数形式ドキュメント解析を実行する.
-        引数として渡された複数形式ドキュメントファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
-        その後、文字列を返す.
-
-        Args:
-            file_path_list (list[str]): 複数形式ドキュメントファイルのパスリスト
-            prompt (str): プロンプト文字列
-        Returns:
-            str: LLMからの応答
-        '''
-        response = await self.analyze_multi_format_files(
-            file_path_list=file_path_list,
-            prompt=prompt,
-            detail=detail
-        )
-        return response.output
 
     async def simple_chat(self, prompt: str) -> str:
         '''
@@ -755,7 +679,10 @@ class OpenAIClient(LLMClient):
             messages=message_dict_list,
             **kwargs
         )
-        return ChatResponse(output=response.choices[0].message.content or "")
+        return ChatResponse(
+            output=response.choices[0].message.content or "",
+            total_tokens=response.usage.total_tokens
+            )
 
     def _is_text_content_(self, content: ChatContent) -> bool:
         return content.params.get("type") == "text"

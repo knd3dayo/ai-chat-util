@@ -205,29 +205,29 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMClient.create_llm_client()
-        response = await llm_client.simple_image_analysis(args.image_path_list, args.prompt, args.detail)
-        print(response)
+        response = await llm_client.analyze_image_files(args.image_path_list, args.prompt, args.detail)
+        print(response.output)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMClient.create_llm_client()
-        response = await llm_client.simple_pdf_analysis(args.pdf_path_list, args.prompt, args.detail)
-        print(response)
+        response = await llm_client.analyze_pdf_files(args.pdf_path_list, args.prompt, args.detail)
+        print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMClient.create_llm_client()
-        response = await llm_client.simple_office_document_analysis(args.office_path_list, args.prompt, args.detail)
-        print(response)
+        response = await llm_client.analyze_office_files(args.office_path_list, args.prompt, args.detail)
+        print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMClient.create_llm_client()
-        response = await llm_client.simple_multi_format_document_analysis(args.file_path_list, args.prompt, args.detail)
-        print(response)
+        response = await llm_client.analyze_files(args.file_path_list, args.prompt, args.detail)
+        print(response.output)
         return
 
     parser.print_help()

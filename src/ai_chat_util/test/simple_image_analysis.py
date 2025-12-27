@@ -5,12 +5,12 @@ async def main(files):
     llm_config = LLMConfig()
     client = LLMClient.create_llm_client(llm_config)
 
-    result = await client.simple_image_analysis(
-        image_path_list=files,
+    result = await client.analyze_image_files(
+        file_list=files,
         prompt="この画像の内容を説明してください。",
         detail="auto"
     )
-    print(result)
+    print(result.output)
 
 if __name__ == "__main__":
     import sys

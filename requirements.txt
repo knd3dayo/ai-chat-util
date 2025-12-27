@@ -7,6 +7,15 @@ openpyxl
 openai
 tiktoken
 
+# For AWS bedrock
+boto3
+
+# For anthropic
+anthropic
+
+# For Google Gemini
+google-generativeai
+
 # For MCP
 fastmcp == 2.12.4
 # For API
@@ -18,3 +27,4 @@ PyMuPDF
 
 # file util
 file_util @ git+https://github.com/knd3dayo/file-util.git@main
+

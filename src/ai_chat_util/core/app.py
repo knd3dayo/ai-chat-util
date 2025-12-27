@@ -3,7 +3,7 @@ import os, tempfile
 import atexit
 from pydantic import Field
 from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse, RequestModel
-from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
 import os
@@ -26,7 +26,7 @@ async def run_chat(
     """
     if request_context is None:
         request_context = ChatRequestContext()
-    client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
+    client = LLMFactory.create_llm_client(LLMConfig(), completion_request, request_context)
     return await client.chat()
 
 async def run_simple_batch_chat(
@@ -86,7 +86,7 @@ async def analyze_image_urls(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
 
     return response.output
@@ -100,7 +100,7 @@ async def analyze_image_files(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_image_files(file_list, prompt, detail)
     return response.output
 
@@ -129,7 +129,7 @@ async def analyze_pdf_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     path_list = llm_client.download_files(pdf_path_urls, tmpdir.name)
     response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
     return response.output
@@ -151,7 +151,7 @@ async def analyze_pdf_files(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_pdf_files(pdf_path_list, prompt, detail)
     return response.output
 
@@ -174,7 +174,7 @@ async def analyze_office_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     path_list = llm_client.download_files(office_path_urls, tmpdir.name)
 
     response = await llm_client.analyze_office_files(path_list, prompt, detail)
@@ -196,7 +196,7 @@ async def analyze_office_files(
     """
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_office_files(office_path_list, prompt, detail=detail)
     return response.output
 
@@ -218,7 +218,7 @@ async def analyze_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     path_list = llm_client.download_files(file_path_urls, tmpdir.name)
     response = await llm_client.analyze_files(path_list, prompt, detail)
     return response.output
@@ -239,6 +239,6 @@ async def analyze_files(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMClient.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_files(file_path_list, prompt, detail=detail)
     return response.output

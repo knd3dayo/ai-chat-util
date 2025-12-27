@@ -1,10 +1,6 @@
 from ai_chat_util.batch.batch_client import LLMBatchClient
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.llm_config import LLMConfig
 
 async def main():
-    llm_config = LLMConfig()
-    client = LLMClient.create_llm_client(llm_config)
 
     batch = LLMBatchClient()
     prompt = "英語に翻訳してください"

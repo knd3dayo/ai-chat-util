@@ -2,7 +2,8 @@ import os
 import asyncio
 from tqdm.asyncio import tqdm_asyncio
 
-from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.llm.llm_factory import LLMFactory
+
 from ai_chat_util.llm.model import ChatMessage, ChatResponse, ChatHistory, ChatContent
 
 import pandas as pd
@@ -21,7 +22,7 @@ class LLMBatchClient:
             chat_response = ChatResponse(output="", total_tokens=0, documents=[])
             result_chat_history = chat_history
         else:
-            llm_client = LLMClient.create_llm_client(chat_history=chat_history)
+            llm_client = LLMFactory.create_llm_client(chat_history=chat_history)
             chat_response = await llm_client.chat()
             result_chat_history = llm_client.chat_history
 
@@ -61,7 +62,7 @@ class LLMBatchClient:
         '''
         指定されたメッセージリストに対して、指定されたプロンプトを用いてバッチ処理を行う。
         '''
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         chat_histories: list[ChatHistory] = []
         for msg in messages:
             chat_content = llm_client.create_text_content(text=f"{prompt}\n{msg}")
@@ -87,7 +88,7 @@ class LLMBatchClient:
             concurrency: int = 16,
         ) -> None:
 
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         use_custom_pdf_analyzer = llm_client.llm_config.use_custom_pdf_analyzer
         # Excelファイルを読み込む
         df = pd.read_excel(input_excel_path)

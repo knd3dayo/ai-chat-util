@@ -1,4 +1,3 @@
-
 # 抽象クラス
 from abc import ABC, abstractmethod
 import os
@@ -30,6 +29,14 @@ class LLMClient(ABC):
     concurrency_limit: int = 16
     
     @abstractmethod
+    def create(
+        cls, llm_config: LLMConfig = LLMConfig(), 
+        chat_history: ChatHistory = ChatHistory(), 
+        request_context: ChatRequestContext = ChatRequestContext()
+    ) -> "LLMClient":
+        pass
+
+    @abstractmethod
     async def _chat_completion_(self, **kwargs) ->  ChatResponse:
         pass
 
@@ -52,17 +59,6 @@ class LLMClient(ABC):
     @abstractmethod    
     def _is_file_content_(self, content: ChatContent) -> bool:
         pass
-
-    @classmethod
-    def create_llm_client(
-        cls, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
-    ) -> 'LLMClient':
-        if llm_config.llm_provider == "azure_openai":
-            return AzureOpenAIClient(llm_config, chat_history, request_context)
-        else:
-            return OpenAIClient(llm_config, chat_history, request_context)
 
     @classmethod
     def get_token_count(cls, model: str, input_text: str) -> int:
@@ -440,7 +436,7 @@ class LLMClient(ABC):
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message__(message_num: int, message: ChatMessage) -> tuple[int, ChatResponse]:
-            client = LLMClient.create_llm_client(
+            client = self.create(
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(message)
@@ -464,7 +460,7 @@ class LLMClient(ABC):
 
         for preprocessed_message in preprocessed_messages:
             # 
-            client = LLMClient.create_llm_client(
+            client = self.create(
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(preprocessed_message)
@@ -654,7 +650,7 @@ class LLMClient(ABC):
             summarize_prompt_text=request_context.summarize_prompt_text
         )
 
-        client = LLMClient.create_llm_client(self.llm_config, request_context=request_context)
+        client = self.create(self.llm_config, request_context=request_context)
         text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
             role=ChatHistory.user_role_name,
@@ -663,73 +659,3 @@ class LLMClient(ABC):
         summarize_response = await client.chat([message])
         return summarize_response
 
-
-class OpenAIClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
-        if llm_config.base_url:
-            self.client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-        else:
-            self.client = AsyncOpenAI(api_key=llm_config.api_key)
-
-        self.model = llm_config.completion_model
-
-        self.chat_history = chat_history
-        self.request_context = request_context
-
-    async def _chat_completion_(self,  **kwargs) -> ChatResponse:
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
-        response = await self.client.chat.completions.create(
-            model=self.chat_history.model,
-            messages=message_dict_list,
-            **kwargs
-        )
-        return ChatResponse(
-            output=response.choices[0].message.content or "",
-            total_tokens=response.usage.total_tokens
-            )
-
-    def _is_text_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "text"
-
-    def _is_image_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "image_url"
-    
-    def _is_file_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "file"
-    
-    def _create_image_content_(self, image_data: bytes, detail: str) -> "ChatContent":
-        base64_image = base64.b64encode(image_data).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
-        return ChatContent(params=params)
-    
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> ChatContent:
-        base64_file = base64.b64encode(file_data).decode('utf-8')
-        file_url = f"data:application/pdf;base64,{base64_file}"    
-        params = {"type": "file", "file": {"file_data": file_url, "filename": filename}}
-        return ChatContent(params=params)
-
-
-class AzureOpenAIClient(OpenAIClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
-        if llm_config.base_url:
-            self.client = AsyncAzureOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-        elif llm_config.api_version and llm_config.endpoint:
-            self.client = AsyncAzureOpenAI(api_key=llm_config.api_key, azure_endpoint=llm_config.endpoint, api_version=llm_config.api_version)
-        else:
-            raise ValueError("Either base_url or both api_version and endpoint must be provided.")
-
-        self.model = llm_config.completion_model
-
-        self.chat_history = chat_history
-        self.request_context = request_context
-
-    async def _chat_completion_(self, **kwargs) -> ChatResponse:
-        
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
-        response = await self.client.chat.completions.create(
-            model=self.chat_history.model,
-            messages=message_dict_list,
-            **kwargs
-        )
-        return ChatResponse(output=response.choices[0].message.content or "")

@@ -1,27 +1,10 @@
-"""ai_chat_util CLI.
-
-`vector-search-util` の `__main__.py` と同様に、argparse + subcommand で実装する。
-
-実行例:
-
-- ヘルプ
-    python -m ai_chat_util.cli --help
-
-- チャット
-    python -m ai_chat_util.cli chat -p "こんにちは"
-
-- ファイル解析
-    python -m ai_chat_util.cli analyze_files -i a.png b.jpg -p "内容を説明して" --detail auto
-
-"""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
 import os
 from typing import Iterable
-from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.batch.batch_client import LLMBatchClient
 
 def _set_env_if_provided(name: str, value: str) -> None:
@@ -256,7 +239,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         response = await llm_client.simple_chat(args.prompt)
         print(response)
         return
@@ -279,28 +262,28 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         response = await llm_client.analyze_image_files(args.image_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         response = await llm_client.analyze_pdf_files(args.pdf_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         response = await llm_client.analyze_office_files(args.office_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMClient.create_llm_client()
+        llm_client = LLMFactory.create_llm_client()
         response = await llm_client.analyze_files(args.file_path_list, args.prompt, args.detail)
         print(response.output)
         return

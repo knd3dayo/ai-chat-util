@@ -21,8 +21,8 @@ import argparse
 import asyncio
 import os
 from typing import Iterable
-from ai_chat_util.llm.model import ChatMessage, ChatHistory, ChatContent, ChatResponse
 from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.batch.batch_client import LLMBatchClient
 
 def _set_env_if_provided(name: str, value: str) -> None:
     if value:
@@ -59,7 +59,67 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプト文字列",
     )
-
+    # batch_chat
+    batch_chat_parser = subparsers.add_parser(
+        "batch_chat", help="LLM へテキストでバッチチャットします"
+    )
+    batch_chat_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプトテンプレート文字列",
+    )
+    batch_chat_parser.add_argument(
+        "-i",
+        "--input_excel_path",
+        type=str,
+        required=True,
+        help="処理対象のメッセージとファイルパスを記載したExcelファイルのパス",
+    )
+    batch_chat_parser.add_argument(
+        "-o",
+        "--output_excel_path",
+        type=str,
+        default="output.xlsx",
+        required=False,
+        help="結果を出力するExcelファイルのパス",
+    )
+    # batch_chat 実行時の動作をカスタマイズするオプション
+    batch_chat_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=16,
+        required=False,
+        help="同時実行数の上限（デフォルト: 16）",
+    )
+    batch_chat_parser.add_argument(
+        "--content_column",
+        type=str,
+        default="content",
+        help="入力Excelファイル内のメッセージを含む列名（デフォルト: content）",
+    )
+    batch_chat_parser.add_argument(
+        "--file_path_column",
+        type=str,
+        default="file_path",
+        help="入力Excelファイル内のファイルパスを含む列名（デフォルト: file_path）",
+    )
+    # output_column は LLM の応答を出力する列名
+    batch_chat_parser.add_argument(
+        "--output_column",
+        type=str,
+        default="output",
+        help="出力Excelファイル内のLLM応答を含む列名（デフォルト: output）",
+    )
+    # 画像解析の detail レベルを指定するオプション
+    batch_chat_parser.add_argument(
+        "--image_detail",
+        type=str,
+        default="auto",
+        help="画像解析のdetail（low/high/auto）。既定は auto",
+    )
+    
     # analyze_image_files
     image_parser = subparsers.add_parser(
         "analyze_image_files", help="画像ファイルを解析します"
@@ -178,7 +238,6 @@ def _validate_non_empty(text: str, parser: argparse.ArgumentParser) -> str:
         raise SystemExit(1)
     return text
 
-
 def _print_header(command: str) -> None:
     print(f"Executing command: {command}")
 
@@ -200,6 +259,22 @@ async def main(argv: Iterable[str] | None = None) -> None:
         llm_client = LLMClient.create_llm_client()
         response = await llm_client.simple_chat(args.prompt)
         print(response)
+        return
+    
+    if args.command == "batch_chat":
+        _validate_non_empty(args.prompt, parser)
+        llm_batch_client = LLMBatchClient()
+        await llm_batch_client.run_batch_chat_from_excel(
+            input_excel_path=args.input_excel_path,
+            output_excel_path=args.output_excel_path,
+            prompt=args.prompt,
+            content_column=args.content_column,
+            file_path_column=args.file_path_column,
+            output_column=args.output_column,
+            concurrency=args.concurrency,
+            detail=args.image_detail,
+        )
+        print(f"Batch chat completed. Results saved to {args.output_excel_path}")
         return
 
     if args.command == "analyze_image_files":

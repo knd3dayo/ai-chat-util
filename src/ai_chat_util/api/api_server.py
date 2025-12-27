@@ -2,6 +2,9 @@ from fastapi import APIRouter, FastAPI
 from ai_chat_util.core.app import (
     use_custom_pdf_analyzer,
     run_chat,
+    run_batch_chat,
+    run_simple_batch_chat,
+    run_batch_chat_from_excel,
     analyze_image_files,
     analyze_pdf_files,
     analyze_office_files,
@@ -19,6 +22,15 @@ router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_an
 
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
 router.add_api_route(path="/run_chat", endpoint=run_chat, methods=["POST"])
+
+# chat_utilのrun_simple_batch_chatを呼び出すラッパー関数を定義
+router.add_api_route(path="/run_simple_batch_chat", endpoint=run_simple_batch_chat, methods=["POST"])  
+
+# chat_utilのrun_batch_chatを呼び出すラッパー関数を定義
+router.add_api_route(path="/run_batch_chat", endpoint=run_batch_chat, methods=["POST"])
+
+# chat_utilのrun_batch_chat_from_excelを呼び出すラッパー関数を定義
+router.add_api_route(path="/run_batch_chat_from_excel", endpoint=run_batch_chat_from_excel, methods=["POST"])
 
 # 複数の画像の分析を行う
 router.add_api_route(path="/analyze_image_files", endpoint=analyze_image_files, methods=["POST"])

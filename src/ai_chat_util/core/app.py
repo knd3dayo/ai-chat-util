@@ -5,6 +5,7 @@ from pydantic import Field
 from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse, RequestModel
 from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util.llm.llm_config import LLMConfig
+from ai_chat_util.batch.batch_client import LLMBatchClient
 import os
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
@@ -28,6 +29,53 @@ async def run_chat(
     client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
     return await client.chat()
 
+async def run_simple_batch_chat(
+        prompt: Annotated[str, Field(description="Prompt for the batch chat")],
+        messages: Annotated[list[str], Field(description="List of messages for the batch chat")],
+        concurrency: Annotated[int, Field(description="Number of concurrent requests to process")]=5
+) -> Annotated[list[str], Field(description="List of chat responses from batch processing")]:
+    """
+    This function processes a simple batch chat with the specified prompt and messages, and returns the list of chat responses.
+    """
+    batch_client = LLMBatchClient()
+    results = await batch_client.run_simple_batch_chat(prompt, messages, concurrency)
+    return results
+
+async def run_batch_chat(
+        chat_histories: Annotated[list[ChatHistory], Field(description="List of chat histories for batch processing")],
+        concurrency: Annotated[int, Field(description="Number of concurrent requests to process")]=5
+) -> Annotated[list[ChatResponse], Field(description="List of chat responses from batch processing")]:
+    """
+    This function processes a batch of chat histories concurrently and returns the list of chat responses.
+    """
+    batch_client = LLMBatchClient()
+    results = await batch_client.run_batch_chat(chat_histories, concurrency)
+    return [response for _, response, _ in results]
+
+async def run_batch_chat_from_excel(
+        prompt: Annotated[str, Field(description="Prompt for the batch chat")],
+        input_excel_path: Annotated[str, Field(description="Path to the input Excel file")],
+        output_excel_path: Annotated[str, Field(description="Path to the output Excel file")]="output.xlsx",
+        content_column: Annotated[str, Field(description="Name of the column containing input messages")]="content",
+        file_path_column: Annotated[str, Field(description="Name of the column containing file paths")]="file_path",
+        output_column: Annotated[str, Field(description="Name of the column to store output responses")]="output",
+        detail: Annotated[str, Field(description="Detail level for file analysis. e.g., 'low', 'high', 'auto'")]= "auto",
+        concurrency: Annotated[int, Field(description="Number of concurrent requests to process")]=16
+) -> None:
+    """
+    This function reads chat histories from an Excel file, processes them in batch, and writes the responses to a new Excel file.
+    """
+    batch_client = LLMBatchClient()
+    await batch_client.run_batch_chat_from_excel(
+        prompt,
+        input_excel_path,
+        output_excel_path,
+        content_column,
+        file_path_column,
+        output_column,
+        detail,
+        concurrency
+    )
 
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 async def analyze_image_urls(

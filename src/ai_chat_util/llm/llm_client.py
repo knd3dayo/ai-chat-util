@@ -23,9 +23,12 @@ logger = log_settings.getLogger(__name__)
 
 class LLMClient(ABC):
 
+
     llm_config: LLMConfig = LLMConfig()
     chat_history: ChatHistory = ChatHistory()
 
+    concurrency_limit: int = 16
+    
     @abstractmethod
     async def _chat_completion_(self, **kwargs) ->  ChatResponse:
         pass
@@ -112,8 +115,7 @@ class LLMClient(ABC):
     def create_pdf_content_from_file(self, file_path: str) -> list["ChatContent"]:
         with open(file_path, "rb") as pdf_file:
             file_data = pdf_file.read()
-        filename = os.path.basename(file_path)
-        return [self._create_pdf_content_(file_data, filename)]
+        return [self._create_pdf_content_(file_data, file_path)]
 
     def create_pdf_content_from_url(self, file_url: str, filename: str) -> "ChatContent":
         tmpdir = tempfile.TemporaryDirectory()
@@ -130,7 +132,7 @@ class LLMClient(ABC):
         '''
         import ai_chat_util.util.pdf_util as pdf_util
 
-        page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(file_path)} の内容を以下に示します。")
+        page_info_content = self.create_text_content(text=f"PDFファイル: {file_path} の内容を以下に示します。")
         pdf_contents = [page_info_content]
         # PDFからテキストと画像を抽出
         pdf_elements = pdf_util.extract_pdf_content(file_path)
@@ -180,8 +182,8 @@ class LLMClient(ABC):
         )
         # 元ファイルからPDFに変換した旨の説明を追加
         explanation_text = f"""
-            {os.path.basename(temp_file_path)}は、元のOfficeドキュメント: {file_path} をPDFに変換したものです。
-            回答を行う際のファイル名は、元のファイル名を使用してください。
+            {temp_file_path}は、元のOfficeドキュメント: {file_path} をPDFに変換したものです。
+            ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
             """
         explanation_content = self.create_text_content(text=explanation_text)
         pdf_contents = [explanation_content]
@@ -293,8 +295,10 @@ class LLMClient(ABC):
         pdf_content_list = []
         for file_path in file_list:
             if self.llm_config.use_custom_pdf_analyzer:
+                logger.info(f"Using custom PDF analyzer for file: {file_path}")
                 pdf_content = self.create_custom_pdf_contents_from_file(file_path, detail)
             else:
+                logger.info(f"Using standard PDF analyzer for file: {file_path}")
                 pdf_content = self.create_pdf_content_from_file(file_path)
             pdf_content_list.extend(pdf_content)
 
@@ -445,7 +449,7 @@ class LLMClient(ABC):
             
         chat_response_tuples: list[tuple[int, ChatResponse]] = []
 
-        sem = asyncio.Semaphore(16)
+        sem = asyncio.Semaphore(self.concurrency_limit)
 
         async def __run_one__(i: int, message: ChatMessage) -> tuple[int, ChatResponse]:
             async with sem:

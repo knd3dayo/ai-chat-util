@@ -56,20 +56,21 @@ class ChatHistory(BaseModel):
         self.messages.append(message)
         logger.debug(f"Message added: {message.role}: {message.content}")
 
-    def get_last_message(self) -> Optional["ChatMessage"]:
+    def get_last_message(self, role: str = "") -> Optional["ChatMessage"]:
         """
         Get the last ChatMessage in the messages list.
         
         Returns:
             Optional[ChatMessage]: The last chat message or None if no messages exist.
         """
-        if self.messages:
-            last_message = self.messages[-1]
-            logger.debug(f"Last message retrieved: {last_message}")
-            return last_message
-        else:
+        if not self.messages:
             logger.debug("No messages found.")
             return None
+
+        last_message = self.messages[-1]
+        logger.debug(f"Last message retrieved: {last_message}")
+
+        return last_message
 
     def update_last_message(self, message: "ChatMessage") -> None:
         """
@@ -99,7 +100,7 @@ class ChatHistory(BaseModel):
         user_messages = [msg for msg in self.messages[last_assistant_index + 1:] if msg.role == self.user_role_name]
         logger.debug(f"User messages retrieved: {len(user_messages)} messages found.")
         return user_messages
-    
+
 
 class ChatResponse(BaseModel):
     output: str = Field(default="", description="The output text from the chat model.")

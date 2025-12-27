@@ -105,6 +105,35 @@ uv run -m ai_chat_util.cli --help
 uv run -m ai_chat_util.cli chat -p "こんにちは"
 ```
 
+#### batch_chat（Excel入力のバッチチャット）
+
+Excel の各行（`content` / `file_path`）を読み込み、指定した `prompt` を前置して LLM に送信し、
+応答を `output` 列（既定）に書き込んだ Excel を出力します。
+
+```bash
+uv run -m ai_chat_util.cli batch_chat \
+  -i data/input.xlsx \
+  -p "要約してください" \
+  -o output.xlsx
+```
+
+入力Excelの列（既定）:
+
+- `content`: 行ごとのテキスト（空でも可）
+- `file_path`: 解析対象ファイルのパス（空でも可。存在しない場合は無視）
+
+> 注意: 入力Excelは `content` / `file_path` の **どちらか少なくとも1列** を含む必要があります。
+
+主要オプション:
+
+- `-i/--input_excel_path` : 入力Excelファイルパス（必須）
+- `-o/--output_excel_path` : 出力Excelファイルパス（既定: `output.xlsx`）
+- `--concurrency` : 同時実行数（既定: 16）
+- `--content_column` : メッセージ列名（既定: `content`）
+- `--file_path_column` : ファイルパス列名（既定: `file_path`）
+- `--output_column` : LLM応答の出力列名（既定: `output`）
+- `--image_detail` : 画像解析の detail（low/high/auto、既定: auto）
+
 #### analyze_image_files（画像解析）
 
 ```bash
@@ -220,4 +249,3 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
 ```
 
 > `.env` を使う場合は、上記 `env` は不要（または最小限）です。
-

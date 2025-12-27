@@ -6,14 +6,14 @@ async def main():
     llm_config = LLMConfig()
     client = LLMClient.create_llm_client(llm_config)
 
-    batch = LLMBatchClient(client)
+    batch = LLMBatchClient()
     prompt = "英語に翻訳してください"
     messages = [
         "今日はどんな日？",
         "明日の天気は？",
         "今週のニュースを教えて"
     ]
-    results = await batch.run(prompt, messages, agent_mode=False, concurrency=3)
+    results = await batch.run_simple_batch_chat(prompt, messages, concurrency=3)
     for r in results:
         print(r)
 

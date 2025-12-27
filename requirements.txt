@@ -1,5 +1,7 @@
 python-dotenv
 pydantic
+pandas
+openpyxl
 
 # For OpenAI
 openai

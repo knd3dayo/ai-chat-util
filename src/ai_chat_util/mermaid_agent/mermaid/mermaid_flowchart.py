@@ -1,6 +1,6 @@
 import re
-from ai_chat_util.mermaid_agent.workflow.flowchat import GraphNode, GraphEdge, Subgraph
-from ai_chat_util.mermaid_agent.workflow.flowchat import Flowchart
+from ai_chat_util.mermaid_agent.workflow.flowchart import GraphNode, GraphEdge, Subgraph
+from ai_chat_util.mermaid_agent.workflow.flowchart import Flowchart
 
 class MermaidFlowChart(Flowchart):
 

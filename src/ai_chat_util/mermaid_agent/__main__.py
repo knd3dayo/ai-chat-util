@@ -1,10 +1,10 @@
 import asyncio
 import argparse
 import os
-from mermaid_workflow.workflow.runner import WorkflowRunner
-from mermaid_workflow.mermaid.mermaid_flowchart import MermaidFlowChart
+from ai_chat_util.mermaid_agent.workflow.runner import WorkflowRunner
+from ai_chat_util.mermaid_agent.mermaid.mermaid_flowchart import MermaidFlowChart 
 
-from mermaid_workflow.log.log_settings import getLogger
+from ai_chat_util.log.log_settings import getLogger
 logger = getLogger(__name__)
 
 async def async_main():

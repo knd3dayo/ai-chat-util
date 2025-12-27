@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from agent_framework import WorkflowBuilder,AgentRunUpdateEvent
 from agent_framework import ChatAgent, AgentExecutorResponse
 from ai_chat_util.mermaid_agent.util.agent_util import MSAIAgentUtil,  AppConfig
-from ai_chat_util.mermaid_agent.workflow.flowchat import GraphNode, Flowchart
+from ai_chat_util.mermaid_agent.workflow.flowchart import GraphNode, Flowchart
 import ai_chat_util.mermaid_agent.log.log_settings as log_settings
 from contextlib import AsyncExitStack
 logger = log_settings.getLogger(__name__)

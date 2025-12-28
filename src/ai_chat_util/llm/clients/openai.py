@@ -29,6 +29,15 @@ class OpenAIClient(LLMClient):
     ) -> "LLMClient":
         return OpenAIClient(llm_config, chat_history, request_context)
 
+    def get_user_role_name(self) -> str:
+        return "user"
+
+    def get_assistant_role_name(self) -> str:
+        return "assistant"
+
+    def get_system_role_name(self) -> str:
+        return "system"
+
     async def _chat_completion_(self,  **kwargs) -> ChatResponse:
         message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
         response = await self.client.chat.completions.create(
@@ -36,9 +45,12 @@ class OpenAIClient(LLMClient):
             messages=message_dict_list,
             **kwargs
         )
+        input_tokens = getattr(response.usage, "prompt_tokens", 0)
+        output_tokens = getattr(response.usage, "completion_tokens", 0)
         return ChatResponse(
             output=response.choices[0].message.content or "",
-            total_tokens=response.usage.total_tokens
+            input_tokens=input_tokens,
+            output_tokens=output_tokens
             )
 
     def _is_text_content_(self, content: ChatContent) -> bool:
@@ -93,4 +105,10 @@ class AzureOpenAIClient(OpenAIClient):
             messages=message_dict_list,
             **kwargs
         )
-        return ChatResponse(output=response.choices[0].message.content or "")
+        input_tokens = getattr(response.usage, "prompt_tokens", 0)
+        output_tokens = getattr(response.usage, "completion_tokens", 0)
+        return ChatResponse(
+            output=response.choices[0].message.content or "",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens
+            )

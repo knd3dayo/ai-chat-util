@@ -16,15 +16,14 @@
 - 対話型のAIチャットを実現。
 - LLM（大規模言語モデル）との自然な会話をサポート。
 - コンテキストを保持した継続的な会話が可能。
-- OpenAI、Azure OpenAIのみ対応
+- OpenAI / Azure OpenAI / Anthropic をサポート（`LLM_PROVIDER` で切り替え）
 
 ### ⚙️ バッチクライアント
 - 複数の入力をまとめてAIに処理させるバッチ実行機能。
-- 自動化スクリプトやデータ処理パイプラインに組み込みやすい設計。
 
 ### 🖼️ 画像・PDF・Office解析
 - 画像ファイル、PDFファイル、Officeドキュメント（Word, Excel, PowerPointなど）をAIに渡して内容を解析。
-- 画像認識、文書要約、表データ抽出などの高度な処理をサポート。
+- 画像認識、文書要約、表データ抽出などの処理をサポート。
 
 ### 🧩 MCPサーバー連携
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
@@ -56,24 +55,56 @@ uv sync
 このプロジェクトでは、`.env` ファイルを使用して環境変数を管理します。  
 `.env_template` を参考に `.env` ファイルを作成してください。
 
-例：
+`.env_template` の内容に沿って設定してください（OpenAI / Azure OpenAI / Anthropic）。
 
-```
+例（OpenAI）：
+
+```dotenv
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_api_key_here
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_COMPLETION_MODEL=gpt-5
-LIBREOFFICE_PATH=C:\\Program Files\\LibreOffice\\program\\soffice.exe
+OPENAI_BASE_URL=https://api.openai.com/v1/
+
+# PDFを直接送らず、抽出したテキスト＋画像で解析したい場合
+USE_CUSTOM_PDF_ANALYZER=true
+
+# Office解析（Office→PDF変換）に必要
+LIBREOFFICE_PATH="c:\Program Files\LibreOffice\program\soffice.exe"
+
+```
+
+例（Azure OpenAI）：
+
+```dotenv
+LLM_PROVIDER=azure_openai
+OPENAI_API_KEY=your_api_key_here
+OPENAI_COMPLETION_MODEL=gpt-5
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_ENDPOINT=https://your-azure-openai-endpoint/
+```
+
+例（Anthropic）：
+
+```dotenv
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_api_key_here
+ANTHROPIC_COMPLETION_MODEL=claude-sonnet-4-5-20250929
 ```
 
 ### 主な環境変数の説明
 
 | 変数名 | 説明 |
-|--------|------|
-| `LLM_PROVIDER` | 使用するLLMプロバイダ（例: openai） |
-| `OPENAI_API_KEY` | OpenAI APIキー |
-| `OPENAI_EMBEDDING_MODEL` | 埋め込みモデル名 |
-| `OPENAI_COMPLETION_MODEL` | テキスト生成モデル名 |
+| `LLM_PROVIDER` | 使用するLLMプロバイダ（`openai` / `azure_openai` / `anthropic`） |
+| `OPENAI_API_KEY` | OpenAI / Azure OpenAI のAPIキー |
+| `OPENAI_COMPLETION_MODEL` | OpenAI / Azure OpenAI のテキスト生成モデル名 |
+| `OPENAI_BASE_URL` | OpenAI互換APIのベースURL（任意） |
+| `AZURE_OPENAI_API_VERSION` | Azure OpenAI のAPIバージョン（`LLM_PROVIDER=azure_openai` のとき） |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI のエンドポイントURL（`LLM_PROVIDER=azure_openai` のとき） |
+| `ANTHROPIC_API_KEY` | Anthropic のAPIキー（`LLM_PROVIDER=anthropic` のとき） |
+| `ANTHROPIC_COMPLETION_MODEL` | Anthropic のテキスト生成モデル名 |
+| `USE_CUSTOM_PDF_ANALYZER` | `true` の場合、PDFを直接送らず、抽出したテキスト＋画像で解析します |
+| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（Office→PDF変換に使用） |
+| `HOST_PORT` | SSE/HTTP起動時に利用するホスト側公開ポート（docker-compose.yml と合わせる） |
 | `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（例: C:\\Program Files\\LibreOffice\\program\\soffice.exe） |
 
 ---
@@ -239,13 +270,11 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
       "env": {
         "LLM_PROVIDER": "openai",
         "OPENAI_API_KEY": "sk-****",
-        "OPENAI_COMPLETION_MODEL": "gpt-4.1",
-        "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
-        "USE_CUSTOM_PDF_ANALYZER": "true"
+        "OPENAI_COMPLETION_MODEL": "gpt-5",
+        "USE_CUSTOM_PDF_ANALYZER": "true",
+        "LIBREOFFICE_PATH": "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
       }
     }
   }
 }
 ```
-
-> `.env` を使う場合は、上記 `env` は不要（または最小限）です。

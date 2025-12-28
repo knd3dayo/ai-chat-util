@@ -19,7 +19,7 @@ class LLMBatchClient:
 
         if not chat_history.messages:
             # メッセージが空の場合はスキップして空のレスポンスを返す
-            chat_response = ChatResponse(output="", total_tokens=0, documents=[])
+            chat_response = ChatResponse(output="", input_tokens=0, output_tokens=0, documents=[])
             result_chat_history = chat_history
         else:
             llm_client = LLMFactory.create_llm_client(chat_history=chat_history)
@@ -31,23 +31,23 @@ class LLMBatchClient:
 
 
     async def run_batch_chat(
-            self, messages: list[ChatHistory], concurrency: int = 5
+            self, chat_histories: list[ChatHistory], concurrency: int = 5
             ) -> list[tuple[int, ChatResponse, ChatHistory]]:
         '''
         指定されたメッセージリストに対して、指定されたプロンプトを用いてバッチ処理を行う。
         '''
-        progress = tqdm_asyncio(total=len(messages), desc="progress")
+        progress = tqdm_asyncio(total=len(chat_histories), desc="progress")
         # 進捗バーのフォーマット
         progress.bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 
         sem = asyncio.Semaphore(concurrency)
 
-        async def _run_one(i: int, msg: ChatHistory):
+        async def _run_one(i: int, chat_history: ChatHistory):
             # Semaphore is effective only when each task acquires it.
             async with sem:
-                return await self._process_row_(i, msg, progress)
+                return await self._process_row_(i, chat_history, progress)
 
-        tasks = [asyncio.create_task(_run_one(i, msg)) for i, msg in enumerate(messages)]
+        tasks = [asyncio.create_task(_run_one(i, chat_history)) for i, chat_history in enumerate(chat_histories)]
 
         try:
             responses = await asyncio.gather(*tasks)

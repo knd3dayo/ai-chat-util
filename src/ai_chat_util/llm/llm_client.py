@@ -37,6 +37,18 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
+    def get_user_role_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_assistant_role_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_system_role_name(self) -> str:
+        pass
+
+    @abstractmethod
     async def _chat_completion_(self, **kwargs) ->  ChatResponse:
         pass
 
@@ -352,7 +364,7 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         chat_message = ChatMessage(
-            role=ChatHistory.user_role_name,
+            role=self.get_user_role_name(),
             content=[self.create_text_content(prompt)]
         )
         response = await self.chat([chat_message], request_context=None)
@@ -394,7 +406,7 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         if len(chat_message_list) == 0:
-            chat_messages = self.chat_history.get_last_user_messages()
+            chat_messages = self.chat_history.get_last_role_messages(self.get_user_role_name())
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
@@ -405,7 +417,7 @@ class LLMClient(ABC):
         chat_response =  await self._chat_completion_(**kwargs)
         text_content = self.create_text_content(chat_response.output)
         self.chat_history.add_message(ChatMessage(
-            role=ChatHistory.assistant_role_name,
+            role=self.get_assistant_role_name(),
             content=[text_content]
         ))
         return chat_response
@@ -423,7 +435,7 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         if len(chat_message_list) == 0:
-            chat_messages = self.chat_history.get_last_user_messages()
+            chat_messages = self.chat_history.get_last_role_messages(self.get_user_role_name())
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
@@ -476,7 +488,7 @@ class LLMClient(ABC):
 
         text_content = self.create_text_content(postprocessed_response.output)
         response_message = ChatMessage(
-            role=ChatHistory.assistant_role_name,
+            role=self.get_assistant_role_name(),
             content=[text_content]
         )
         self.chat_history.add_message(response_message)
@@ -546,7 +558,7 @@ class LLMClient(ABC):
             split_contents = [self.create_text_content(f"{request_context.prompt_template_text}\n{split_text}")]
             for split_content in split_contents:
                 chat_message = ChatMessage(
-                    role=ChatHistory.user_role_name,
+                    role=self.get_user_role_name(),
                     content=[split_content]
                 )
                 # textタイプ以外のcontentを追加する
@@ -653,7 +665,7 @@ class LLMClient(ABC):
         client = self.create(self.llm_config, request_context=request_context)
         text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
-            role=ChatHistory.user_role_name,
+            role=self.get_user_role_name(),
             content=[text_content]
         )
         summarize_response = await client.chat([message])

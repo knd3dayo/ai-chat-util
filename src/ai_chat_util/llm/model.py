@@ -33,83 +33,6 @@ class ChatRequestContext(BaseModel):
     # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
 
-class ChatHistory(BaseModel):
-
-    messages: list[Any] = Field(default=[], description="List of chat messages in the conversation.")
-    model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
-    
-    # option fields
-    temperature: Optional[float] = Field(default=0.7, description="Sampling temperature for the model.")
-    response_format: Optional[dict] = Field(default=None, description="Format of the response from the model.")
-    
-    user_role_name: ClassVar[str]  = "user"
-    assistant_role_name: ClassVar[str]  = "assistant"
-    system_role_name: ClassVar[str]  = "system"
-
-    def add_message(self, message: "ChatMessage") -> None:
-        """
-        Add a ChatMessage to the messages list.
-        
-        Args:
-            message (ChatMessage): The chat message to add.
-        """
-        self.messages.append(message)
-        logger.debug(f"Message added: {message.role}: {message.content}")
-
-    def get_last_message(self, role: str = "") -> Optional["ChatMessage"]:
-        """
-        Get the last ChatMessage in the messages list.
-        
-        Returns:
-            Optional[ChatMessage]: The last chat message or None if no messages exist.
-        """
-        if not self.messages:
-            logger.debug("No messages found.")
-            return None
-
-        last_message = self.messages[-1]
-        logger.debug(f"Last message retrieved: {last_message}")
-
-        return last_message
-
-    def update_last_message(self, message: "ChatMessage") -> None:
-        """
-        Update the last ChatMessage in the messages list.
-        
-        Args:
-            message (ChatMessage): The new chat message to replace the last one.
-        """
-        if self.messages:
-            self.messages[-1] = message
-            logger.debug(f"Last message updated to: {message.role}: {message.content}")
-        else:
-            logger.debug("No messages to update.")
-
-    def get_last_user_messages(self) -> list["ChatMessage"]:
-        """
-        Get all ChatMessages with role 'user' in the messages after the last assistant message.
-        
-        Returns:
-            list[ChatMessage]: List of chat messages with role 'user'.
-        """
-        last_assistant_index = -1
-        for i in range(len(self.messages) - 1, -1, -1):
-            if self.messages[i].role == self.assistant_role_name:
-                last_assistant_index = i
-                break
-        user_messages = [msg for msg in self.messages[last_assistant_index + 1:] if msg.role == self.user_role_name]
-        logger.debug(f"User messages retrieved: {len(user_messages)} messages found.")
-        return user_messages
-
-
-class ChatResponse(BaseModel):
-    output: str = Field(default="", description="The output text from the chat model.")
-    total_tokens: int = Field(default=0, description="The total number of tokens used in the chat interaction.")
-    documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")
-
-
-
-from typing import Any
 
 class ChatContent(BaseModel):
     params: dict[str, Any] = Field(default={}, description="Parameters of the chat content.")
@@ -117,7 +40,6 @@ class ChatContent(BaseModel):
             base = super().model_dump(*args, **kwargs)
             # paramsを展開
             return {**{k: v for k, v in base.items() if k != "params"}, **self.params}
-
 
 class ChatMessage(BaseModel):
     role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
@@ -169,3 +91,75 @@ class ChatMessage(BaseModel):
             logger.debug(f"Last content updated to: {chat_content}")
         else:
             logger.debug("No content to update.")
+
+
+class ChatHistory(BaseModel):
+
+    messages: list[Any] = Field(default=[], description="List of chat messages in the conversation.")
+    model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
+    
+    # option fields
+    temperature: Optional[float] = Field(default=0.7, description="Sampling temperature for the model.")
+    response_format: Optional[dict] = Field(default=None, description="Format of the response from the model.")
+
+    def add_message(self, message: "ChatMessage") -> None:
+        """
+        Add a ChatMessage to the messages list.
+        
+        Args:
+            message (ChatMessage): The chat message to add.
+        """
+        self.messages.append(message)
+        logger.debug(f"Message added: {message.role}: {message.content}")
+
+    def get_last_message(self) -> Optional["ChatMessage"]:
+        """
+        Get the last ChatMessage in the messages list.
+        
+        Returns:
+            Optional[ChatMessage]: The last chat message or None if no messages exist.
+        """
+        if not self.messages:
+            logger.debug("No messages found.")
+            return None
+
+        last_message = self.messages[-1]
+        logger.debug(f"Last message retrieved: {last_message}")
+
+        return last_message
+
+    def update_last_message(self, message: "ChatMessage") -> None:
+        """
+        Update the last ChatMessage in the messages list.
+        
+        Args:
+            message (ChatMessage): The new chat message to replace the last one.
+        """
+        if self.messages:
+            self.messages[-1] = message
+            logger.debug(f"Last message updated to: {message.role}: {message.content}")
+        else:
+            logger.debug("No messages to update.")
+
+    def get_last_role_messages(self, role: str) -> list["ChatMessage"]:
+        """
+        Get all ChatMessages with role 'user' in the messages after the last assistant message.
+        
+        Returns:
+            list[ChatMessage]: List of chat messages with role 'user'.
+        """
+        last_role_index = -1
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role != role:
+                last_role_index = i
+                break
+        role_messages = [msg for msg in self.messages[last_role_index + 1:] if msg.role == role]
+        logger.debug(f"{role.capitalize()} messages retrieved: {len(role_messages)} messages found.")
+        return role_messages
+
+class ChatResponse(BaseModel):
+    output: str = Field(default="", description="The output text from the chat model.")
+    input_tokens: int = Field(default=0, description="The number of tokens in the input to the model.")
+    output_tokens: int = Field(default=0, description="The number of tokens in the model's output.")
+
+    documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")

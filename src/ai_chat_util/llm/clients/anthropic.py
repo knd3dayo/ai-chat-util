@@ -1,7 +1,8 @@
 import base64
+from typing import Optional
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel
+from ai_chat_util.llm.model import ChatResponse, ChatContent, ChatRequest
 
 from anthropic import AsyncAnthropic
 
@@ -9,19 +10,17 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class AnthropicClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest = ChatRequest()):
 
         self.client = AsyncAnthropic(api_key=llm_config.api_key)
         self.model = llm_config.completion_model
-        self.chat_history = chat_history
-        self.request_context = request_context
+        self.chat_request = chat_request
     
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
+        chat_request: ChatRequest = ChatRequest()
     ) -> "LLMClient":
-        return AnthropicClient(llm_config, chat_history, request_context)  
+        return AnthropicClient(llm_config, chat_request)  
     
     
     def get_user_role_name(self) -> str:
@@ -34,8 +33,8 @@ class AnthropicClient(LLMClient):
         return "system"
 
     async def _chat_completion_(self,  **kwargs) -> ChatResponse:
-
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
+        messages = self.chat_request.chat_history.messages
+        message_dict_list = [msg.model_dump() for msg in messages]
 
         # Invoke the model with the request.
         logger.debug(f"Anthropic Chat Completion Request: {message_dict_list}, Model: {self.model}, Kwargs: {kwargs}")

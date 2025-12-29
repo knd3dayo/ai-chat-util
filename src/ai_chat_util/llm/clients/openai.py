@@ -4,14 +4,14 @@ from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel, ChatRequest
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest = ChatRequest()):
         if llm_config.base_url:
             self.client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         else:
@@ -19,15 +19,13 @@ class OpenAIClient(LLMClient):
 
         self.model = llm_config.completion_model
 
-        self.chat_history = chat_history
-        self.request_context = request_context
+        self.chat_request = chat_request
 
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
+        chat_request: ChatRequest = ChatRequest()
     ) -> "LLMClient":
-        return OpenAIClient(llm_config, chat_history, request_context)
+        return OpenAIClient(llm_config, chat_request)
 
     def get_user_role_name(self) -> str:
         return "user"
@@ -39,9 +37,10 @@ class OpenAIClient(LLMClient):
         return "system"
 
     async def _chat_completion_(self,  **kwargs) -> ChatResponse:
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
+        messages = self.chat_request.chat_history.messages
+        message_dict_list = [msg.model_dump() for msg in messages]
         response = await self.client.chat.completions.create(
-            model=self.chat_history.model,
+            model=self.chat_request.chat_history.model,
             messages=message_dict_list,
             **kwargs
         )
@@ -76,7 +75,7 @@ class OpenAIClient(LLMClient):
 
 
 class AzureOpenAIClient(OpenAIClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_reqquest: ChatRequest = ChatRequest()):
         if llm_config.base_url:
             self.client = AsyncAzureOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         elif llm_config.api_version and llm_config.endpoint:
@@ -86,22 +85,18 @@ class AzureOpenAIClient(OpenAIClient):
 
         self.model = llm_config.completion_model
 
-        self.chat_history = chat_history
-        self.request_context = request_context
-
 
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
+        chat_request: ChatRequest = ChatRequest()
     ) -> "LLMClient":
-        return AzureOpenAIClient(llm_config, chat_history, request_context)
+        return AzureOpenAIClient(llm_config, chat_request)
 
     async def _chat_completion_(self, **kwargs) -> ChatResponse:
         
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
+        message_dict_list = [msg.model_dump() for msg in self.chat_request.chat_history.messages]
         response = await self.client.chat.completions.create(
-            model=self.chat_history.model,
+            model=self.chat_request.chat_history.model,
             messages=message_dict_list,
             **kwargs
         )

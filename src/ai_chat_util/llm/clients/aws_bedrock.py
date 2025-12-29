@@ -3,7 +3,7 @@ import json
 
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel, ChatRequest
 
 import boto3
 
@@ -12,7 +12,7 @@ logger = log_settings.getLogger(__name__)
 
 
 class AWSBedrockClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest = ChatRequest()):
         params = {"service_name": 'bedrock-runtime', "region_name": llm_config.region_name}
 
         # アクセスキーとシークレットキーが設定されている場合のパラメーター
@@ -25,15 +25,13 @@ class AWSBedrockClient(LLMClient):
         )
 
         self.model = llm_config.completion_model
-        self.chat_history = chat_history
-        self.request_context = request_context
+        self.chat_request = chat_request
 
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
+        chat_request: ChatRequest = ChatRequest()
     ) -> "LLMClient":
-        return AWSBedrockClient(llm_config, chat_history, request_context)
+        return AWSBedrockClient(llm_config, chat_request)
 
     def get_user_role_name(self) -> str:
         return "user"
@@ -45,8 +43,8 @@ class AWSBedrockClient(LLMClient):
         return "system"
 
     async def _chat_completion_(self,  **kwargs) -> ChatResponse:
-
-        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
+        messages = self.chat_request.chat_history.messages
+        message_dict_list = [msg.model_dump() for msg in messages]
 
 
         native_request = {

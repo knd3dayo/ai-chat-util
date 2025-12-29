@@ -4,7 +4,7 @@ from tqdm.asyncio import tqdm_asyncio
 
 from ai_chat_util.llm.llm_factory import LLMFactory
 
-from ai_chat_util.llm.model import ChatMessage, ChatResponse, ChatHistory, ChatContent
+from ai_chat_util.llm.model import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 
 import pandas as pd
 
@@ -22,9 +22,10 @@ class LLMBatchClient:
             chat_response = ChatResponse(output="", input_tokens=0, output_tokens=0, documents=[])
             result_chat_history = chat_history
         else:
-            llm_client = LLMFactory.create_llm_client(chat_history=chat_history)
+            chat_request = ChatRequest(chat_history=chat_history)
+            llm_client = LLMFactory.create_llm_client(chat_request=chat_request)
             chat_response = await llm_client.chat()
-            result_chat_history = llm_client.chat_history
+            result_chat_history = llm_client.chat_request.chat_history
 
         progress.update(1)  # Update progress after processing the row
         return (row_num, chat_response, result_chat_history)

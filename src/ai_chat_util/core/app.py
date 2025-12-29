@@ -23,9 +23,7 @@ async def run_chat(
     """
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
-    if chat_request.chat_request_context is None:
-        chat_request.chat_request_context = ChatRequestContext()
-    client = LLMFactory.create_llm_client(LLMConfig(), chat_request.chat_history, chat_request.chat_request_context)
+    client = LLMFactory.create_llm_client(LLMConfig(), chat_request)
     return await client.chat()
 
 async def run_simple_batch_chat(

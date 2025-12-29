@@ -160,8 +160,8 @@ class ChatRequestContext(BaseModel):
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
 
 class ChatRequest(BaseModel):
-    chat_history: ChatHistory = Field(default_factory=ChatHistory, description="The chat history for the request.")
-    chat_request_context: ChatRequestContext = Field(default_factory=ChatRequestContext, description="The context for the chat request.")
+    chat_history: ChatHistory = Field(default=ChatHistory(), description="The chat history for the request.")
+    chat_request_context: Optional[ChatRequestContext] = Field(default=ChatRequestContext(), description="The context for the chat request.")
 
 class ChatResponse(BaseModel):
     output: str = Field(default="", description="The output text from the chat model.")

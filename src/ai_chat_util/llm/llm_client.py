@@ -1,19 +1,18 @@
 # 抽象クラス
 from abc import ABC, abstractmethod
+from typing import Optional
 import os
 import uuid
 import copy
 import tiktoken
 import asyncio
-import base64
 import tempfile
 import atexit
 import requests
 
-from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel, ChatRequest
 from ai_chat_util.util.office2pdf import Office2PDFUtil
 from file_util.model import DocumentType
 
@@ -22,17 +21,15 @@ logger = log_settings.getLogger(__name__)
 
 class LLMClient(ABC):
 
-
     llm_config: LLMConfig = LLMConfig()
-    chat_history: ChatHistory = ChatHistory()
+    chat_request: ChatRequest = ChatRequest()
 
     concurrency_limit: int = 16
     
     @abstractmethod
     def create(
         cls, llm_config: LLMConfig = LLMConfig(), 
-        chat_history: ChatHistory = ChatHistory(), 
-        request_context: ChatRequestContext = ChatRequestContext()
+        chat_request: ChatRequest = ChatRequest()
     ) -> "LLMClient":
         pass
 
@@ -275,7 +272,8 @@ class LLMClient(ABC):
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
     async def analyze_image_urls(self, image_url_list: list[RequestModel], prompt: str, detail: str) -> ChatResponse:
@@ -289,7 +287,8 @@ class LLMClient(ABC):
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
 
@@ -311,7 +310,8 @@ class LLMClient(ABC):
             pdf_content_list.extend(pdf_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
     async def analyze_office_files(
@@ -332,7 +332,8 @@ class LLMClient(ABC):
         prompt_content = self.create_text_content(text=prompt)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
-        response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        response: ChatResponse = await self.chat(chat_request)
         return response
 
     async def analyze_files(
@@ -350,7 +351,8 @@ class LLMClient(ABC):
 
         prompt_content = self.create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
-        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
     async def simple_chat(self, prompt: str) -> str:
@@ -367,11 +369,14 @@ class LLMClient(ABC):
             role=self.get_user_role_name(),
             content=[self.create_text_content(prompt)]
         )
-        response = await self.chat([chat_message], request_context=None)
+        chat_history = ChatHistory()
+        chat_history.add_message(chat_message)
+        
+        response = await self.chat(ChatRequest(chat_history=chat_history, chat_request_context=None))
         return response.output
 
     async def chat(
-            self, chat_message_list: list[ChatMessage] = [], request_context: ChatRequestContext|None = None, **kwargs
+            self, chat_request: Optional[ChatRequest] = None, **kwargs
             ) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
@@ -384,13 +389,15 @@ class LLMClient(ABC):
         Returns:
             CompletionResponse: LLMからの応答
         '''
-        if request_context:
+        if chat_request is None:
+            chat_request = self.chat_request
+        if chat_request.chat_request_context:
             return await self.__chat_with_request_context__(
-                chat_message_list, request_context, **kwargs
+                chat_request.chat_history.messages, chat_request.chat_request_context, **kwargs
             )
         else:
             return await self.__normal_chat__(
-                chat_message_list, **kwargs
+                chat_request.chat_history.messages, **kwargs
             )   
 
     async def __normal_chat__(self, chat_message_list: list[ChatMessage] = [], **kwargs) -> ChatResponse:
@@ -406,17 +413,17 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         if len(chat_message_list) == 0:
-            chat_messages = self.chat_history.get_last_role_messages(self.get_user_role_name())
+            chat_messages = self.chat_request.chat_history.get_last_role_messages(self.get_user_role_name())
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
             chat_messages = chat_message_list
 
         for chat_message in chat_messages:
-            self.chat_history.add_message(chat_message)
+            self.chat_request.chat_history.add_message(chat_message)
         chat_response =  await self._chat_completion_(**kwargs)
         text_content = self.create_text_content(chat_response.output)
-        self.chat_history.add_message(ChatMessage(
+        self.chat_request.chat_history.add_message(ChatMessage(
             role=self.get_assistant_role_name(),
             content=[text_content]
         ))
@@ -435,7 +442,7 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         if len(chat_message_list) == 0:
-            chat_messages = self.chat_history.get_last_role_messages(self.get_user_role_name())
+            chat_messages = self.chat_request.chat_history.get_last_role_messages(self.get_user_role_name())
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
@@ -448,10 +455,11 @@ class LLMClient(ABC):
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message__(message_num: int, message: ChatMessage) -> tuple[int, ChatResponse]:
+            chat_request: ChatRequest = ChatRequest(chat_history=copy.deepcopy(self.chat_request.chat_history), chat_request_context=request_context)
             client = self.create(
-                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
+                self.llm_config, chat_request=chat_request)
             
-            client.chat_history.add_message(message)
+            client.chat_request.chat_history.add_message(message)
             chat_response =  await client._chat_completion_(**kwargs)
             return (message_num, chat_response)
             
@@ -471,11 +479,10 @@ class LLMClient(ABC):
         chat_responses = [t[1] for t in chat_response_tuples]
 
         for preprocessed_message in preprocessed_messages:
-            # 
+            chat_request = ChatRequest(chat_history=ChatHistory(messages=[preprocessed_message]), chat_request_context=request_context)
             client = self.create(
-                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
+                self.llm_config, chat_request=chat_request)
             
-            client.chat_history.add_message(preprocessed_message)
             chat_response =  await client._chat_completion_(**kwargs)
             chat_responses.append(chat_response)
 
@@ -484,14 +491,15 @@ class LLMClient(ABC):
 
         # chat_historyにpreprocessed_messageとpostprocessed_responseを追加する
         for preprocessed_message in preprocessed_messages:
-            self.chat_history.add_message(preprocessed_message)
+            
+            self.chat_request.chat_history.add_message(preprocessed_message)
 
         text_content = self.create_text_content(postprocessed_response.output)
         response_message = ChatMessage(
             role=self.get_assistant_role_name(),
             content=[text_content]
         )
-        self.chat_history.add_message(response_message)
+        self.chat_request.chat_history.add_message(response_message)
 
         return postprocessed_response
     
@@ -661,13 +669,14 @@ class LLMClient(ABC):
             split_mode=ChatRequestContext.split_mode_name_none,
             summarize_prompt_text=request_context.summarize_prompt_text
         )
-
-        client = self.create(self.llm_config, request_context=request_context)
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(), chat_request_context=request_context)
+        client = self.create(self.llm_config, chat_request=chat_request)
         text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
             role=self.get_user_role_name(),
             content=[text_content]
         )
-        summarize_response = await client.chat([message])
+        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[message]), chat_request_context=None)
+        summarize_response = await client.chat(chat_request)
         return summarize_response
 

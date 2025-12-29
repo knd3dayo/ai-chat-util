@@ -2,7 +2,7 @@ from typing import Annotated
 import os, tempfile
 import atexit
 from pydantic import Field
-from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse, RequestModel
+from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse, RequestModel, ChatRequest
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
@@ -18,15 +18,14 @@ def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to u
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
 async def run_chat(
-        completion_request: Annotated[ChatHistory, Field(description="Completion request object")],
-        request_context: Annotated[ChatRequestContext, Field(description="Chat request context")] = ChatRequestContext()
+        chat_request: Annotated[ChatRequest, Field(description="Chat request object")]
 ) -> Annotated[ChatResponse, Field(description="List of related articles from Wikipedia")]:
     """
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
-    if request_context is None:
-        request_context = ChatRequestContext()
-    client = LLMFactory.create_llm_client(LLMConfig(), completion_request, request_context)
+    if chat_request.chat_request_context is None:
+        chat_request.chat_request_context = ChatRequestContext()
+    client = LLMFactory.create_llm_client(LLMConfig(), chat_request.chat_history, chat_request.chat_request_context)
     return await client.chat()
 
 async def run_simple_batch_chat(

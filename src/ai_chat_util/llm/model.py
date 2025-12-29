@@ -1,7 +1,7 @@
 import base64, os
 # 抽象クラス
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 from typing import ClassVar, Optional, Any
@@ -14,25 +14,7 @@ class RequestModel(BaseModel):
     url: str
     headers: dict[str, Any] = {}
 
-class ChatRequestContext(BaseModel):
-
-    # split_mode
-    split_mode_name_none: ClassVar[str] = "none"
-    split_mode_name_normal: ClassVar[str] = "normal_split"
-    split_mode_name_split_and_summarize: ClassVar[str] = "split_and_summarize"
-
-    # メッセージを分割するモード。分割しない場合は"none"、通常分割は"normal_split"、分割して要約は"split_and_summarize"
-    split_mode: str = Field(default="none", description="Mode to split messages. 'none' for no split, 'normal_split' for normal split, 'split_and_summarize' for split and summarize.")
-    # メッセージ分割する文字数
-    split_message_length: int = Field(default=2000, description="Maximum character count for message splitting.")
-    # 複数画像URLがある場合に、1つのリクエストに含める最大画像数。分割しない場合は0を設定
-    max_images_per_request: int = Field(default=0, description="Maximum number of images to include in a single request. Set to 0 if not splitting.")
-    # SplitAndSummarizeモード時の要約用プロンプトテキスト
-    summarize_prompt_text: str = Field(default="Summarize the content concisely.", description="Prompt text for summarization in SplitAndSummarize mode.")
-    # プロンプトテンプレートテキスト. 分割モードがNone以外の場合に使用. 分割した各メッセージの前に付与する。
-    # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
-    prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
-
+    
 
 class ChatContent(BaseModel):
     params: dict[str, Any] = Field(default={}, description="Parameters of the chat content.")
@@ -156,6 +138,30 @@ class ChatHistory(BaseModel):
         role_messages = [msg for msg in self.messages[last_role_index + 1:] if msg.role == role]
         logger.debug(f"{role.capitalize()} messages retrieved: {len(role_messages)} messages found.")
         return role_messages
+
+class ChatRequestContext(BaseModel):
+
+    # split_mode
+    split_mode_name_none: ClassVar[Literal["none"]] = "none"
+    split_mode_name_normal: ClassVar[Literal["normal_split"]] = "normal_split"
+    split_mode_name_split_and_summarize: ClassVar[Literal["split_and_summarize"]] = "split_and_summarize"
+
+    # メッセージを分割するモード。分割しない場合は"none"、通常分割は"normal_split"、分割して要約は"split_and_summarize"
+    split_mode: Literal["none", "normal_split", "split_and_summarize"] = Field(default="none", description="Mode to split messages. 'none' for no split, 'normal_split' for normal split, 'split_and_summarize' for split and summarize.")
+
+    # メッセージ分割する文字数
+    split_message_length: int = Field(default=2000, description="Maximum character count for message splitting.")
+    # 複数画像URLがある場合に、1つのリクエストに含める最大画像数。分割しない場合は0を設定
+    max_images_per_request: int = Field(default=0, description="Maximum number of images to include in a single request. Set to 0 if not splitting.")
+    # SplitAndSummarizeモード時の要約用プロンプトテキスト
+    summarize_prompt_text: str = Field(default="Summarize the content concisely.", description="Prompt text for summarization in SplitAndSummarize mode.")
+    # プロンプトテンプレートテキスト. 分割モードがNone以外の場合に使用. 分割した各メッセージの前に付与する。
+    # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
+    prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
+
+class ChatRequest(BaseModel):
+    chat_history: ChatHistory = Field(default_factory=ChatHistory, description="The chat history for the request.")
+    chat_request_context: ChatRequestContext = Field(default_factory=ChatRequestContext, description="The context for the chat request.")
 
 class ChatResponse(BaseModel):
     output: str = Field(default="", description="The output text from the chat model.")

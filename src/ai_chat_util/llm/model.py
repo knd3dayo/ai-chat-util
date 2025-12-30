@@ -77,7 +77,7 @@ class ChatMessage(BaseModel):
 
 class ChatHistory(BaseModel):
 
-    messages: list[Any] = Field(default=[], description="List of chat messages in the conversation.")
+    messages: list[ChatMessage] = Field(default=[], description="List of chat messages in the conversation.")
     model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
     
     # option fields

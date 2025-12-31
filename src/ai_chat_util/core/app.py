@@ -15,12 +15,6 @@ def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to u
     use_custom = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
     return use_custom
 
-def get_llm_config() -> Annotated[LLMConfig, Field(description="LLM configuration object")]:
-    """
-    This function returns the LLM configuration object.
-    """
-    return LLMConfig()
-
 def create_chat_history(
         chat_message_list: Annotated[list[ChatMessage], Field(description="List of chat messages to create chat history from")]
 ) -> Annotated[ChatHistory, Field(description="Chat history created from the list of chat messages")]:

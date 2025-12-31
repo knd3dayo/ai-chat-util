@@ -14,17 +14,15 @@ class RequestModel(BaseModel):
     url: str
     headers: dict[str, Any] = {}
 
-    
-
 class ChatContent(BaseModel):
-    params: dict[str, Any] = Field(default={}, description="Parameters of the chat content.")
+    params: dict[str, Any] = Field(..., description="Parameters of the chat content.")
     def model_dump(self, *args, **kwargs):
             base = super().model_dump(*args, **kwargs)
             # paramsを展開
             return {**{k: v for k, v in base.items() if k != "params"}, **self.params}
 
 class ChatMessage(BaseModel):
-    role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
+    role: str = Field(..., description="The role of the message sender (e.g., 'user', 'assistant').")
     content: list[ChatContent] = Field(..., description="The content of the message, which can be text or other types.")
 
     # model_dump をオーバーライドして content を展開する

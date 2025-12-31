@@ -1,7 +1,16 @@
 from fastapi import APIRouter, FastAPI
 from ai_chat_util.core.app import (
     use_custom_pdf_analyzer,
+    create_user_message,
+    create_system_message,
+    create_assistant_message,
+    create_text_content,
+    create_pdf_content_from_file,
+    create_image_content_from_file,
+    create_office_content_from_file,
+    create_multi_format_contents_from_file,
     run_chat,
+    run_simple_chat,
     run_batch_chat,
     run_simple_batch_chat,
     run_batch_chat_from_excel,
@@ -20,8 +29,27 @@ app = FastAPI()
 
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
 
+# chat_utilのcreate_user_messageを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_user_message", endpoint=create_user_message, methods=["POST"])
+# chat_utilのcreate_system_messageを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_system_message", endpoint=create_system_message, methods=["POST"])
+# chat_utilのcreate_assistant_messageを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_assistant_message", endpoint=create_assistant_message, methods=["POST"])
+# chat_utilのcreate_text_contentを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_text_content", endpoint=create_text_content, methods=["POST"])
+# chat_utilのcreate_pdf_content_from_fileを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_pdf_content_from_file", endpoint=create_pdf_content_from_file, methods=["POST"])
+# chat_utilのcreate_image_content_from_fileを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_image_content_from_file", endpoint=create_image_content_from_file, methods=["POST"])
+# chat_utilのcreate_office_content_from_fileを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_office_content_from_file", endpoint=create_office_content_from_file, methods=["POST"])
+# chat_utilのcreate_multi_format_contents_from_fileを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_multi_format_contents_from_file", endpoint=create_multi_format_contents_from_file, methods=["POST"])
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
 router.add_api_route(path="/run_chat", endpoint=run_chat, methods=["POST"])
+
+# chat_utilのrun_simple_chatを呼び出すラッパー関数を定義
+router.add_api_route(path="/run_simple_chat", endpoint=run_simple_chat, methods=["POST"])
 
 # chat_utilのrun_simple_batch_chatを呼び出すラッパー関数を定義
 router.add_api_route(path="/run_simple_batch_chat", endpoint=run_simple_batch_chat, methods=["POST"])  

@@ -12,7 +12,13 @@ logger = log_settings.getLogger(__name__)
 
 
 class AWSBedrockClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest = ChatRequest()):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest | None = None):
+        if chat_request is None:
+            chat_request = ChatRequest(
+                chat_history=ChatHistory(
+                    model=llm_config.completion_model, messages=[]),
+                chat_request_context=None
+            )
         params = {"service_name": 'bedrock-runtime', "region_name": llm_config.region_name}
 
         # アクセスキーとシークレットキーが設定されている場合のパラメーター
@@ -29,7 +35,7 @@ class AWSBedrockClient(LLMClient):
 
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_request: ChatRequest = ChatRequest()
+        chat_request: ChatRequest | None = None
     ) -> "LLMClient":
         return AWSBedrockClient(llm_config, chat_request)
 
@@ -78,14 +84,14 @@ class AWSBedrockClient(LLMClient):
     def _is_file_content_(self, content: ChatContent) -> bool:
         return content.params.get("type") == "file"
     
-    def _create_image_content_(self, image_data: bytes, detail: str) -> "ChatContent":
+    def _create_image_content_(self, image_data: bytes, detail: str) -> list[ChatContent]:
         base64_image = base64.b64encode(image_data).decode('utf-8')
         image_url = f"data:image/png;base64,{base64_image}"
         params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
-        return ChatContent(params=params)
+        return [ChatContent(params=params)]
     
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> ChatContent:
+    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list[ChatContent]:
         base64_file = base64.b64encode(file_data).decode('utf-8')
         file_url = f"data:application/pdf;base64,{base64_file}"    
         params = {"type": "file", "file": {"file_data": file_url, "filename": filename}}
-        return ChatContent(params=params)
+        return [ChatContent(params=params)]

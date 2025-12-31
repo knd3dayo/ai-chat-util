@@ -8,7 +8,11 @@ class LLMFactory:
     @classmethod
     def create_llm_client(
         cls, llm_config: LLMConfig = LLMConfig(), 
-        chat_request: ChatRequest = ChatRequest()
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                model=LLMConfig().completion_model, messages=[]), 
+            chat_request_context=None)
+            
     ) -> LLMClient:
         if llm_config.llm_provider == "azure_openai":
             return AzureOpenAIClient(llm_config, chat_request)

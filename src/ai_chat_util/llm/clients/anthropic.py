@@ -1,16 +1,22 @@
 import base64
-from typing import Optional
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatResponse, ChatContent, ChatRequest
+from ai_chat_util.llm.model import ChatResponse, ChatContent, ChatRequest, ChatHistory
 
 from anthropic import AsyncAnthropic
+from anthropic.types import MessageParam
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class AnthropicClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest = ChatRequest()):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest|None = None):
+        if chat_request is None:
+            chat_request = ChatRequest(
+                chat_history=ChatHistory(
+                    model=llm_config.completion_model, messages=[]),
+                chat_request_context=None
+            )
 
         self.client = AsyncAnthropic(api_key=llm_config.api_key)
         self.model = llm_config.completion_model
@@ -18,7 +24,7 @@ class AnthropicClient(LLMClient):
     
     def create(
         self, llm_config: LLMConfig = LLMConfig(), 
-        chat_request: ChatRequest = ChatRequest()
+        chat_request: ChatRequest| None = None
     ) -> "LLMClient":
         return AnthropicClient(llm_config, chat_request)  
     
@@ -34,7 +40,7 @@ class AnthropicClient(LLMClient):
 
     async def _chat_completion_(self,  **kwargs) -> ChatResponse:
         messages = self.chat_request.chat_history.messages
-        message_dict_list = [msg.model_dump() for msg in messages]
+        message_dict_list: list = [msg.model_dump() for msg in messages]
 
         # Invoke the model with the request.
         logger.debug(f"Anthropic Chat Completion Request: {message_dict_list}, Model: {self.model}, Kwargs: {kwargs}")
@@ -60,14 +66,14 @@ class AnthropicClient(LLMClient):
     def _is_file_content_(self, content: ChatContent) -> bool:
         return content.params.get("type") == "file"
     
-    def _create_image_content_(self, image_data: bytes, detail: str) -> "ChatContent":
+    def _create_image_content_(self, image_data: bytes, detail: str) -> list[ChatContent]:
         base64_image = base64.b64encode(image_data).decode('utf-8')
         media_type = "image/png"
         params = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64_image}}
-        return ChatContent(params=params)
+        return [ChatContent(params=params)]
     
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> ChatContent:
+    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list[ChatContent]:
         base64_file = base64.b64encode(file_data).decode('utf-8')
         media_type = "application/pdf" 
         params = {"type": "document", "source": {"type": "base64", "media_type": media_type, "data": base64_file}}
-        return ChatContent(params=params)
+        return [ChatContent(params=params)]

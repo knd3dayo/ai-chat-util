@@ -22,14 +22,18 @@ logger = log_settings.getLogger(__name__)
 class LLMClient(ABC):
 
     llm_config: LLMConfig = LLMConfig()
-    chat_request: ChatRequest = ChatRequest()
+    chat_request: ChatRequest = ChatRequest(
+        chat_history=ChatHistory(messages=[], model=llm_config.completion_model ), chat_request_context=None
+        )
 
     concurrency_limit: int = 16
     
     @abstractmethod
     def create(
         cls, llm_config: LLMConfig = LLMConfig(), 
-        chat_request: ChatRequest = ChatRequest()
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[], model=llm_config.completion_model ), chat_request_context=None
+        )
     ) -> "LLMClient":
         pass
 
@@ -50,11 +54,11 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def _create_image_content_(cls, image_data: bytes, detail: str) -> "ChatContent":
+    def _create_image_content_(cls, image_data: bytes, detail: str) -> list["ChatContent"]:
         pass
     
     @abstractmethod
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> "ChatContent":
+    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list["ChatContent"]:
         pass
 
     @abstractmethod
@@ -97,18 +101,37 @@ class LLMClient(ABC):
             file_paths.append(file_path)
         return file_paths
 
+    def create_user_message(self, chat_content_list: list[ChatContent]) -> ChatMessage:
+        return ChatMessage(
+            role=self.get_user_role_name(),
+            content=chat_content_list
+        )
+
+    def create_assistant_message(self, chat_content_list: list[ChatContent]) -> ChatMessage:
+        return ChatMessage(
+            role=self.get_assistant_role_name(),
+            content=chat_content_list
+        )
+    
+    def create_system_message(self, chat_content_list: list[ChatContent]) -> ChatMessage:
+        return ChatMessage(
+            role=self.get_system_role_name(),
+            content=chat_content_list
+        )
 
     def create_text_content(self, text: str) -> "ChatContent":
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
 
-
-    def create_image_content_from_file(self, file_path: str, detail: str) -> "ChatContent":
+    def create_image_content(self, image_data: bytes, detail: str) -> list["ChatContent"]:
+        return self._create_image_content_(image_data, detail)
+    
+    def create_image_content_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
         with open(file_path, "rb") as image_file:
             image_data = image_file.read()
         return self._create_image_content_(image_data, detail)
 
-    def create_image_content_from_url(self, file_url: RequestModel, detail: str) -> "ChatContent":
+    def create_image_content_from_url(self, file_url: RequestModel, detail: str) -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
@@ -117,21 +140,41 @@ class LLMClient(ABC):
             image_data = image_file.read()
         return self._create_image_content_(image_data, detail)
     
-    def create_pdf_content_from_file(self, file_path: str) -> list["ChatContent"]:
-        with open(file_path, "rb") as pdf_file:
-            file_data = pdf_file.read()
-        return [self._create_pdf_content_(file_data, file_path)]
+    def create_pdf_content(self, file_data: bytes, filename: str, detail: str = "auto") -> list["ChatContent"]:
+        use_custom = self.llm_config.use_custom_pdf_analyzer
+        if use_custom:
+            return self._create_custom_pdf_contents_from_bytes_(file_data, filename, detail=detail)
+        else:
+            return self._create_pdf_content_(file_data, filename)
 
-    def create_pdf_content_from_url(self, file_url: str, filename: str) -> "ChatContent":
+    def create_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
+        use_custom = self.llm_config.use_custom_pdf_analyzer
+        if use_custom:
+            return self._create_custom_pdf_contents_from_file_(file_path, detail=detail)
+        else:
+            with open(file_path, "rb") as pdf_file:
+                file_data = pdf_file.read()
+            return self.create_pdf_content(file_data, file_path, detail=detail)
+
+    def create_pdf_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
         file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
-        with open(file_paths[0], "rb") as pdf_file:
-            file_data = pdf_file.read()
-        return self._create_pdf_content_(file_data, filename)
+        return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
-    def create_custom_pdf_contents_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
+    def _create_custom_pdf_contents_from_bytes_(self, file_data: bytes, filename: str, detail: str) -> list["ChatContent"]:
+        '''
+        テキストデータからChatContentのリストを生成して返す
+        '''
+        tmpdir = tempfile.TemporaryDirectory()
+        atexit.register(tmpdir.cleanup)
+        temp_file_path = os.path.join(tmpdir.name, f"{filename}_{uuid.uuid4()}.pdf")
+        with open(temp_file_path, "wb") as temp_pdf_file:
+            temp_pdf_file.write(file_data)
+        return self._create_custom_pdf_contents_from_file_(temp_file_path, detail)
+
+    def _create_custom_pdf_contents_from_file_(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
@@ -147,32 +190,13 @@ class LLMClient(ABC):
                 pdf_contents.append(text_content)
             elif element["type"] == "image":
                 image_content = self._create_image_content_(element["bytes"], detail)
-                pdf_contents.append(image_content)
+                pdf_contents.extend(image_content)
 
         return pdf_contents
     
-    def create_custom_pdf_contents_from_url(self, file_url: str, filename: str, detail: str = "auto") -> list["ChatContent"]:
-        '''
-        PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
-        '''
-        import ai_chat_util.util.pdf_util as pdf_util
-
-        page_info_content = self.create_text_content(text=f"PDFファイル: {filename} の内容を以下に示します。")
-        pdf_contents = [page_info_content]
-
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
-
-        for file_path in file_paths:
-            pdf_content = self.create_custom_pdf_contents_from_file(file_path, detail)
-            pdf_contents.extend(pdf_content)
-
-        return pdf_contents
 
     def create_office_content_from_file(
-            self, file_path: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
+            self, file_path: str, detail: str = "auto"
             ) -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
@@ -193,14 +217,11 @@ class LLMClient(ABC):
         explanation_content = self.create_text_content(text=explanation_text)
         pdf_contents = [explanation_content]
 
-        if use_custom_pdf_analyzer:
-            pdf_contents.extend(self.create_custom_pdf_contents_from_file(temp_file_path, detail))
-        else:
-            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path))
+        pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
 
         return pdf_contents
 
-    def create_office_content_from_url(self, file_url: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto") -> list["ChatContent"]:
+    def create_office_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
@@ -212,13 +233,13 @@ class LLMClient(ABC):
         office_contents = []
         for file_path in file_paths:
             content = self.create_office_content_from_file(
-                file_path, use_custom_pdf_analyzer=use_custom_pdf_analyzer, detail=detail)
+                file_path, detail=detail)
             office_contents.extend(content)
 
         return office_contents
 
     def create_multi_format_contents_from_file(
-            self, file_path: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
+            self, file_path: str, detail: str = "auto"
             ) -> list["ChatContent"]:
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
@@ -232,22 +253,18 @@ class LLMClient(ABC):
             return [self.create_text_content(text_data)]
 
         if document_type.is_image():
-            return [self.create_image_content_from_file(file_path, detail)]
+            return self.create_image_content_from_file(file_path, detail)
 
         if document_type.is_pdf():
-            if use_custom_pdf_analyzer:
-                return self.create_custom_pdf_contents_from_file(file_path, detail)
-            else:
-                return self.create_pdf_content_from_file(file_path)
+            return self.create_pdf_content_from_file(file_path, detail=detail)
 
         if document_type.is_office_document():
-            return self.create_office_content_from_file(
-                file_path, use_custom_pdf_analyzer=use_custom_pdf_analyzer, detail=detail)
+            return self.create_office_content_from_file(file_path, detail=detail)
         
         raise ValueError(f"Unsupported document type for file: {file_path}")    
 
     def create_multi_format_contents_from_url(
-            self, file_url: str, use_custom_pdf_analyzer: bool = False, detail: str = "auto"
+            self, file_url: str, detail: str = "auto"
             ) -> list["ChatContent"]:
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
@@ -257,7 +274,7 @@ class LLMClient(ABC):
         file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
 
         return self.create_multi_format_contents_from_file(
-            file_paths[0], use_custom_pdf_analyzer=use_custom_pdf_analyzer, detail=detail
+            file_paths[0], detail=detail
         )
 
 
@@ -272,7 +289,10 @@ class LLMClient(ABC):
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                model=self.llm_config.completion_model, messages=[chat_message]
+                ), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
@@ -287,7 +307,10 @@ class LLMClient(ABC):
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                model=self.llm_config.completion_model,
+                messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
@@ -303,14 +326,16 @@ class LLMClient(ABC):
         for file_path in file_list:
             if self.llm_config.use_custom_pdf_analyzer:
                 logger.info(f"Using custom PDF analyzer for file: {file_path}")
-                pdf_content = self.create_custom_pdf_contents_from_file(file_path, detail)
+                pdf_content = self._create_custom_pdf_contents_from_file_(file_path, detail)
             else:
                 logger.info(f"Using standard PDF analyzer for file: {file_path}")
                 pdf_content = self.create_pdf_content_from_file(file_path)
             pdf_content_list.extend(pdf_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
@@ -325,14 +350,15 @@ class LLMClient(ABC):
         for file_path in file_path_list:
             # Officeドキュメントを一時的にPDFに変換する
             pdf_content = self.create_office_content_from_file(
-                file_path, use_custom_pdf_analyzer=self.llm_config.use_custom_pdf_analyzer, detail=detail)
+                file_path, detail=detail)
 
             office_contents.extend(pdf_content)
 
         prompt_content = self.create_text_content(text=prompt)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
         response: ChatResponse = await self.chat(chat_request)
         return response
 
@@ -346,12 +372,13 @@ class LLMClient(ABC):
         content_list = []
         for file_path in file_path_list:
             contents = self.create_multi_format_contents_from_file(
-                file_path, use_custom_pdf_analyzer=self.llm_config.use_custom_pdf_analyzer, detail=detail)
+                file_path, detail=detail)
             content_list.extend(contents)
 
         prompt_content = self.create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
@@ -369,7 +396,7 @@ class LLMClient(ABC):
             role=self.get_user_role_name(),
             content=[self.create_text_content(prompt)]
         )
-        chat_history = ChatHistory()
+        chat_history = ChatHistory(messages=[chat_message], model=self.llm_config.completion_model)
         chat_history.add_message(chat_message)
         
         response = await self.chat(ChatRequest(chat_history=chat_history, chat_request_context=None))
@@ -479,7 +506,10 @@ class LLMClient(ABC):
         chat_responses = [t[1] for t in chat_response_tuples]
 
         for preprocessed_message in preprocessed_messages:
-            chat_request = ChatRequest(chat_history=ChatHistory(messages=[preprocessed_message]), chat_request_context=request_context)
+            chat_request = ChatRequest(
+                chat_history=ChatHistory(
+                    messages=[preprocessed_message], model=self.llm_config.completion_model), 
+                    chat_request_context=request_context)
             client = self.create(
                 self.llm_config, chat_request=chat_request)
             
@@ -669,14 +699,21 @@ class LLMClient(ABC):
             split_mode=ChatRequestContext.split_mode_name_none,
             summarize_prompt_text=request_context.summarize_prompt_text
         )
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(), chat_request_context=request_context)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                model=self.llm_config.completion_model,
+                messages=[]
+                ), chat_request_context=request_context)
         client = self.create(self.llm_config, chat_request=chat_request)
         text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
             role=self.get_user_role_name(),
             content=[text_content]
         )
-        chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=[message]), chat_request_context=None)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                model=self.llm_config.completion_model,
+                messages=[message], ), chat_request_context=None)
         summarize_response = await client.chat(chat_request)
         return summarize_response
 

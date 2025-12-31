@@ -1,8 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Literal
 import os, tempfile
 import atexit
 from pydantic import Field
-from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse, RequestModel, ChatRequest
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, RequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
@@ -15,6 +15,82 @@ def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to u
     use_custom = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
     return use_custom
 
+def create_user_message(
+        chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the user messages")]
+) -> Annotated[ChatMessage, Field(description="Chat history created from user messages")]:
+    """
+    This function creates a ChatHistory object from a list of user messages.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_user_message(chat_content_list)
+
+def create_assistant_message(
+        chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the assistant messages")]
+) -> Annotated[ChatMessage, Field(description="Chat history created from assistant messages")]:
+    """
+    This function creates a ChatHistory object from a list of assistant messages.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_assistant_message(chat_content_list)
+
+def create_system_message(
+        chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the system messages")]
+) -> Annotated[ChatMessage, Field(description="Chat history created from system messages")]:
+    """
+    This function creates a ChatHistory object from a list of system messages.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_system_message(chat_content_list)
+
+def create_text_content(
+        text: Annotated[str, Field(description="Text content for the chat message")]
+) -> Annotated[ChatContent, Field(description="Chat content created from text")]:
+    """
+    This function creates a ChatContent object from text.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_text_content(text)
+
+def create_pdf_content_from_file(
+    file_path: Annotated[str, Field(description="File path for the chat message content")],
+    detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from file")]:
+    """
+    This function creates a ChatContent object from a file.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_pdf_content_from_file(file_path, detail)
+
+def create_image_content_from_file(
+        file_path: Annotated[str, Field(description="File path for the chat message content")],
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from image file")]:
+    """
+    This function creates a ChatContent object from an image file.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_image_content_from_file(file_path, detail)
+
+def create_office_content_from_file(
+        file_path: Annotated[str, Field(description="File path for the chat message content")],
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for Office document analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from Office document file")]:
+    """
+    This function creates a ChatContent object from an Office document file.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_office_content_from_file(file_path, detail)
+
+def create_multi_format_contents_from_file(
+        file_path: Annotated[str, Field(description="File path for the chat message content")],
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for file analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from multi-format file")]:
+    """
+    This function creates a ChatContent object from a multi-format file.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_multi_format_contents_from_file(file_path, detail)
+
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
 async def run_chat(
@@ -25,6 +101,17 @@ async def run_chat(
     """
     client = LLMFactory.create_llm_client(LLMConfig(), chat_request)
     return await client.chat()
+
+
+async def run_simple_chat(
+        prompt: Annotated[str, Field(description="Prompt for the chat")],
+) -> Annotated[str, Field(description="Chat response from the LLM")]:
+    """
+    This function processes a simple chat with the specified prompt and returns the chat response.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    response = await llm_client.simple_chat(prompt)
+    return response
 
 async def run_simple_batch_chat(
         prompt: Annotated[str, Field(description="Prompt for the batch chat")],

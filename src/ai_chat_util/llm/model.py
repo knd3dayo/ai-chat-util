@@ -25,7 +25,7 @@ class ChatContent(BaseModel):
 
 class ChatMessage(BaseModel):
     role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
-    content: list[ChatContent] = Field(default=[], description="The content of the message, which can be text or other types.")
+    content: list[ChatContent] = Field(..., description="The content of the message, which can be text or other types.")
 
     # model_dump をオーバーライドして content を展開する
     def model_dump(self, *args, **kwargs):
@@ -77,8 +77,8 @@ class ChatMessage(BaseModel):
 
 class ChatHistory(BaseModel):
 
-    messages: list[ChatMessage] = Field(default=[], description="List of chat messages in the conversation.")
-    model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
+    messages: list[ChatMessage] = Field(..., description="List of chat messages in the conversation.")
+    model: str = Field(..., description="The model used for the chat conversation.")
     
     # option fields
     temperature: Optional[float] = Field(default=0.7, description="Sampling temperature for the model.")
@@ -160,7 +160,7 @@ class ChatRequestContext(BaseModel):
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
 
 class ChatRequest(BaseModel):
-    chat_history: ChatHistory = Field(default=ChatHistory(), description="The chat history for the request.")
+    chat_history: ChatHistory = Field(..., description="The chat history for the request.")
     chat_request_context: Optional[ChatRequestContext] = Field(default=ChatRequestContext(), description="The context for the chat request.")
 
 class ChatResponse(BaseModel):

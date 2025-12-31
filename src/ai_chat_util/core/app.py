@@ -17,7 +17,7 @@ def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to u
 
 def create_chat_history(
         chat_message_list: Annotated[list[ChatMessage], Field(description="List of chat messages to create chat history from")]
-) -> Annotated[ChatHistory, Field(description="Chat history created from the list of chat messages")]:
+) -> ChatHistory:
     """
     This function creates a ChatHistory object from a list of chat messages.
     """

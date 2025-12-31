@@ -15,14 +15,12 @@ def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to u
     use_custom = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
     return use_custom
 
-def create_chat_history(
-        chat_message_list: Annotated[list[ChatMessage], Field(description="List of chat messages to create chat history from")]
-) -> ChatHistory:
+def get_completion_model() -> Annotated[str, Field(description="The completion model used for LLM")]:
     """
     This function creates a ChatHistory object from a list of chat messages.
     """
     llm_config = LLMConfig()
-    return ChatHistory(messages=chat_message_list, model=llm_config.completion_model)
+    return llm_config.completion_model
 
 def create_user_message(
         chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the user messages")]

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, FastAPI
 from ai_chat_util.core.app import (
     use_custom_pdf_analyzer,
-    create_chat_history,
+    get_completion_model,
     create_user_message,
     create_system_message,
     create_assistant_message,
@@ -30,8 +30,8 @@ app = FastAPI()
 
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
 
-# chat_utilのcreate_chat_historyを呼び出すラッパー関数を定義
-router.add_api_route(path="/create_chat_history", endpoint=create_chat_history, methods=["POST"])
+# chat_utilのget_completion_modelを呼び出すラッパー関数を定義
+router.add_api_route(path="/get_completion_model", endpoint=get_completion_model, methods=["GET"])
 # chat_utilのcreate_user_messageを呼び出すラッパー関数を定義
 router.add_api_route(path="/create_user_message", endpoint=create_user_message, methods=["POST"])
 # chat_utilのcreate_system_messageを呼び出すラッパー関数を定義

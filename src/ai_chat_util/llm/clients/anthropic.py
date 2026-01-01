@@ -1,10 +1,12 @@
 import base64
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatResponse, ChatContent, ChatRequest, ChatHistory
+from ai_chat_util.llm.model import (
+    ChatHistory, ChatResponse, ChatContent, ChatRequest
+)
 
+from file_util.model import DocumentType
 from anthropic import AsyncAnthropic
-from anthropic.types import MessageParam
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -66,14 +68,14 @@ class AnthropicClient(LLMClient):
     def _is_file_content_(self, content: ChatContent) -> bool:
         return content.params.get("type") == "file"
     
-    def _create_image_content_(self, image_data: bytes, detail: str) -> list[ChatContent]:
-        base64_image = base64.b64encode(image_data).decode('utf-8')
+    def _create_image_content_(self, file_data: DocumentType, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(file_data.data).decode('utf-8')
         media_type = "image/png"
         params = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64_image}}
         return [ChatContent(params=params)]
     
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list[ChatContent]:
-        base64_file = base64.b64encode(file_data).decode('utf-8')
+    def _create_pdf_content_(self, file_data: DocumentType, file_name: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(file_data.data).decode('utf-8')
         media_type = "application/pdf" 
         params = {"type": "document", "source": {"type": "base64", "media_type": media_type, "data": base64_file}}
         return [ChatContent(params=params)]

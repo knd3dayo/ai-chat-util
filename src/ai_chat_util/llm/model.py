@@ -1,16 +1,13 @@
-import base64, os
 # 抽象クラス
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Optional
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 from typing import ClassVar, Optional, Any
 from pydantic import BaseModel, Field
-
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-class RequestModel(BaseModel):
+class WebRequestModel(BaseModel):
     url: str
     headers: dict[str, Any] = {}
 

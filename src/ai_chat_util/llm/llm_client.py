@@ -12,7 +12,10 @@ import requests
 
 
 from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel, ChatRequest
+from ai_chat_util.llm.model import (
+    ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
+    ChatContent, WebRequestModel, ChatRequest
+)
 from ai_chat_util.util.office2pdf import Office2PDFUtil
 from file_util.model import DocumentType
 
@@ -54,11 +57,11 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def _create_image_content_(cls, image_data: bytes, detail: str) -> list["ChatContent"]:
+    def _create_image_content_(cls, file_data: DocumentType, detail: str) -> list["ChatContent"]:
         pass
     
     @abstractmethod
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list["ChatContent"]:
+    def _create_pdf_content_(self, file_data: DocumentType, file_name: str) -> list["ChatContent"]:
         pass
 
     @abstractmethod
@@ -87,7 +90,7 @@ class LLMClient(ABC):
         return len(encoder.encode(input_text))
 
     @classmethod
-    def download_files(cls, urls: list[RequestModel], download_dir: str) -> list[str]:
+    def download_files(cls, urls: list[WebRequestModel], download_dir: str) -> list[str]:
         """
         Download files from the given URLs to the specified directory.
         Returns a list of file paths where the files are saved.
@@ -123,29 +126,26 @@ class LLMClient(ABC):
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
 
-    def create_image_content(self, image_data: bytes, detail: str) -> list["ChatContent"]:
-        return self._create_image_content_(image_data, detail)
+    def create_image_content(self, file_data: DocumentType, detail: str) -> list["ChatContent"]:
+        return self._create_image_content_(file_data, detail)
     
     def create_image_content_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
-        with open(file_path, "rb") as image_file:
-            image_data = image_file.read()
-        return self._create_image_content_(image_data, detail)
+        return self._create_image_content_(DocumentType.from_file(file_path), detail)
 
-    def create_image_content_from_url(self, file_url: RequestModel, detail: str) -> list["ChatContent"]:
+    def create_image_content_from_url(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
         file_paths = self.download_files([file_url], tmpdir.name)
-        with open(file_paths[0], "rb") as image_file:
-            image_data = image_file.read()
-        return self._create_image_content_(image_data, detail)
+        return self._create_image_content_(DocumentType.from_file(file_paths[0]), detail)
     
     def create_pdf_content(self, file_data: bytes, filename: str, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.use_custom_pdf_analyzer
+        document_type = DocumentType(data=file_data)
         if use_custom:
-            return self._create_custom_pdf_contents_from_bytes_(file_data, filename, detail=detail)
+            return self._create_custom_pdf_contents_from_bytes_(document_type, filename, detail=detail)
         else:
-            return self._create_pdf_content_(file_data, filename)
+            return self._create_pdf_content_(document_type, filename)
 
     def create_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.use_custom_pdf_analyzer
@@ -160,10 +160,10 @@ class LLMClient(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
+        file_paths = self.download_files([WebRequestModel(url=file_url)], tmpdir.name)
         return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
-    def _create_custom_pdf_contents_from_bytes_(self, file_data: bytes, filename: str, detail: str) -> list["ChatContent"]:
+    def _create_custom_pdf_contents_from_bytes_(self, file_data: DocumentType, filename: str, detail: str) -> list["ChatContent"]:
         '''
         テキストデータからChatContentのリストを生成して返す
         '''
@@ -171,7 +171,7 @@ class LLMClient(ABC):
         atexit.register(tmpdir.cleanup)
         temp_file_path = os.path.join(tmpdir.name, f"{filename}_{uuid.uuid4()}.pdf")
         with open(temp_file_path, "wb") as temp_pdf_file:
-            temp_pdf_file.write(file_data)
+            temp_pdf_file.write(file_data.data)
         return self._create_custom_pdf_contents_from_file_(temp_file_path, detail)
 
     def _create_custom_pdf_contents_from_file_(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
@@ -189,7 +189,8 @@ class LLMClient(ABC):
                 text_content = self.create_text_content(text=element["text"])
                 pdf_contents.append(text_content)
             elif element["type"] == "image":
-                image_content = self._create_image_content_(element["bytes"], detail)
+                document_type = DocumentType(data=element["bytes"])
+                image_content = self._create_image_content_(document_type, detail)
                 pdf_contents.extend(image_content)
 
         return pdf_contents
@@ -228,7 +229,7 @@ class LLMClient(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
+        file_paths = self.download_files([WebRequestModel(url=file_url)], tmpdir.name)
 
         office_contents = []
         for file_path in file_paths:
@@ -245,7 +246,7 @@ class LLMClient(ABC):
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
             
-        document_type = DocumentType(document_path=file_path)
+        document_type = DocumentType.from_file(document_path=file_path)
 
         if document_type.is_text():
             with open(file_path, "r", encoding="utf-8") as text_file:
@@ -271,7 +272,7 @@ class LLMClient(ABC):
         '''
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
-        file_paths = self.download_files([RequestModel(url=file_url)], tmpdir.name)
+        file_paths = self.download_files([WebRequestModel(url=file_url)], tmpdir.name)
 
         return self.create_multi_format_contents_from_file(
             file_paths[0], detail=detail
@@ -296,7 +297,7 @@ class LLMClient(ABC):
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
-    async def analyze_image_urls(self, image_url_list: list[RequestModel], prompt: str, detail: str) -> ChatResponse:
+    async def analyze_image_urls(self, image_url_list: list[WebRequestModel], prompt: str, detail: str) -> ChatResponse:
         '''
         複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''

@@ -3,7 +3,10 @@ import json
 
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent, RequestModel, ChatRequest
+from ai_chat_util.llm.model import (
+    ChatHistory, ChatResponse, ChatContent, ChatRequest
+)
+from file_util.model import DocumentType
 
 import boto3
 
@@ -84,14 +87,14 @@ class AWSBedrockClient(LLMClient):
     def _is_file_content_(self, content: ChatContent) -> bool:
         return content.params.get("type") == "file"
     
-    def _create_image_content_(self, image_data: bytes, detail: str) -> list[ChatContent]:
-        base64_image = base64.b64encode(image_data).decode('utf-8')
+    def _create_image_content_(self, file_data: DocumentType, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(file_data.data).decode('utf-8')
         image_url = f"data:image/png;base64,{base64_image}"
         params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
         return [ChatContent(params=params)]
     
-    def _create_pdf_content_(self, file_data: bytes, filename: str) -> list[ChatContent]:
-        base64_file = base64.b64encode(file_data).decode('utf-8')
+    def _create_pdf_content_(self, file_data: DocumentType, file_name: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(file_data.data).decode('utf-8')
         file_url = f"data:application/pdf;base64,{base64_file}"    
-        params = {"type": "file", "file": {"file_data": file_url, "filename": filename}}
+        params = {"type": "file", "file": {"file_data": file_url, "filename": file_name}}
         return [ChatContent(params=params)]

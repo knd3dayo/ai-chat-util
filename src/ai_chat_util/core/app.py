@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 import os, tempfile
 import atexit
 from pydantic import Field
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, RequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
@@ -180,7 +180,7 @@ async def run_batch_chat_from_excel(
 
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 async def analyze_image_urls(
-        image_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the image files to analyze. e.g., http://path/to/image1.jpg")],
+        image_path_urls: Annotated[list[WebRequestModel], Field(description="List of urls to the image files to analyze. e.g., http://path/to/image1.jpg")],
         prompt: Annotated[str, Field(description="Prompt to analyze the images")],
         detail: Annotated[str, Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
     ) -> Annotated[str, Field(description="Analysis result of the images")]:
@@ -209,7 +209,7 @@ async def analyze_image_files(
 # 複数のPDFの分析を行う URLからPDFをダウンロードして分析する
 async def analyze_pdf_urls(
         pdf_path_urls: Annotated[
-            list[RequestModel],
+            list[WebRequestModel],
             Field(
                 description="List of URLs to the PDF files to analyze. e.g., http://path/to/document2.pdf"
             ),
@@ -258,7 +258,7 @@ async def analyze_pdf_files(
 
 # 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
 async def analyze_office_urls(
-        office_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the Office files to analyze. e.g., http://path/to/document1.docx")],
+        office_path_urls: Annotated[list[WebRequestModel], Field(description="List of urls to the Office files to analyze. e.g., http://path/to/document1.docx")],
         prompt: Annotated[str, Field(description="Prompt to analyze the Office documents")],
         detail: Annotated[
             str,
@@ -302,7 +302,7 @@ async def analyze_office_files(
     return response.output
 
 async def analyze_urls(
-        file_path_urls: Annotated[list[RequestModel], Field(description="List of urls to the files to analyze. e.g., http://path/to/document1.pdf, http://path/to/image1.jpg")],
+        file_path_urls: Annotated[list[WebRequestModel], Field(description="List of urls to the files to analyze. e.g., http://path/to/document1.pdf, http://path/to/image1.jpg")],
         prompt: Annotated[str, Field(description="Prompt to analyze the files")],
         detail: Annotated[
             str,

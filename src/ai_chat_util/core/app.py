@@ -68,6 +68,16 @@ def create_pdf_content_from_file(
     llm_client = LLMFactory.create_llm_client(LLMConfig())
     return llm_client.create_pdf_content_from_file(file_path, detail)
 
+def create_image_content_from_bytes(
+        image_bytes: Annotated[bytes, Field(description="Image bytes for the chat message content")],
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from image bytes")]:
+    """
+    This function creates a ChatContent object from image bytes.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_image_content(image_bytes, detail)
+
 def create_image_content_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
         detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"

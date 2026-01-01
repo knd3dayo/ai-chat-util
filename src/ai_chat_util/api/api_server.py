@@ -7,6 +7,7 @@ from ai_chat_util.core.app import (
     create_assistant_message,
     create_text_content,
     create_pdf_content_from_file,
+    create_image_content_from_bytes,
     create_image_content_from_file,
     create_office_content_from_file,
     create_multi_format_contents_from_file,
@@ -42,6 +43,8 @@ router.add_api_route(path="/create_assistant_message", endpoint=create_assistant
 router.add_api_route(path="/create_text_content", endpoint=create_text_content, methods=["POST"])
 # chat_utilのcreate_pdf_content_from_fileを呼び出すラッパー関数を定義
 router.add_api_route(path="/create_pdf_content_from_file", endpoint=create_pdf_content_from_file, methods=["POST"])
+# chat_utilのcreate_image_content_from_bytesを呼び出すラッパー関数を定義
+router.add_api_route(path="/create_image_content_from_bytes", endpoint=create_image_content_from_bytes, methods=["POST"])
 # chat_utilのcreate_image_content_from_fileを呼び出すラッパー関数を定義
 router.add_api_route(path="/create_image_content_from_file", endpoint=create_image_content_from_file, methods=["POST"])
 # chat_utilのcreate_office_content_from_fileを呼び出すラッパー関数を定義

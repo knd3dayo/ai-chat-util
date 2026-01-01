@@ -57,11 +57,11 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def _create_image_content_(cls, file_data: DocumentType, detail: str) -> list["ChatContent"]:
+    def _create_image_content_(cls, document_type: DocumentType, detail: str) -> list["ChatContent"]:
         pass
     
     @abstractmethod
-    def _create_pdf_content_(self, file_data: DocumentType, file_name: str) -> list["ChatContent"]:
+    def _create_pdf_content_(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
         pass
 
     @abstractmethod
@@ -139,22 +139,15 @@ class LLMClient(ABC):
         file_paths = self.download_files([file_url], tmpdir.name)
         return self._create_image_content_(DocumentType.from_file(file_paths[0]), detail)
     
-    def create_pdf_content(self, file_data: bytes, filename: str, detail: str = "auto") -> list["ChatContent"]:
+    def create_pdf_content(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.use_custom_pdf_analyzer
-        document_type = DocumentType(data=file_data)
         if use_custom:
-            return self._create_custom_pdf_contents_from_bytes_(document_type, filename, detail=detail)
+            return self._create_custom_pdf_contents_from_bytes_(document_type, detail=detail)
         else:
-            return self._create_pdf_content_(document_type, filename)
+            return self._create_pdf_content_(document_type, detail=detail)
 
     def create_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
-        use_custom = self.llm_config.use_custom_pdf_analyzer
-        if use_custom:
-            return self._create_custom_pdf_contents_from_file_(file_path, detail=detail)
-        else:
-            with open(file_path, "rb") as pdf_file:
-                file_data = pdf_file.read()
-            return self.create_pdf_content(file_data, file_path, detail=detail)
+            return self.create_pdf_content(DocumentType.from_file(file_path), detail=detail)
 
     def create_pdf_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
@@ -163,15 +156,15 @@ class LLMClient(ABC):
         file_paths = self.download_files([WebRequestModel(url=file_url)], tmpdir.name)
         return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
-    def _create_custom_pdf_contents_from_bytes_(self, file_data: DocumentType, filename: str, detail: str) -> list["ChatContent"]:
+    def _create_custom_pdf_contents_from_bytes_(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
         '''
         テキストデータからChatContentのリストを生成して返す
         '''
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
-        temp_file_path = os.path.join(tmpdir.name, f"{filename}_{uuid.uuid4()}.pdf")
+        temp_file_path = os.path.join(tmpdir.name, f"{document_type.filename}_{uuid.uuid4()}.pdf")
         with open(temp_file_path, "wb") as temp_pdf_file:
-            temp_pdf_file.write(file_data.data)
+            temp_pdf_file.write(document_type.data)
         return self._create_custom_pdf_contents_from_file_(temp_file_path, detail)
 
     def _create_custom_pdf_contents_from_file_(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
@@ -195,24 +188,21 @@ class LLMClient(ABC):
 
         return pdf_contents
     
-
-    def create_office_content_from_file(
-            self, file_path: str, detail: str = "auto"
-            ) -> list["ChatContent"]:
+    def create_office_content(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
         # Officeドキュメントを一時的にPDFに変換する
         temp_dir = tempfile.TemporaryDirectory()
         atexit.register(temp_dir.cleanup)
-        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(file_path)}_{uuid.uuid4()}.pdf")
-        Office2PDFUtil.create_pdf_from_document(
-            input_path=file_path,
+        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.filename)}_{uuid.uuid4()}.pdf")
+        Office2PDFUtil.create_pdf_from_document_bytes(
+            input_bytes=document_type.data,
             output_path=temp_file_path
         )
         # 元ファイルからPDFに変換した旨の説明を追加
         explanation_text = f"""
-            {temp_file_path}は、元のOfficeドキュメント: {file_path} をPDFに変換したものです。
+            {temp_file_path}は、元のOfficeドキュメント: {document_type.filename} をPDFに変換したものです。
             ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
             """
         explanation_content = self.create_text_content(text=explanation_text)
@@ -221,6 +211,18 @@ class LLMClient(ABC):
         pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
 
         return pdf_contents
+
+
+    def create_office_content_from_file(
+            self, file_path: str, detail: str = "auto"
+            ) -> list["ChatContent"]:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        with open(file_path, "rb") as office_file:
+            document_type = DocumentType(data=office_file.read())
+        return self.create_office_content(document_type, detail=detail)
+  
 
     def create_office_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         '''
@@ -238,6 +240,29 @@ class LLMClient(ABC):
             office_contents.extend(content)
 
         return office_contents
+
+
+    def create_multi_format_content(
+            self, document_type: DocumentType, detail: str = "auto"
+            ) -> list["ChatContent"]:
+        '''
+        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
+        '''
+
+        if document_type.is_text():
+            text = document_type.data.decode('utf-8')
+            return [self.create_text_content(text)]
+
+        if document_type.is_image():
+            return self.create_image_content(document_type, detail)
+
+        if document_type.is_pdf():
+            return self.create_pdf_content(document_type, detail=detail)
+
+        if document_type.is_office_document():
+            return self.create_office_content(document_type, detail=detail)
+        
+        raise ValueError(f"Unsupported document type for file: {document_type.filename}")    
 
     def create_multi_format_contents_from_file(
             self, file_path: str, detail: str = "auto"
@@ -363,6 +388,27 @@ class LLMClient(ABC):
         response: ChatResponse = await self.chat(chat_request)
         return response
 
+    async def analyze_documents_data(
+            self, document_type_list: list[DocumentType], prompt: str, detail: str = "auto"
+            ) -> ChatResponse:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
+        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        content_list = []
+        for document_type in document_type_list:
+            contents = self.create_multi_format_content(
+                document_type, detail=detail)
+            content_list.extend(contents)
+
+        prompt_content = self.create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
+        chat_response: ChatResponse = await self.chat(chat_request)
+        return chat_response
+
+
     async def analyze_files(
             self, file_path_list: list[str], prompt: str, detail: str = "auto"
             ) -> ChatResponse:
@@ -382,6 +428,7 @@ class LLMClient(ABC):
             chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
+
 
     async def simple_chat(self, prompt: str) -> str:
         '''

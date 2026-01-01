@@ -7,7 +7,7 @@ from ai_chat_util.core.app import (
     create_assistant_message,
     create_text_content,
     create_pdf_content_from_file,
-    create_image_content_from_bytes,
+    create_image_content,
     create_image_content_from_file,
     create_office_content_from_file,
     create_multi_format_contents_from_file,
@@ -20,6 +20,7 @@ from ai_chat_util.core.app import (
     analyze_pdf_files,
     analyze_office_files,
     analyze_files,
+    analyze_documents_data,
     analyze_image_urls,
     analyze_pdf_urls,
     analyze_office_urls,
@@ -44,7 +45,7 @@ router.add_api_route(path="/create_text_content", endpoint=create_text_content, 
 # chat_utilのcreate_pdf_content_from_fileを呼び出すラッパー関数を定義
 router.add_api_route(path="/create_pdf_content_from_file", endpoint=create_pdf_content_from_file, methods=["POST"])
 # chat_utilのcreate_image_content_from_bytesを呼び出すラッパー関数を定義
-router.add_api_route(path="/create_image_content_from_bytes", endpoint=create_image_content_from_bytes, methods=["POST"])
+router.add_api_route(path="/create_image_content_from_bytes", endpoint=create_image_content, methods=["POST"])
 # chat_utilのcreate_image_content_from_fileを呼び出すラッパー関数を定義
 router.add_api_route(path="/create_image_content_from_file", endpoint=create_image_content_from_file, methods=["POST"])
 # chat_utilのcreate_office_content_from_fileを呼び出すラッパー関数を定義
@@ -77,6 +78,9 @@ router.add_api_route(path="/analyze_office_files", endpoint=analyze_office_files
 
 # 複数の形式のドキュメントの分析を行う
 router.add_api_route(path="/analyze_files", endpoint=analyze_files, methods=["POST"])
+
+# 複数の形式のドキュメントの分析を行う
+router.add_api_route(path="/analyze_documents_data", endpoint=analyze_documents_data, methods=["POST"])
 
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 router.add_api_route(path="/analyze_image_urls", endpoint=analyze_image_urls, methods=["POST"])

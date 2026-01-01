@@ -6,6 +6,7 @@ from ai_chat_util.llm.model import ChatHistory, ChatResponse, WebRequestModel, C
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
+from file_util.model import DocumentType
 import os
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
@@ -58,17 +59,7 @@ def create_text_content(
     llm_client = LLMFactory.create_llm_client(LLMConfig())
     return llm_client.create_text_content(text)
 
-def create_pdf_content_from_file(
-    file_path: Annotated[str, Field(description="File path for the chat message content")],
-    detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-) -> Annotated[list[ChatContent], Field(description="Chat content created from file")]:
-    """
-    This function creates a ChatContent object from a file.
-    """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
-    return llm_client.create_pdf_content_from_file(file_path, detail)
-
-def create_image_content_from_bytes(
+def create_image_content(
         image_bytes: Annotated[bytes, Field(description="Image bytes for the chat message content")],
         detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for image analysis. e.g., 'low', 'high', 'auto'")]= "auto"
 ) -> Annotated[list[ChatContent], Field(description="Chat content created from image bytes")]:
@@ -76,7 +67,8 @@ def create_image_content_from_bytes(
     This function creates a ChatContent object from image bytes.
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    return llm_client.create_image_content(image_bytes, detail)
+    document_type = DocumentType(data=image_bytes)
+    return llm_client.create_image_content(document_type, detail)
 
 def create_image_content_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -87,6 +79,36 @@ def create_image_content_from_file(
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
     return llm_client.create_image_content_from_file(file_path, detail)
+
+def create_pdf_content(
+        document_type: Annotated[DocumentType, Field(description="PDF file data for the chat message content")], 
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+        ) -> Annotated[list["ChatContent"], Field(description="Chat content created from PDF file data")]:
+    """
+    This function creates a ChatContent object from PDF file data.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_pdf_content(document_type, detail)
+
+def create_pdf_content_from_file(
+    file_path: Annotated[str, Field(description="File path for the chat message content")],
+    detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from file")]:
+    """
+    This function creates a ChatContent object from a file.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_pdf_content_from_file(file_path, detail)
+
+def create_office_content(
+        document_type: Annotated[DocumentType, Field(description="Office document file data for the chat message content")],
+        detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for Office document analysis. e.g., 'low', 'high', 'auto'")]= "auto"
+) -> Annotated[list[ChatContent], Field(description="Chat content created from Office document file data")]:
+    """
+    This function creates a ChatContent object from Office document file data.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    return llm_client.create_office_content(document_type, detail)
 
 def create_office_content_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -342,4 +364,24 @@ async def analyze_files(
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
     response = await llm_client.analyze_files(file_path_list, prompt, detail=detail)
+    return response.output
+
+async def analyze_documents_data(
+        document_type_list: Annotated[list[DocumentType], Field(description="List of DocumentType objects to analyze.")],
+        prompt: Annotated[str, Field(description="Prompt to analyze the documents")],
+        detail: Annotated[
+            str,
+            Field(
+                description=(
+                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Detail level for analysis. e.g., 'low', 'high', 'auto'"
+                )
+            ),
+        ] = "auto",
+    ) -> Annotated[str, Field(description="Analysis result of the files")]:
+    """
+    This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
+    """
+    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    response = await llm_client.analyze_documents_data(document_type_list, prompt, detail=detail)
     return response.output

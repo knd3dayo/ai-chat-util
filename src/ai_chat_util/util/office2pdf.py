@@ -7,6 +7,8 @@ from typing import Iterable
 import os
 import shutil
 from pathlib import Path
+import tempfile
+import atexit
 
 class Office2PDFUtil:
     LIBREOFFICE_ENV_VAR = "LIBREOFFICE_PATH"
@@ -38,7 +40,30 @@ class Office2PDFUtil:
         return command
 
     @classmethod
-    def create_pdf_from_document(
+    def create_pdf_from_document_bytes(
+        cls,
+        input_bytes: bytes,
+        output_path: str | Path | None = None,
+        libreoffice_path: str | Path | None = None,
+        timeout: int | None = 120,
+        temp_dir: str | Path | None = None,
+    ) -> Path:
+        tmpdir = tempfile.TemporaryDirectory(dir=temp_dir)
+        atexit.register(tmpdir.cleanup)
+        with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdirname:
+            source_path = Path(tmpdirname) / "input_document"
+            with open(source_path, "wb") as source_file:
+                source_file.write(input_bytes)
+
+            return cls.create_pdf_from_document_file(
+                input_path=source_path,
+                output_path=output_path,
+                libreoffice_path=libreoffice_path,
+                timeout=timeout,
+            )
+
+    @classmethod
+    def create_pdf_from_document_file(
         cls,
         input_path: str | Path,
         output_path: str | Path | None = None,
@@ -76,7 +101,7 @@ class Office2PDFUtil:
             else:
                 target = output_candidate
         target.parent.mkdir(parents=True, exist_ok=True)
-
+        
         libreoffice_binary = cls.find_libreoffice_binary(libreoffice_path)
         output_dir = target.parent.resolve()
 

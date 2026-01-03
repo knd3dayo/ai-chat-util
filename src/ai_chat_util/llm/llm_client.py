@@ -95,10 +95,21 @@ class LLMClient(ABC):
         Download files from the given URLs to the specified directory.
         Returns a list of file paths where the files are saved.
         """
+        def get_file_name_from_url(url: str) -> str:
+            """
+            URLからファイル名を抽出する。
+            例: https://example.com/path/to/file.txt -> file.txt
+            """
+            from urllib.parse import urlparse
+            import os
+            parsed_url = urlparse(url)
+            return os.path.basename(parsed_url.path)
+        
         file_paths = []
         for item in urls:
             res = requests.get(url=item.url, headers=item.headers)
-            file_path = os.path.join(download_dir, os.path.basename(item.url))
+            
+            file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
             with open(file_path, "wb") as f:
                 f.write(res.content)
             file_paths.append(file_path)

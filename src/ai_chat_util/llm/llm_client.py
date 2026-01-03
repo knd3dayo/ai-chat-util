@@ -142,7 +142,7 @@ class LLMClient(ABC):
     def create_pdf_content(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.use_custom_pdf_analyzer
         if use_custom:
-            return self._create_custom_pdf_contents_from_bytes_(document_type, detail=detail)
+            return self._create_custom_pdf_content_(document_type, detail=detail)
         else:
             return self._create_pdf_content_(document_type, detail=detail)
 
@@ -156,27 +156,24 @@ class LLMClient(ABC):
         file_paths = self.download_files([WebRequestModel(url=file_url)], tmpdir.name)
         return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
-    def _create_custom_pdf_contents_from_bytes_(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
+    def _create_custom_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
         '''
-        テキストデータからChatContentのリストを生成して返す
+        PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-        temp_file_path = os.path.join(tmpdir.name, f"{document_type.filename}_{uuid.uuid4()}.pdf")
-        with open(temp_file_path, "wb") as temp_pdf_file:
-            temp_pdf_file.write(document_type.data)
-        return self._create_custom_pdf_contents_from_file_(temp_file_path, detail)
-
-    def _create_custom_pdf_contents_from_file_(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
+        with open(file_path, "rb") as pdf_file:
+            document_type = DocumentType(data=pdf_file.read(), filename=os.path.basename(file_path))
+        return self._create_custom_pdf_content_(document_type, detail=detail)
+    
+    def _create_custom_pdf_content_(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
         import ai_chat_util.util.pdf_util as pdf_util
 
-        page_info_content = self.create_text_content(text=f"PDFファイル: {file_path} の内容を以下に示します。")
+        page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.filename} の内容を以下に示します。")
         pdf_contents = [page_info_content]
         # PDFからテキストと画像を抽出
-        pdf_elements = pdf_util.extract_pdf_content(file_path)
+        pdf_elements = pdf_util.extract_content_from_bytes(document_type.data)
         for element in pdf_elements:
             if element["type"] == "text":
                 text_content = self.create_text_content(text=element["text"])
@@ -352,7 +349,7 @@ class LLMClient(ABC):
         for file_path in file_list:
             if self.llm_config.use_custom_pdf_analyzer:
                 logger.info(f"Using custom PDF analyzer for file: {file_path}")
-                pdf_content = self._create_custom_pdf_contents_from_file_(file_path, detail)
+                pdf_content = self._create_custom_pdf_content_from_file(file_path, detail)
             else:
                 logger.info(f"Using standard PDF analyzer for file: {file_path}")
                 pdf_content = self.create_pdf_content_from_file(file_path)

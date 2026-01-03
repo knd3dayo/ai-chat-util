@@ -1,9 +1,9 @@
 import fitz  # PyMuPDF
 import base64
 import json
+from fitz import Document
 
-def extract_pdf_content(pdf_path):
-    doc = fitz.open(pdf_path)
+def _extract_content(doc: Document) -> list[dict]:
     results = []
 
     for page_num in range(len(doc)):
@@ -31,10 +31,19 @@ def extract_pdf_content(pdf_path):
 
     return results
 
+def extract_content_from_bytes(pdf_bytes) -> list[dict]:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    return _extract_content(doc)
+
+def extract_content_from_file(pdf_path) -> list[dict]:
+    fitz.open()
+    doc = fitz.open(pdf_path)
+    return _extract_content(doc)
+
 if __name__ == "__main__":
     import sys
     pdf_file = sys.argv[1] if len(sys.argv) > 1 else "sample.pdf"
-    content = extract_pdf_content(pdf_file)
+    content = extract_content_from_file(pdf_file)
 
     # JSONとして保存
     with open("output.json", "w", encoding="utf-8") as f:

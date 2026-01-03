@@ -172,7 +172,7 @@ class LLMClient(ABC):
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
         with open(file_path, "rb") as pdf_file:
-            document_type = DocumentType(data=pdf_file.read(), filename=os.path.basename(file_path))
+            document_type = DocumentType(data=pdf_file.read(), identifier=file_path)
         return self._create_custom_pdf_content_(document_type, detail=detail)
     
     def _create_custom_pdf_content_(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
@@ -181,7 +181,7 @@ class LLMClient(ABC):
         '''
         import ai_chat_util.util.pdf_util as pdf_util
 
-        page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.filename} の内容を以下に示します。")
+        page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.identifier} の内容を以下に示します。")
         pdf_contents = [page_info_content]
         # PDFからテキストと画像を抽出
         pdf_elements = pdf_util.extract_content_from_bytes(document_type.data)
@@ -190,7 +190,7 @@ class LLMClient(ABC):
                 text_content = self.create_text_content(text=element["text"])
                 pdf_contents.append(text_content)
             elif element["type"] == "image":
-                document_type = DocumentType(data=element["bytes"])
+                document_type = DocumentType(data=element["bytes"], identifier=document_type.identifier)
                 image_content = self._create_image_content_(document_type, detail)
                 pdf_contents.extend(image_content)
 
@@ -203,14 +203,14 @@ class LLMClient(ABC):
         # Officeドキュメントを一時的にPDFに変換する
         temp_dir = tempfile.TemporaryDirectory()
         atexit.register(temp_dir.cleanup)
-        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.filename)}_{uuid.uuid4()}.pdf")
+        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
         Office2PDFUtil.create_pdf_from_document_bytes(
             input_bytes=document_type.data,
             output_path=temp_file_path
         )
         # 元ファイルからPDFに変換した旨の説明を追加
         explanation_text = f"""
-            {temp_file_path}は、元のOfficeドキュメント: {document_type.filename} をPDFに変換したものです。
+            {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
             ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
             """
         explanation_content = self.create_text_content(text=explanation_text)
@@ -228,7 +228,7 @@ class LLMClient(ABC):
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
         with open(file_path, "rb") as office_file:
-            document_type = DocumentType(data=office_file.read())
+            document_type = DocumentType(data=office_file.read(), identifier=file_path)
         return self.create_office_content(document_type, detail=detail)
   
 
@@ -270,7 +270,7 @@ class LLMClient(ABC):
         if document_type.is_office_document():
             return self.create_office_content(document_type, detail=detail)
         
-        raise ValueError(f"Unsupported document type for file: {document_type.filename}")    
+        raise ValueError(f"Unsupported document type for file: {document_type.identifier}")    
 
     def create_multi_format_contents_from_file(
             self, file_path: str, detail: str = "auto"

@@ -79,7 +79,7 @@ class OpenAIClient(LLMClient):
     def _create_pdf_content_(self, document_type: DocumentType, detail: str) -> list[ChatContent]:
         base64_file = base64.b64encode(document_type.data).decode('utf-8')
         file_url = f"data:application/pdf;base64,{base64_file}"    
-        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.filename}}
+        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
         return [ChatContent(params=params)]
 
 

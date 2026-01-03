@@ -67,7 +67,8 @@ def create_image_content(
     This function creates a ChatContent object from image bytes.
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    document_type = DocumentType(data=image_bytes)
+    identifier = "画像データのコンテンツ"
+    document_type = DocumentType(data=image_bytes, identifier=identifier)
     return llm_client.create_image_content(document_type, detail)
 
 def create_image_content_from_file(

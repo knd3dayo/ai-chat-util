@@ -634,7 +634,7 @@ wheels = [
 [[package]]
 name = "file-util"
 version = "0.1.1"
-source = { git = "https://github.com/knd3dayo/file-util.git?rev=main#f6c2aa01b0a5bc8e2c824afeec410ea65745a5f3" }
+source = { git = "https://github.com/knd3dayo/file-util.git?rev=main#73295de1141739a2e99a35bd28834bd5e0c59c2e" }
 dependencies = [
     { name = "aiofiles" },
     { name = "beautifulsoup4" },

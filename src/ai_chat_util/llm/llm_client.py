@@ -17,7 +17,7 @@ from ai_chat_util.llm.model import (
     ChatContent, WebRequestModel, ChatRequest
 )
 from ai_chat_util.util.office2pdf import Office2PDFUtil
-from file_util.model import DocumentType
+from file_util.model import FileUtilDocument
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -57,11 +57,11 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def _create_image_content_(cls, document_type: DocumentType, detail: str) -> list["ChatContent"]:
+    def _create_image_content_(cls, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
         pass
     
     @abstractmethod
-    def _create_pdf_content_(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
+    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
         pass
 
     @abstractmethod
@@ -137,20 +137,20 @@ class LLMClient(ABC):
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
 
-    def create_image_content(self, file_data: DocumentType, detail: str) -> list["ChatContent"]:
+    def create_image_content(self, file_data: FileUtilDocument, detail: str) -> list["ChatContent"]:
         return self._create_image_content_(file_data, detail)
     
     def create_image_content_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
-        return self._create_image_content_(DocumentType.from_file(file_path), detail)
+        return self._create_image_content_(FileUtilDocument.from_file(file_path), detail)
 
     def create_image_content_from_url(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
         file_paths = self.download_files([file_url], tmpdir.name)
-        return self._create_image_content_(DocumentType.from_file(file_paths[0]), detail)
+        return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
     
-    def create_pdf_content(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
+    def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.use_custom_pdf_analyzer
         if use_custom:
             return self._create_custom_pdf_content_(document_type, detail=detail)
@@ -158,7 +158,7 @@ class LLMClient(ABC):
             return self._create_pdf_content_(document_type, detail=detail)
 
     def create_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
-            return self.create_pdf_content(DocumentType.from_file(file_path), detail=detail)
+            return self.create_pdf_content(FileUtilDocument.from_file(file_path), detail=detail)
 
     def create_pdf_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         tmpdir = tempfile.TemporaryDirectory()
@@ -172,10 +172,10 @@ class LLMClient(ABC):
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
         with open(file_path, "rb") as pdf_file:
-            document_type = DocumentType(data=pdf_file.read(), identifier=file_path)
+            document_type = FileUtilDocument(data=pdf_file.read(), identifier=file_path)
         return self._create_custom_pdf_content_(document_type, detail=detail)
     
-    def _create_custom_pdf_content_(self, document_type: DocumentType, detail: str = "auto") -> list["ChatContent"]:
+    def _create_custom_pdf_content_(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
@@ -190,13 +190,13 @@ class LLMClient(ABC):
                 text_content = self.create_text_content(text=element["text"])
                 pdf_contents.append(text_content)
             elif element["type"] == "image":
-                document_type = DocumentType(data=element["bytes"], identifier=document_type.identifier)
+                document_type = FileUtilDocument(data=element["bytes"], identifier=document_type.identifier)
                 image_content = self._create_image_content_(document_type, detail)
                 pdf_contents.extend(image_content)
 
         return pdf_contents
     
-    def create_office_content(self, document_type: DocumentType, detail: str) -> list["ChatContent"]:
+    def create_office_content(self, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
@@ -228,7 +228,7 @@ class LLMClient(ABC):
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
         with open(file_path, "rb") as office_file:
-            document_type = DocumentType(data=office_file.read(), identifier=file_path)
+            document_type = FileUtilDocument(data=office_file.read(), identifier=file_path)
         return self.create_office_content(document_type, detail=detail)
   
 
@@ -251,7 +251,7 @@ class LLMClient(ABC):
 
 
     def create_multi_format_content(
-            self, document_type: DocumentType, detail: str = "auto"
+            self, document_type: FileUtilDocument, detail: str = "auto"
             ) -> list["ChatContent"]:
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
@@ -279,7 +279,7 @@ class LLMClient(ABC):
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
             
-        document_type = DocumentType.from_file(document_path=file_path)
+        document_type = FileUtilDocument.from_file(document_path=file_path)
 
         if document_type.is_text():
             with open(file_path, "r", encoding="utf-8") as text_file:
@@ -397,7 +397,7 @@ class LLMClient(ABC):
         return response
 
     async def analyze_documents_data(
-            self, document_type_list: list[DocumentType], prompt: str, detail: str = "auto"
+            self, document_type_list: list[FileUtilDocument], prompt: str, detail: str = "auto"
             ) -> ChatResponse:
         '''
         複数の形式のドキュメントとプロンプトからドキュメント解析を行う。

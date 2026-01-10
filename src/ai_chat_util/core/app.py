@@ -6,7 +6,7 @@ from ai_chat_util.llm.model import ChatHistory, ChatResponse, WebRequestModel, C
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
-from file_util.model import DocumentType
+from file_util.model import FileUtilDocument
 import os
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
@@ -68,7 +68,7 @@ def create_image_content(
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
     identifier = "画像データのコンテンツ"
-    document_type = DocumentType(data=image_bytes, identifier=identifier)
+    document_type = FileUtilDocument(data=image_bytes, identifier=identifier)
     return llm_client.create_image_content(document_type, detail)
 
 def create_image_content_from_file(
@@ -82,7 +82,7 @@ def create_image_content_from_file(
     return llm_client.create_image_content_from_file(file_path, detail)
 
 def create_pdf_content(
-        document_type: Annotated[DocumentType, Field(description="PDF file data for the chat message content")], 
+        document_type: Annotated[FileUtilDocument, Field(description="PDF file data for the chat message content")], 
         detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
         ) -> Annotated[list["ChatContent"], Field(description="Chat content created from PDF file data")]:
     """
@@ -102,7 +102,7 @@ def create_pdf_content_from_file(
     return llm_client.create_pdf_content_from_file(file_path, detail)
 
 def create_office_content(
-        document_type: Annotated[DocumentType, Field(description="Office document file data for the chat message content")],
+        document_type: Annotated[FileUtilDocument, Field(description="Office document file data for the chat message content")],
         detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for Office document analysis. e.g., 'low', 'high', 'auto'")]= "auto"
 ) -> Annotated[list[ChatContent], Field(description="Chat content created from Office document file data")]:
     """
@@ -368,7 +368,7 @@ async def analyze_files(
     return response.output
 
 async def analyze_documents_data(
-        document_type_list: Annotated[list[DocumentType], Field(description="List of DocumentType objects to analyze.")],
+        document_type_list: Annotated[list[FileUtilDocument], Field(description="List of FileUtilDocument objects to analyze.")],
         prompt: Annotated[str, Field(description="Prompt to analyze the documents")],
         detail: Annotated[
             str,

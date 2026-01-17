@@ -1,6 +1,6 @@
 # 抽象クラス
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Any, cast
 import os
 import uuid
 import copy
@@ -19,6 +19,8 @@ from ai_chat_util.llm.model import (
 from ai_chat_util.util.office2pdf import Office2PDFUtil
 from file_util.model import FileUtilDocument
 
+import litellm
+
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class LLMClient(ABC):
 
     llm_config: LLMConfig = LLMConfig()
     chat_request: ChatRequest = ChatRequest(
-        chat_history=ChatHistory(messages=[], model=llm_config.completion_model ), chat_request_context=None
+        chat_history=ChatHistory(messages=[]), chat_request_context=None
         )
 
     concurrency_limit: int = 16
@@ -35,7 +37,7 @@ class LLMClient(ABC):
     def create(
         cls, llm_config: LLMConfig = LLMConfig(), 
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[], model=llm_config.completion_model ), chat_request_context=None
+            chat_history=ChatHistory(messages=[]), chat_request_context=None
         )
     ) -> "LLMClient":
         pass
@@ -324,9 +326,7 @@ class LLMClient(ABC):
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                model=self.llm_config.completion_model, messages=[chat_message]
-                ), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
     
@@ -343,7 +343,6 @@ class LLMClient(ABC):
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(
-                model=self.llm_config.completion_model,
                 messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
@@ -369,7 +368,7 @@ class LLMClient(ABC):
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(
-                messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
+                messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
@@ -392,7 +391,7 @@ class LLMClient(ABC):
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
         response: ChatResponse = await self.chat(chat_request)
         return response
 
@@ -412,7 +411,7 @@ class LLMClient(ABC):
         prompt_content = self.create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
@@ -433,7 +432,7 @@ class LLMClient(ABC):
         prompt_content = self.create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message], model=self.llm_config.completion_model), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
 
@@ -452,7 +451,7 @@ class LLMClient(ABC):
             role=self.get_user_role_name(),
             content=[self.create_text_content(prompt)]
         )
-        chat_history = ChatHistory(messages=[chat_message], model=self.llm_config.completion_model)
+        chat_history = ChatHistory(messages=[chat_message])
         chat_history.add_message(chat_message)
         
         response = await self.chat(ChatRequest(chat_history=chat_history, chat_request_context=None))
@@ -564,7 +563,7 @@ class LLMClient(ABC):
         for preprocessed_message in preprocessed_messages:
             chat_request = ChatRequest(
                 chat_history=ChatHistory(
-                    messages=[preprocessed_message], model=self.llm_config.completion_model), 
+                    messages=[preprocessed_message]), 
                     chat_request_context=request_context)
             client = self.create(
                 self.llm_config, chat_request=chat_request)
@@ -757,7 +756,6 @@ class LLMClient(ABC):
         )
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(
-                model=self.llm_config.completion_model,
                 messages=[]
                 ), chat_request_context=request_context)
         client = self.create(self.llm_config, chat_request=chat_request)
@@ -767,9 +765,95 @@ class LLMClient(ABC):
             content=[text_content]
         )
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                model=self.llm_config.completion_model,
-                messages=[message], ), chat_request_context=None)
+            chat_history=ChatHistory(messages=[message], ), chat_request_context=None)
         summarize_response = await client.chat(chat_request)
         return summarize_response
+
+import base64
+
+class LiteLLMClient(LLMClient):
+    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest | None = None):
+
+        self.llm_config = llm_config
+
+        if chat_request is None:
+            chat_request = ChatRequest(
+                chat_history=ChatHistory(messages=[]),
+                chat_request_context=None
+            )
+        self.chat_request = chat_request
+
+    def create(
+        self, llm_config: LLMConfig = LLMConfig(), 
+        chat_request: ChatRequest | None = None
+    ) -> "LLMClient":
+        return LiteLLMClient(llm_config, chat_request)
+
+    def get_user_role_name(self) -> str:
+        return "user"
+
+    def get_assistant_role_name(self) -> str:
+        return "assistant"
+
+    def get_system_role_name(self) -> str:
+        return "system"
+
+    async def _chat_completion_(self,  **kwargs) -> ChatResponse:
+        messages = self.chat_request.chat_history.messages
+        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
+        response = litellm.completion(
+            model=self.llm_config.get_model_path(),
+            messages=message_dict_list,
+            **kwargs
+        )
+        if isinstance(response, litellm.ModelResponse):
+            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
+            # 属性として見えないことがあるため dict-style access を使う。
+            usage = response.get("usage") or {}
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
+            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+
+            choices = cast(list[Any], response.get("choices") or [])
+            output = ""
+            if choices:
+                first_choice = cast(Any, choices[0])
+                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                else:
+                    message = getattr(first_choice, "message", None)
+
+                if isinstance(message, dict):
+                    output = message.get("content") or ""
+                else:
+                    output = getattr(message, "content", "") or ""
+
+            return ChatResponse(
+                output=output,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
+            )
+        raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+
+    def _is_text_content_(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "text"
+
+    def _is_image_content_(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "image_url"
+    
+    def _is_file_content_(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "file"
+    
+    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(document_type.data).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
+        return [ChatContent(params=params)]
+    
+    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(document_type.data).decode('utf-8')
+        file_url = f"data:application/pdf;base64,{base64_file}"    
+        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
+        return [ChatContent(params=params)]
 

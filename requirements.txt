@@ -3,6 +3,7 @@ pydantic
 pandas
 openpyxl
 
+litellm 
 # For OpenAI
 openai
 tiktoken

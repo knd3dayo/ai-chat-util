@@ -126,8 +126,7 @@ class LLMBatchClient:
                 logger.info(f"Processing file: {file_path}")
                 file_content = llm_client.create_multi_format_contents_from_file(
                     file_path=file_path, 
-                    detail=detail,
-                    use_custom_pdf_analyzer=use_custom_pdf_analyzer
+                    detail=detail
                 )
                 contents.extend(file_content)
 

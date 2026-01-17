@@ -10,6 +10,8 @@ from agent_framework import ChatAgent
 
 from ai_chat_util.llm.llm_config import LLMConfig
 
+import litellm
+
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -109,23 +111,12 @@ class MSAIAgentFactory(BaseModel):
 
     llm_config: LLMConfig = Field(default_factory=lambda: LLMConfig())
 
-    def __create_openai_dict(self) -> dict:
+    def __create_llm_dict(self) -> dict:
         completion_dict = {}
-        completion_dict["api_key"] = self.llm_config.api_key
+        completion_dict["api_key"] = litellm.api_key
         completion_dict["model_id"] = self.llm_config.completion_model
-        if self.llm_config.base_url:
-            completion_dict["base_url"] = self.llm_config.base_url
-        return completion_dict
-    
-    def __create_azure_openai_dict(self) -> dict:
-        completion_dict = {}
-        completion_dict["api_key"] = self.llm_config.api_key
-        if self.llm_config.base_url:
-            completion_dict["base_url"] = self.llm_config.base_url
-        else:
-            completion_dict["endpoint"] = self.llm_config.endpoint
-            completion_dict["deployment_name"] = self.llm_config.completion_model
-            completion_dict["api_version"] = self.llm_config.api_version
+        if litellm.api_base:
+            completion_dict["base_url"] = litellm.api_base
         return completion_dict
 
     def __create_tools(self) -> list[Any]:
@@ -160,13 +151,13 @@ class MSAIAgentFactory(BaseModel):
 
         if (self.llm_config.llm_provider == "azure_openai"):
             client = AzureOpenAIChatClient(
-                **self.__create_azure_openai_dict()
+                **self.__create_llm_dict()
             )
 
             return client.create_agent(**params_dict)
         if (self.llm_config.llm_provider == "openai"):
             client = OpenAIChatClient(
-                **self.__create_openai_dict()
+                **self.__create_llm_dict()
             )
             return client.create_agent(**params_dict)
         

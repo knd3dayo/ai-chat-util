@@ -73,7 +73,6 @@ class ChatMessage(BaseModel):
 class ChatHistory(BaseModel):
 
     messages: list[ChatMessage] = Field(..., description="List of chat messages in the conversation.")
-    model: str = Field(..., description="The model used for the chat conversation.")
     
     # option fields
     temperature: Optional[float] = Field(default=0.7, description="Sampling temperature for the model.")

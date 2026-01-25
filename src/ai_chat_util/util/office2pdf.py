@@ -3,15 +3,97 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import Iterable
+import signal
 
 import os
 import shutil
-from pathlib import Path
 import tempfile
 import atexit
 
 class Office2PDFUtil:
     LIBREOFFICE_ENV_VAR = "LIBREOFFICE_PATH"
+
+    @classmethod
+    def _build_user_installation_arg(cls, user_profile_dir: Path) -> str:
+        """Build `-env:UserInstallation=...` for LibreOffice.
+
+        LibreOffice expects a *file URL* (e.g. file:///... ), not a plain filesystem path.
+        """
+        # `as_uri()` requires an absolute path
+        uri = user_profile_dir.resolve().as_uri()
+        return f"-env:UserInstallation={uri}"
+
+    @classmethod
+    def _kill_process_tree(cls, proc: subprocess.Popen[bytes]) -> None:
+        """Best-effort: kill the process *and its children*.
+
+        LibreOffice may spawn child processes; on timeout we want to clean up the whole
+        process tree.
+
+        - Windows: `taskkill /T /F`
+        - POSIX: `killpg` (requires `start_new_session=True` on Popen)
+        """
+        if proc.poll() is not None:
+            return
+
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            return
+
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    @classmethod
+    def _run_command_with_timeout(
+        cls,
+        command: list[str],
+        timeout: int | None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run a command and ensure it's cleaned up on timeout."""
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # POSIX: create a process group so we can killpg on timeout.
+            start_new_session=True,
+        )
+
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            cls._kill_process_tree(proc)
+            # Reap the process if possible.
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
+            raise RuntimeError(f"LibreOffice conversion timed out after {timeout}s") from exc
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(
+                proc.returncode,
+                command,
+                output=stdout,
+                stderr=stderr,
+            )
+
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
     @classmethod
     def _build_command(
@@ -29,14 +111,17 @@ class Office2PDFUtil:
             "--headless",
             "--nologo",
             "--nolockcheck",
+        ]
+        if extra_args:
+            # LibreOffice CLI options should appear before the document path.
+            command.extend(extra_args)
+        command.extend([
             "--convert-to",
             "pdf",
             "--outdir",
             str(output_dir),
             str(source),
-        ]
-        if extra_args:
-            command.extend(extra_args)
+        ])
         return command
 
     @classmethod
@@ -68,7 +153,7 @@ class Office2PDFUtil:
         input_path: str | Path,
         output_path: str | Path | None = None,
         libreoffice_path: str | Path | None = None,
-        timeout: int | None = 120,
+        timeout: int | None = 240,
     ) -> Path:
         """
         Convert an Office document to PDF using LibreOffice.
@@ -105,25 +190,30 @@ class Office2PDFUtil:
         libreoffice_binary = cls.find_libreoffice_binary(libreoffice_path)
         output_dir = target.parent.resolve()
 
-        command = cls._build_command(libreoffice_binary, source, output_dir)
+        # Isolate LibreOffice user profile per conversion to avoid profile locks and
+        # lingering state across runs.
+        with tempfile.TemporaryDirectory() as lo_profile_dirname:
+            lo_profile_dir = Path(lo_profile_dirname)
+            extra_args = [cls._build_user_installation_arg(lo_profile_dir)]
 
-        try:
-            result = subprocess.run(
-                command,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=timeout,
+            command = cls._build_command(
+                libreoffice_binary,
+                source,
+                output_dir,
+                extra_args=extra_args,
             )
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - raised paths tested
-            stderr = exc.stderr.decode(errors="ignore") if exc.stderr else ""
-            raise RuntimeError(
-                f"LibreOffice failed to convert {source.name}: {stderr.strip()}"
-            ) from exc
-        except FileNotFoundError:
-            raise
-        except Exception as exc:  # pragma: no cover - defensive guard
-            raise RuntimeError(f"Failed to convert {source} to PDF") from exc
+
+            try:
+                result = cls._run_command_with_timeout(command=command, timeout=timeout)
+            except subprocess.CalledProcessError as exc:  # pragma: no cover - raised paths tested
+                stderr = exc.stderr.decode(errors="ignore") if exc.stderr else ""
+                raise RuntimeError(
+                    f"LibreOffice failed to convert {source.name}: {stderr.strip()}"
+                ) from exc
+            except FileNotFoundError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive guard
+                raise RuntimeError(f"Failed to convert {source} to PDF") from exc
 
         # LibreOffice names the output after the source stem. Rename if the caller requested a custom
         # filename.

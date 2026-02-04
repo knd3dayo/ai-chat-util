@@ -1,5 +1,6 @@
 from typing import Annotated, Literal
-import os, tempfile
+import os
+import tempfile
 import atexit
 from pydantic import Field
 from ai_chat_util.llm.model import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
@@ -7,7 +8,18 @@ from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
-import os
+from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
+
+
+def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
+    """ユーザー入力のパスを、実在するパスへ解決して返す。"""
+    llm_config = LLMConfig()
+    resolved: list[str] = []
+    for p in file_path_list:
+        r = resolve_existing_file_path(p, working_directory=llm_config.working_directory)
+        resolved.append(r.resolved_path)
+    return resolved
+
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
     """
@@ -225,7 +237,8 @@ async def analyze_image_files(
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_image_files(file_list, prompt, detail)
+    resolved_paths = _resolve_existing_file_paths(file_list)
+    response = await llm_client.analyze_image_files(resolved_paths, prompt, detail)
     return response.output
 
 
@@ -276,7 +289,8 @@ async def analyze_pdf_files(
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_pdf_files(pdf_path_list, prompt, detail)
+    resolved_paths = _resolve_existing_file_paths(pdf_path_list)
+    response = await llm_client.analyze_pdf_files(resolved_paths, prompt, detail)
     return response.output
 
 # 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
@@ -321,7 +335,8 @@ async def analyze_office_files(
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_office_files(office_path_list, prompt, detail=detail)
+    resolved_paths = _resolve_existing_file_paths(office_path_list)
+    response = await llm_client.analyze_office_files(resolved_paths, prompt, detail=detail)
     return response.output
 
 async def analyze_urls(
@@ -364,7 +379,8 @@ async def analyze_files(
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
     llm_client = LLMFactory.create_llm_client(LLMConfig())
-    response = await llm_client.analyze_files(file_path_list, prompt, detail=detail)
+    resolved_paths = _resolve_existing_file_paths(file_path_list)
+    response = await llm_client.analyze_files(resolved_paths, prompt, detail=detail)
     return response.output
 
 async def analyze_documents_data(

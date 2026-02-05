@@ -62,7 +62,7 @@ uv sync
 ```dotenv
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_api_key_here
-OPENAI_COMPLETION_MODEL=gpt-5
+COMPLETION_MODEL=gpt-5
 OPENAI_BASE_URL=https://api.openai.com/v1/
 
 # PDFを直接送らず、抽出したテキスト＋画像で解析したい場合
@@ -76,11 +76,12 @@ LIBREOFFICE_PATH="c:\Program Files\LibreOffice\program\soffice.exe"
 例（Azure OpenAI）：
 
 ```dotenv
-LLM_PROVIDER=azure_openai
-OPENAI_API_KEY=your_api_key_here
-OPENAI_COMPLETION_MODEL=gpt-5
-AZURE_OPENAI_API_VERSION=2024-12-01-preview
-AZURE_OPENAI_ENDPOINT=https://your-azure-openai-endpoint/
+# Azure OpenAI (litellm)
+LLM_PROVIDER=azure
+AZURE_API_KEY=your_api_key_here
+COMPLETION_MODEL=gpt-5
+AZURE_API_VERSION=2024-12-01-preview
+AZURE_API_BASE=https://your-azure-openai-endpoint/
 ```
 
 例（Anthropic）：
@@ -88,24 +89,42 @@ AZURE_OPENAI_ENDPOINT=https://your-azure-openai-endpoint/
 ```dotenv
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_api_key_here
-ANTHROPIC_COMPLETION_MODEL=claude-sonnet-4-5-20250929
+COMPLETION_MODEL=claude-sonnet-4-5-20250929
 ```
 
 ### 主な環境変数の説明
 
 | 変数名 | 説明 |
-| `LLM_PROVIDER` | 使用するLLMプロバイダ（`openai` / `azure_openai` / `anthropic`） |
-| `OPENAI_API_KEY` | OpenAI / Azure OpenAI のAPIキー |
-| `OPENAI_COMPLETION_MODEL` | OpenAI / Azure OpenAI のテキスト生成モデル名 |
-| `OPENAI_BASE_URL` | OpenAI互換APIのベースURL（任意） |
-| `AZURE_OPENAI_API_VERSION` | Azure OpenAI のAPIバージョン（`LLM_PROVIDER=azure_openai` のとき） |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI のエンドポイントURL（`LLM_PROVIDER=azure_openai` のとき） |
+|---|---|
+| `LLM_PROVIDER` | 使用するLLMプロバイダ（`openai` / `azure` / `anthropic`） |
+| `COMPLETION_MODEL` | テキスト生成モデル名（例: `gpt-5` / `claude-sonnet-4-5-20250929`） |
+| `OPENAI_API_KEY` | OpenAI のAPIキー（`LLM_PROVIDER=openai` のとき） |
+| `OPENAI_BASE_URL` | OpenAI互換APIのベースURL（任意、`LLM_PROVIDER=openai` のとき） |
+| `AZURE_API_KEY` | Azure OpenAI のAPIキー（`LLM_PROVIDER=azure` のとき） |
+| `AZURE_API_VERSION` | Azure OpenAI のAPIバージョン（`LLM_PROVIDER=azure` のとき） |
+| `AZURE_API_BASE` | Azure OpenAI のエンドポイントURL（`LLM_PROVIDER=azure` のとき） |
 | `ANTHROPIC_API_KEY` | Anthropic のAPIキー（`LLM_PROVIDER=anthropic` のとき） |
-| `ANTHROPIC_COMPLETION_MODEL` | Anthropic のテキスト生成モデル名 |
 | `USE_CUSTOM_PDF_ANALYZER` | `true` の場合、PDFを直接送らず、抽出したテキスト＋画像で解析します |
-| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（Office→PDF変換に使用） |
+| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（例: `C:\\Program Files\\LibreOffice\\program\\soffice.exe`） |
 | `HOST_PORT` | SSE/HTTP起動時に利用するホスト側公開ポート（docker-compose.yml と合わせる） |
-| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（例: C:\\Program Files\\LibreOffice\\program\\soffice.exe） |
+| `AI_CHAT_UTIL_REQUESTS_VERIFY` | URLからファイルをダウンロードする際のSSL検証を切替（既定: `true`）。`false` で検証を無効化（※非推奨、切り分け用途） |
+| `AI_CHAT_UTIL_CA_BUNDLE` | URLからファイルをダウンロードする際に使用するCAバンドル(PEM)のパス（社内ProxyのSSLインスペクション対策として推奨） |
+
+#### Proxy環境で `certificate verify failed` が出る場合
+
+`analyze_*_urls` / `download_files` は内部で `requests.get()` を使ってURLからファイルを取得します。
+社内ProxyがSSLインスペクション（MITM）を行う環境では、サーバ証明書がProxy発行の証明書に差し替わり、
+Python側がその発行元CAを信頼していないと `certificate verify failed` になります。
+
+推奨は **社内CAをPEMにして `AI_CHAT_UTIL_CA_BUNDLE` で指定**することです。
+
+```dotenv
+# 推奨（安全）
+AI_CHAT_UTIL_CA_BUNDLE="C:\\path\\to\\corp-ca.pem"
+
+# 切り分け用途（非推奨）
+AI_CHAT_UTIL_REQUESTS_VERIFY=false
+```
 
 ---
 
@@ -270,7 +289,7 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
       "env": {
         "LLM_PROVIDER": "openai",
         "OPENAI_API_KEY": "sk-****",
-        "OPENAI_COMPLETION_MODEL": "gpt-5",
+        "COMPLETION_MODEL": "gpt-5",
         "USE_CUSTOM_PDF_ANALYZER": "true",
         "LIBREOFFICE_PATH": "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
       }

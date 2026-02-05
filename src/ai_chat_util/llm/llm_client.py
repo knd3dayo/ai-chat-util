@@ -97,6 +97,25 @@ class LLMClient(ABC):
         Download files from the given URLs to the specified directory.
         Returns a list of file paths where the files are saved.
         """
+        def _env_bool(name: str, default: bool) -> bool:
+            val = os.getenv(name)
+            if val is None:
+                return default
+            val = val.strip().lower()
+            return val in {"1", "true", "yes", "y", "on"}
+
+        # Proxy環境などでSSL検証が失敗する場合の回避策。
+        # - AI_CHAT_UTIL_REQUESTS_VERIFY=false で検証無効化（非推奨だが切り分けに有用）
+        # - AI_CHAT_UTIL_CA_BUNDLE=/path/to/corp-ca.pem で社内CAを指定（推奨）
+        verify_enabled = _env_bool("AI_CHAT_UTIL_REQUESTS_VERIFY", True)
+        ca_bundle = os.getenv("AI_CHAT_UTIL_CA_BUNDLE")
+        # requestsのverifyには bool | str(=CA bundle path) を渡せる
+        verify: bool | str
+        if ca_bundle:
+            verify = ca_bundle
+        else:
+            verify = verify_enabled
+
         def get_file_name_from_url(url: str) -> str:
             """
             URLからファイル名を抽出する。
@@ -109,7 +128,8 @@ class LLMClient(ABC):
         
         file_paths = []
         for item in urls:
-            res = requests.get(url=item.url, headers=item.headers)
+            res = requests.get(url=item.url, headers=item.headers, verify=verify)
+            res.raise_for_status()
             
             file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
             with open(file_path, "wb") as f:
@@ -856,4 +876,5 @@ class LiteLLMClient(LLMClient):
         file_url = f"data:application/pdf;base64,{base64_file}"    
         params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
         return [ChatContent(params=params)]
+
 

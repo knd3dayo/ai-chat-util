@@ -4,7 +4,7 @@ from tqdm.asyncio import tqdm_asyncio
 
 from ai_chat_util.llm.llm_factory import LLMFactory
 
-from ai_chat_util.llm.model import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
+from ai_chat_util.model.models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 
 import pandas as pd
 
@@ -12,6 +12,11 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class LLMBatchClient:
+
+    async def _run_one_(self, i: int, chat_history: ChatHistory, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse, ChatHistory]:
+        # Semaphore is effective only when each task acquires it.
+        async with sem:
+            return await self._process_row_(i, chat_history, progress)
 
     async def _process_row_(
             self, row_num: int, chat_history: ChatHistory, progress: tqdm_asyncio
@@ -43,12 +48,7 @@ class LLMBatchClient:
 
         sem = asyncio.Semaphore(concurrency)
 
-        async def _run_one(i: int, chat_history: ChatHistory):
-            # Semaphore is effective only when each task acquires it.
-            async with sem:
-                return await self._process_row_(i, chat_history, progress)
-
-        tasks = [asyncio.create_task(_run_one(i, chat_history)) for i, chat_history in enumerate(chat_histories)]
+        tasks = [asyncio.create_task(self._run_one_(i, chat_history, sem, progress)) for i, chat_history in enumerate(chat_histories)]
 
         try:
             responses = await asyncio.gather(*tasks)

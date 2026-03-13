@@ -1,18 +1,27 @@
 import os
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
+from ai_chat_util.config.runtime import get_runtime_config
 
 class AppConfig(BaseModel):
-    # default_factoryでオブジェクト生成時に環境変数から読み込む
-    model_id: str = Field(default_factory=lambda: os.getenv("OPENAI_COMPLETION_MODEL",""))
-    api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY",""))
-    azure_openai: bool = Field(default_factory=lambda: os.getenv("AZURE_OPENAI") == "true")
-    base_url: str = Field(default_factory=lambda: os.getenv("OPENAI_BASE_URL",""))
-    azure_api_version: str = Field(default_factory=lambda: os.getenv("AZURE_API_VERSION", "2024-12-01"))
-    azure_openai_endpoint: str = Field(default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", ""))
-    mcp_server_config_file_path: str = Field(default_factory=lambda: os.getenv("MCP_SERVER_CONFIG_FILE_PATH",""))
-    custom_instructions_file_path: str = Field(default_factory=lambda: os.getenv("CUSTOM_INSTRUCTIONS_FILE_PATH",""))
+    # Non-secret settings are loaded from config.yml via runtime config.
+    # Secret settings (API keys) remain in env/.env.
+    model_id: str = Field(default="")
+    api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
+    azure_openai: bool = Field(default=False)
+    base_url: str = Field(default="")
+    azure_api_version: str = Field(default="2024-12-01")
+    azure_openai_endpoint: str = Field(default="")
+    mcp_server_config_file_path: str = Field(default="")
+    custom_instructions_file_path: str = Field(default="")
 
     def __init__(self, **data):
-        load_dotenv()
+        if not data:
+            cfg = get_runtime_config()
+            data = {
+                "model_id": cfg.llm.completion_model,
+                "azure_openai": cfg.llm.provider == "azure_openai",
+                "base_url": cfg.llm.base_url or "",
+                "mcp_server_config_file_path": cfg.paths.mcp_server_config_file_path or "",
+                "custom_instructions_file_path": cfg.paths.custom_instructions_file_path or "",
+            }
         super().__init__(**data)

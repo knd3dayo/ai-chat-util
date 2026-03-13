@@ -9,6 +9,7 @@ from agent_framework.openai import OpenAIChatClient
 from agent_framework import ChatAgent
 
 from ai_chat_util.llm.llm_config import LLMConfig
+from ai_chat_util.config.runtime import init_runtime
 
 import litellm
 
@@ -199,11 +200,17 @@ class MSAIAgentFactory(BaseModel):
 
 async def async_main():
 
-    # Create an agent using OpenAI ChatCompletion
-    llm_config = LLMConfig()
-
     # 引数解析 -f mcp_settings_json_path
     parser = argparse.ArgumentParser(description="MS AI Agent Sample")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help=(
+            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
+        ),
+    )
     parser.add_argument("-f", "--mcp_server_config_file_path", type=str, help="Path to the MCP settings JSON file")
     # カスタムインストラクションのパス
     parser.add_argument("-c", "--custom_instructions_file_path", type=str, help="Path to the custom instructions file")
@@ -213,6 +220,11 @@ async def async_main():
     parser.add_argument("--allow_outside_modifications", action="store_true", help="Allow modifications to files outside the working directory")
 
     args = parser.parse_args()
+
+    init_runtime(args.config or None)
+
+    # Create an agent using OpenAI ChatCompletion
+    llm_config = LLMConfig()
     llm_config.mcp_server_config_file_path = args.mcp_server_config_file_path
     working_directory = args.working_directory
     allow_outside_modifications = args.allow_outside_modifications

@@ -2,7 +2,7 @@ import asyncio, os
 import argparse
 from fastmcp import FastMCP
 
-from dotenv import load_dotenv
+from ai_chat_util.config.runtime import init_runtime
 from ai_chat_util.core.app import (
     run_chat,
     run_batch_chat,
@@ -22,6 +22,15 @@ from ai_chat_util.core.app import (
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help=(
+            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
+        ),
+    )
     # -m オプションを追加
     parser.add_argument("-m", "--mode", choices=["sse", "http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
     # -t tools オプションを追加 toolsはカンマ区切りの文字列. search_wikipedia_ja_mcp, vector_search, etc. 指定されていない場合は空文字を設定
@@ -68,10 +77,12 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
     
 
 async def main():
-    # load_dotenv() を使用して環境変数を読み込む
-    load_dotenv()
     # 引数を解析
     args = parse_args()
+
+    # Initialize runtime config first (config.yml required)
+    init_runtime(args.config or None)
+
     mode = args.mode
 
     mcp = FastMCP() 

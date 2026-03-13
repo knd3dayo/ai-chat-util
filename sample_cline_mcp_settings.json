@@ -6,17 +6,14 @@
             "command": "uv",
             "args": [
                 "--directory",
-                "<PATH_TO_VENV>",
+                "<REPO_PATH>",
                 "run",
                 "-m",
                 "ai_chat_util.mcp.mcp_server"
             ],
             "env": {
-                "LLM_PROVIDER": "openai",
                 "OPENAI_API_KEY": "sk-****",
-                "OPENAI_COMPLETION_MODEL": "gpt-4.1",
-                "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
-                "USE_CUSTOM_PDF_ANALYZER": "true"
+                "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\config.yml"
             }
         }
     }

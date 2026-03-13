@@ -1,5 +1,4 @@
 from typing import Annotated, Literal
-import os
 import tempfile
 import atexit
 from pydantic import Field
@@ -9,6 +8,7 @@ from ai_chat_util.llm.llm_config import LLMConfig
 from ai_chat_util.batch.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
+from ai_chat_util.config.runtime import get_runtime_config
 
 
 def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
@@ -23,10 +23,10 @@ def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
     """
-    This function checks whether to use the custom PDF analyzer based on the environment variable.
+    This function checks whether to use the custom PDF analyzer based on config.yml.
     """
-    use_custom = os.getenv("USE_CUSTOM_PDF_ANALYZER", "false").lower() == "true"
-    return use_custom
+    cfg = get_runtime_config()
+    return cfg.features.use_custom_pdf_analyzer
 
 def get_completion_model() -> Annotated[str, Field(description="The completion model used for LLM")]:
     """
@@ -255,7 +255,7 @@ async def analyze_pdf_urls(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -279,7 +279,7 @@ async def analyze_pdf_files(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -301,7 +301,7 @@ async def analyze_office_urls(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -325,7 +325,7 @@ async def analyze_office_files(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -346,7 +346,7 @@ async def analyze_urls(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -369,7 +369,7 @@ async def analyze_files(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),
@@ -390,7 +390,7 @@ async def analyze_documents_data(
             str,
             Field(
                 description=(
-                    "Parameter used when USE_CUSTOM_PDF_ANALYZER is enabled. "
+                    "Parameter used when features.use_custom_pdf_analyzer is enabled. "
                     "Detail level for analysis. e.g., 'low', 'high', 'auto'"
                 )
             ),

@@ -12,6 +12,7 @@ import requests
 
 
 from ai_chat_util.llm.llm_config import LLMConfig
+from ai_chat_util.config.runtime import get_runtime_config
 from ai_chat_util.llm.model import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
@@ -26,16 +27,14 @@ logger = log_settings.getLogger(__name__)
 
 class LLMClient(ABC):
 
-    llm_config: LLMConfig = LLMConfig()
-    chat_request: ChatRequest = ChatRequest(
-        chat_history=ChatHistory(messages=[]), chat_request_context=None
-        )
+    llm_config: LLMConfig
+    chat_request: ChatRequest
 
     concurrency_limit: int = 16
     
     @abstractmethod
     def create(
-        cls, llm_config: LLMConfig = LLMConfig(), 
+        cls, llm_config: LLMConfig | None = None,
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(messages=[]), chat_request_context=None
         )
@@ -97,18 +96,10 @@ class LLMClient(ABC):
         Download files from the given URLs to the specified directory.
         Returns a list of file paths where the files are saved.
         """
-        def _env_bool(name: str, default: bool) -> bool:
-            val = os.getenv(name)
-            if val is None:
-                return default
-            val = val.strip().lower()
-            return val in {"1", "true", "yes", "y", "on"}
+        cfg = get_runtime_config()
 
-        # Proxy環境などでSSL検証が失敗する場合の回避策。
-        # - AI_CHAT_UTIL_REQUESTS_VERIFY=false で検証無効化（非推奨だが切り分けに有用）
-        # - AI_CHAT_UTIL_CA_BUNDLE=/path/to/corp-ca.pem で社内CAを指定（推奨）
-        verify_enabled = _env_bool("AI_CHAT_UTIL_REQUESTS_VERIFY", True)
-        ca_bundle = os.getenv("AI_CHAT_UTIL_CA_BUNDLE")
+        verify_enabled = cfg.network.requests_verify
+        ca_bundle = cfg.network.ca_bundle
         # requestsのverifyには bool | str(=CA bundle path) を渡せる
         verify: bool | str
         if ca_bundle:
@@ -804,9 +795,11 @@ class LiteLLMClient(LLMClient):
         self.chat_request = chat_request
 
     def create(
-        self, llm_config: LLMConfig = LLMConfig(), 
+        self, llm_config: LLMConfig | None = None,
         chat_request: ChatRequest | None = None
     ) -> "LLMClient":
+        if llm_config is None:
+            llm_config = LLMConfig()
         return LiteLLMClient(llm_config, chat_request)
 
     def get_user_role_name(self) -> str:

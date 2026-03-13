@@ -1,0 +1,66 @@
+# ai_chat_util config example
+#
+# NOTE:
+# - This file contains NON-secret settings only.
+# - Secrets (API keys / tokens) should be provided via environment variables or .env.
+# - At runtime, config.yml is required. Resolution order:
+#   1) --config
+#   2) AI_CHAT_UTIL_CONFIG
+#   3) ./config.yml (cwd)
+#   4) <project-root>/config.yml
+
+llm:
+  # Provider name used by LiteLLM. Examples: openai, azure, anthropic
+  provider: openai
+
+  # Optional: API key reference (secret).
+  # - Secrets themselves must NOT be written in config.yml.
+  # - Use env reference format:
+  #     api_key: os.environ/OPENAI_API_KEY
+  #   (provider=azure -> AZURE_API_KEY, provider=anthropic -> ANTHROPIC_API_KEY)
+  api_key: null
+
+  # Model name (or Azure deployment name) for chat completion
+  completion_model: gpt-5
+
+  # Model name for embeddings
+  embedding_model: text-embedding-3-small
+
+  # Non-secret API base URL (optional).
+  # - OpenAI: https://api.openai.com/v1/
+  # - Azure OpenAI: https://<resource-name>.openai.azure.com/
+  base_url: null
+
+  # Non-secret API version (mainly for Azure OpenAI; optional)
+  api_version: null
+
+paths:
+  # Optional: MCP client settings path
+  mcp_server_config_file_path: null
+
+  # Optional: custom instructions path
+  custom_instructions_file_path: null
+
+  # Base directory used to resolve relative paths
+  working_directory: work
+
+features:
+  allow_outside_modifications: false
+  use_custom_pdf_analyzer: false
+
+logging:
+  level: INFO
+  file: null
+
+network:
+  # SSL verification for downloading files from URLs (recommended: true)
+  requests_verify: true
+
+  # Optional CA bundle path (PEM). Useful behind corporate proxy / SSL inspection.
+  ca_bundle: null
+
+office2pdf:
+  # Optional LibreOffice binary path.
+  # - Windows example: C:\\Program Files\\LibreOffice\\program\\soffice.exe
+  # - Or just "soffice" if it's on PATH
+  libreoffice_path: null

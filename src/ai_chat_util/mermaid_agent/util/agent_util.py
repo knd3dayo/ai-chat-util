@@ -9,6 +9,7 @@ from agent_framework.openai import OpenAIChatClient
 from agent_framework import ChatAgent
 
 from ai_chat_util.mermaid_agent.util.app_config import AppConfig
+from ai_chat_util.config.runtime import init_runtime
 
 import ai_chat_util.mermaid_agent.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -201,6 +202,15 @@ class MSAIAgentUtil(BaseModel):
 async def async_main():
     # 引数解析 -f mcp_settings_json_path
     parser = argparse.ArgumentParser(description="MS AI Agent Sample")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help=(
+            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
+        ),
+    )
     parser.add_argument("-f", "--mcp_settings_json_path", type=str, help="Path to the MCP settings JSON file")
     # -d 作業ディレクトリ defaultはカレントディレクトリ
     parser.add_argument("-d", "--working_directory", type=str, default=".", help="Path to the working directory")
@@ -210,6 +220,9 @@ async def async_main():
     parser.add_argument("-c", "--custom_instructions_path", type=str, help="Path to the custom instructions file")
 
     args = parser.parse_args()
+
+    init_runtime(args.config or None)
+
     mcp_settings_json_path = args.mcp_settings_json_path
     working_directory = args.working_directory
     allow_outside_modifications = args.allow_outside_modifications

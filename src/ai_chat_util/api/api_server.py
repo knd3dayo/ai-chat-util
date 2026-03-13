@@ -1,4 +1,5 @@
 from fastapi import APIRouter, FastAPI
+from ai_chat_util.config.runtime import init_runtime
 from ai_chat_util.core.app import (
     use_custom_pdf_analyzer,
     get_completion_model,
@@ -29,6 +30,12 @@ from ai_chat_util.core.app import (
 router = APIRouter()
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def _startup_init_runtime() -> None:
+    # Ensure config is loaded (uvicorn direct import path).
+    init_runtime(None)
 
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
 
@@ -98,7 +105,20 @@ router.add_api_route(path="/analyze_urls", endpoint=analyze_urls, methods=["POST
 app.include_router(prefix="/api/ai_chat_util", router=router)
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
-    from dotenv import load_dotenv
-    load_dotenv()
+
+    parser = argparse.ArgumentParser(description="ai_chat_util API server")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help=(
+            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
+        ),
+    )
+    args = parser.parse_args()
+
+    init_runtime(args.config or None)
     uvicorn.run(app, host="0.0.0.0", port=8000)

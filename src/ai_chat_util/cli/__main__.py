@@ -2,14 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 from typing import Iterable
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.batch.batch_client import LLMBatchClient
-
-def _set_env_if_provided(name: str, value: str) -> None:
-    if value:
-        os.environ[name] = value
+from ai_chat_util.config.runtime import init_runtime, apply_logging_overrides
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
@@ -17,19 +13,29 @@ def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
         "--loglevel",
         type=str,
         default="",
-        help="LOGLEVEL 環境変数を設定します（例: DEBUG, INFO）。指定しない場合は既存設定を使用します。",
+        help="ログレベルを上書きします（例: DEBUG, INFO）。未指定の場合は config.yml の設定を使用します。",
     )
     parser.add_argument(
         "--logfile",
         type=str,
         default="",
-        help="LOGFILE 環境変数を設定します（ログをファイル出力）。指定しない場合は既存設定を使用します。",
+        help="ログのファイル出力先を上書きします。未指定の場合は config.yml の設定を使用します。",
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ai_chat_util CLI")
     _add_common_logging_args(parser)
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help=(
+            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
+        ),
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -151,7 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="auto",
         help=(
-            "USE_CUSTOM_PDF_ANALYZER=true の場合に使われる detail（low/high/auto）。既定は auto"
+            "features.use_custom_pdf_analyzer=true の場合に使われる detail（low/high/auto）。既定は auto"
         ),
     )
 
@@ -179,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="auto",
         help=(
-            "USE_CUSTOM_PDF_ANALYZER=true の場合に使われる detail（low/high/auto）。既定は auto"
+            "features.use_custom_pdf_analyzer=true の場合に使われる detail（low/high/auto）。既定は auto"
         ),
     )
 
@@ -208,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="auto",
         help=(
-            "USE_CUSTOM_PDF_ANALYZER=true の場合に使われる detail（low/high/auto）。既定は auto"
+            "features.use_custom_pdf_analyzer=true の場合に使われる detail（low/high/auto）。既定は auto"
         ),
     )
 
@@ -225,15 +231,14 @@ def _print_header(command: str) -> None:
     print(f"Executing command: {command}")
 
 async def main(argv: Iterable[str] | None = None) -> None:
-    # NOTE: dotenv は各機能側でも読み込むが、CLI起動時点でも読み込んでおく
-    from dotenv import load_dotenv
-
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    _set_env_if_provided("LOGLEVEL", args.loglevel)
-    _set_env_if_provided("LOGFILE", args.logfile)
-    load_dotenv()
+    # Initialize runtime config first (config.yml required)
+    init_runtime(args.config or None)
+
+    # Optional logging overrides (process-local; does not touch env)
+    apply_logging_overrides(level=args.loglevel or None, file=args.logfile or None)
 
     _print_header(args.command)
 

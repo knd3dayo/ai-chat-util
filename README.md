@@ -16,7 +16,7 @@
 - 対話型のAIチャットを実現。
 - LLM（大規模言語モデル）との自然な会話をサポート。
 - コンテキストを保持した継続的な会話が可能。
-- OpenAI / Azure OpenAI / Anthropic をサポート（`LLM_PROVIDER` で切り替え）
+- OpenAI / Azure OpenAI / Anthropic をサポート（`config.yml` の `llm.provider` で切り替え）
 
 ### ⚙️ バッチクライアント
 - 複数の入力をまとめてAIに処理させるバッチ実行機能。
@@ -50,81 +50,82 @@ src/ai_chat_util/
 ```bash
 uv sync
 ```
-## 環境変数設定
+## 設定（config.yml + .env）
 
-このプロジェクトでは、`.env` ファイルを使用して環境変数を管理します。  
-`.env_template` を参考に `.env` ファイルを作成してください。
+本プロジェクトは、
 
-`.env_template` の内容に沿って設定してください（OpenAI / Azure OpenAI / Anthropic）。
+- **非秘密設定** → `config.yml`
+- **秘密情報（APIキー/トークン等）** → 環境変数 / `.env`
 
-例（OpenAI）：
+に分離しています。
 
-```dotenv
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_api_key_here
-COMPLETION_MODEL=gpt-5
-OPENAI_BASE_URL=https://api.openai.com/v1/
+### 1) config.yml（必須）
 
-# PDFを直接送らず、抽出したテキスト＋画像で解析したい場合
-USE_CUSTOM_PDF_ANALYZER=true
+`config.example.yml` をコピーして `config.yml` を作成してください。
 
-# Office解析（Office→PDF変換）に必要
-LIBREOFFICE_PATH="c:\Program Files\LibreOffice\program\soffice.exe"
-
+```bash
+copy config.example.yml config.yml
 ```
 
-例（Azure OpenAI）：
+設定ファイルの探索順は以下です。
 
-```dotenv
-# Azure OpenAI (litellm)
-LLM_PROVIDER=azure
-AZURE_API_KEY=your_api_key_here
-COMPLETION_MODEL=gpt-5
-AZURE_API_VERSION=2024-12-01-preview
-AZURE_API_BASE=https://your-azure-openai-endpoint/
+1. `--config`
+2. 環境変数 `AI_CHAT_UTIL_CONFIG`
+3. `./config.yml`（実行時カレント）
+4. `<project-root>/config.yml`
+
+> `config.yml` が見つからない場合はエラーになります。
+
+#### `--config` を渡せない起動（例: `uvicorn ...:app`）
+
+環境変数 `AI_CHAT_UTIL_CONFIG` で `config.yml` の場所を指定してください。
+
+```powershell
+$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\config.yml"
+uvicorn ai_chat_util.api.api_server:app
 ```
 
-例（Anthropic）：
+### 2) .env（任意・秘密のみ）
 
-```dotenv
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=your_api_key_here
-COMPLETION_MODEL=claude-sonnet-4-5-20250929
+`.env.example` をコピーして `.env` を作成し、利用するプロバイダの API キー等を設定してください。
+
+```bash
+copy .env.example .env
 ```
 
-### 主な環境変数の説明
+### Proxy環境で `certificate verify failed` が出る場合
 
-| 変数名 | 説明 |
-|---|---|
-| `LLM_PROVIDER` | 使用するLLMプロバイダ（`openai` / `azure` / `anthropic`） |
-| `COMPLETION_MODEL` | テキスト生成モデル名（例: `gpt-5` / `claude-sonnet-4-5-20250929`） |
-| `OPENAI_API_KEY` | OpenAI のAPIキー（`LLM_PROVIDER=openai` のとき） |
-| `OPENAI_BASE_URL` | OpenAI互換APIのベースURL（任意、`LLM_PROVIDER=openai` のとき） |
-| `AZURE_API_KEY` | Azure OpenAI のAPIキー（`LLM_PROVIDER=azure` のとき） |
-| `AZURE_API_VERSION` | Azure OpenAI のAPIバージョン（`LLM_PROVIDER=azure` のとき） |
-| `AZURE_API_BASE` | Azure OpenAI のエンドポイントURL（`LLM_PROVIDER=azure` のとき） |
-| `ANTHROPIC_API_KEY` | Anthropic のAPIキー（`LLM_PROVIDER=anthropic` のとき） |
-| `USE_CUSTOM_PDF_ANALYZER` | `true` の場合、PDFを直接送らず、抽出したテキスト＋画像で解析します |
-| `LIBREOFFICE_PATH` | LibreOffice実行ファイルのパス（例: `C:\\Program Files\\LibreOffice\\program\\soffice.exe`） |
-| `HOST_PORT` | SSE/HTTP起動時に利用するホスト側公開ポート（docker-compose.yml と合わせる） |
-| `AI_CHAT_UTIL_REQUESTS_VERIFY` | URLからファイルをダウンロードする際のSSL検証を切替（既定: `true`）。`false` で検証を無効化（※非推奨、切り分け用途） |
-| `AI_CHAT_UTIL_CA_BUNDLE` | URLからファイルをダウンロードする際に使用するCAバンドル(PEM)のパス（社内ProxyのSSLインスペクション対策として推奨） |
+`analyze_*_urls` / `download_files` は URL からファイルを取得します。
+社内Proxyが SSL インスペクション（MITM）を行う環境では、CA を信頼できずエラーになることがあります。
 
-#### Proxy環境で `certificate verify failed` が出る場合
+推奨は **社内CAをPEMにして `config.yml` の `network.ca_bundle` で指定**することです。
 
-`analyze_*_urls` / `download_files` は内部で `requests.get()` を使ってURLからファイルを取得します。
-社内ProxyがSSLインスペクション（MITM）を行う環境では、サーバ証明書がProxy発行の証明書に差し替わり、
-Python側がその発行元CAを信頼していないと `certificate verify failed` になります。
-
-推奨は **社内CAをPEMにして `AI_CHAT_UTIL_CA_BUNDLE` で指定**することです。
-
-```dotenv
-# 推奨（安全）
-AI_CHAT_UTIL_CA_BUNDLE="C:\\path\\to\\corp-ca.pem"
-
-# 切り分け用途（非推奨）
-AI_CHAT_UTIL_REQUESTS_VERIFY=false
+```yml
+network:
+  ca_bundle: "C:\\path\\to\\corp-ca.pem"
+  requests_verify: true
 ```
+
+切り分け用途（非推奨）で SSL 検証を無効化する場合は `network.requests_verify: false` を設定してください。
+
+### LibreOffice（Office→PDF 変換）
+
+Office 解析で LibreOffice を使う場合は、`config.yml` の `office2pdf.libreoffice_path` を設定します。
+
+```yml
+office2pdf:
+  libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
+```
+
+### 環境変数（一覧）
+
+| 変数名 | 種別 | 説明 |
+|---|---|---|
+| `OPENAI_API_KEY` | 秘密 | OpenAI APIキー |
+| `AZURE_API_KEY` | 秘密 | Azure OpenAI APIキー |
+| `ANTHROPIC_API_KEY` | 秘密 | Anthropic APIキー |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
+| `AI_CHAT_UTIL_CONFIG` | 非秘密 | `config.yml` のパス（`--config` を渡せない起動で使用） |
 
 ---
 
@@ -138,13 +139,14 @@ AI_CHAT_UTIL_REQUESTS_VERIFY=false
 uv run -m ai_chat_util.cli --help
 ```
 
-> 補足: CLI起動時に `.env` を読み込みます（`python-dotenv`）。
+> 補足: 起動時に `.env` を読み込みます（秘密情報のみ）。`config.yml` は必須です。
 
 ### 共通オプション
 
 ```text
---loglevel  LOGLEVEL 環境変数を設定します（例: DEBUG, INFO）
---logfile   LOGFILE 環境変数を設定します（ログをファイル出力）
+--loglevel  ログレベルを上書き（例: DEBUG, INFO）
+--logfile   ログのファイル出力先を上書き
+--config    設定ファイル(config.yml)のパス
 ```
 
 ### サブコマンド
@@ -228,7 +230,7 @@ uv run -m ai_chat_util.cli analyze_files \
 MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
 > 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
-> そのため、事前に `.env` に `OPENAI_API_KEY` 等を設定してください。
+> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定してください。`config.yml` は必須です。
 
 ### 起動方法
 
@@ -287,11 +289,8 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
         "ai_chat_util.mcp.mcp_server"
       ],
       "env": {
-        "LLM_PROVIDER": "openai",
         "OPENAI_API_KEY": "sk-****",
-        "COMPLETION_MODEL": "gpt-5",
-        "USE_CUSTOM_PDF_ANALYZER": "true",
-        "LIBREOFFICE_PATH": "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
+        "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\config.yml"
       }
     }
   }

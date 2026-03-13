@@ -4,6 +4,7 @@ from typing import List, Optional, Annotated, Callable
 from pydantic import BaseModel, Field
 from datetime import datetime
 import ai_chat_util.mermaid_agent.log.log_settings as log_settings
+from ai_chat_util.config.runtime import get_runtime_config
 
 logger = log_settings.getLogger(__name__)
 
@@ -34,10 +35,10 @@ def check_allow_outside_modification(file_path: str):
     Args:
     file_path (str): The path to the file to check.
     """
-    allow_outside_modification = os.getenv("ALLOW_OUTSIDE_MODIFICATIONS", "false").lower()
-    if not allow_outside_modification == "true":
+    cfg = get_runtime_config()
+    if not cfg.features.allow_outside_modifications:
         file_path = os.path.abspath(file_path)
-        allowed_directory = os.path.abspath(os.getenv("PWD", "."))
+        allowed_directory = os.path.abspath(cfg.paths.working_directory or os.getcwd())
         if not file_path.startswith(allowed_directory):
             logger.warning(f"Outside file modification is not allowed. Attempted to modify {file_path}.")
             raise ValueError(f"Outside file modification is not allowed. Attempted to modify {file_path}.")

@@ -151,7 +151,7 @@ async def run_chat(
     """
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
-    client = LLMFactory.create_llm_client(chat_request=chat_request)
+    client = LLMFactory.create_llm_client()
     return await client.chat()
 
 

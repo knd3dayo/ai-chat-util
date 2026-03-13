@@ -28,7 +28,7 @@ class LLMBatchClient:
             result_chat_history = chat_history
         else:
             chat_request = ChatRequest(chat_history=chat_history)
-            llm_client = LLMFactory.create_llm_client(chat_request=chat_request)
+            llm_client = LLMFactory.create_llm_client()
             chat_response = await llm_client.chat()
             result_chat_history = llm_client.chat_request.chat_history
 

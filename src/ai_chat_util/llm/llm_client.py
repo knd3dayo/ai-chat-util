@@ -34,9 +34,6 @@ class LLMClient(ABC):
     @abstractmethod
     def create(
         cls, llm_config: AiChatUtilConfig | None = None,
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[]), chat_request_context=None
-        )
     ) -> "LLMClient":
         pass
 
@@ -549,7 +546,7 @@ class LLMClient(ABC):
         async def __process_message__(message_num: int, message: ChatMessage) -> tuple[int, ChatResponse]:
             chat_request: ChatRequest = ChatRequest(chat_history=copy.deepcopy(self.chat_request.chat_history), chat_request_context=request_context)
             client = self.create(
-                self.llm_config, chat_request=chat_request)
+                self.llm_config, )
             
             client.chat_request.chat_history.add_message(message)
             chat_response =  await client._chat_completion_(**kwargs)
@@ -576,7 +573,7 @@ class LLMClient(ABC):
                     messages=[preprocessed_message]), 
                     chat_request_context=request_context)
             client = self.create(
-                self.llm_config, chat_request=chat_request)
+                self.llm_config)
             
             chat_response =  await client._chat_completion_(**kwargs)
             chat_responses.append(chat_response)
@@ -768,7 +765,7 @@ class LLMClient(ABC):
             chat_history=ChatHistory(
                 messages=[]
                 ), chat_request_context=request_context)
-        client = self.create(self.llm_config, chat_request=chat_request)
+        client = self.create(self.llm_config)
         text_content = client.create_text_content(summmarize_request_text)
         message = ChatMessage(
             role=self.get_user_role_name(),
@@ -782,24 +779,16 @@ class LLMClient(ABC):
 import base64
 
 class LiteLLMClient(LLMClient):
-    def __init__(self, llm_config: AiChatUtilConfig, chat_request: ChatRequest | None = None):
+    def __init__(self, llm_config: AiChatUtilConfig):
 
         self.llm_config = llm_config
 
-        if chat_request is None:
-            chat_request = ChatRequest(
-                chat_history=ChatHistory(messages=[]),
-                chat_request_context=None
-            )
-        self.chat_request = chat_request
-
     def create(
-        self, llm_config: AiChatUtilConfig | None = None,
-        chat_request: ChatRequest | None = None
-    ) -> "LLMClient":
+        self, llm_config: AiChatUtilConfig | None = None
+        ) -> "LLMClient":
         if llm_config is None:
             llm_config = get_runtime_config()
-        return LiteLLMClient(llm_config, chat_request)
+        return LiteLLMClient(llm_config)
 
     def get_user_role_name(self) -> str:
         return "user"

@@ -2,9 +2,9 @@ from typing import Annotated, Literal
 import tempfile
 import atexit
 from pydantic import Field
-from ai_chat_util.llm.model import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util.model.models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
-from ai_chat_util.llm.llm_config import LLMConfig
+from ai_chat_util.config.runtime import get_runtime_config
 from ai_chat_util.batch.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
@@ -13,10 +13,10 @@ from ai_chat_util.config.runtime import get_runtime_config
 
 def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
     """ユーザー入力のパスを、実在するパスへ解決して返す。"""
-    llm_config = LLMConfig()
+    llm_config = get_runtime_config()
     resolved: list[str] = []
     for p in file_path_list:
-        r = resolve_existing_file_path(p, working_directory=llm_config.working_directory)
+        r = resolve_existing_file_path(p, working_directory=llm_config.paths.working_directory)
         resolved.append(r.resolved_path)
     return resolved
 
@@ -32,8 +32,8 @@ def get_completion_model() -> Annotated[str, Field(description="The completion m
     """
     This function creates a ChatHistory object from a list of chat messages.
     """
-    llm_config = LLMConfig()
-    return llm_config.completion_model
+    cfg = get_runtime_config()
+    return cfg.llm.completion_model
 
 def create_user_message(
         chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the user messages")]
@@ -41,7 +41,7 @@ def create_user_message(
     """
     This function creates a ChatHistory object from a list of user messages.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_user_message(chat_content_list)
 
 def create_assistant_message(
@@ -50,7 +50,7 @@ def create_assistant_message(
     """
     This function creates a ChatHistory object from a list of assistant messages.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_assistant_message(chat_content_list)
 
 def create_system_message(
@@ -59,7 +59,7 @@ def create_system_message(
     """
     This function creates a ChatHistory object from a list of system messages.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_system_message(chat_content_list)
 
 def create_text_content(
@@ -68,7 +68,7 @@ def create_text_content(
     """
     This function creates a ChatContent object from text.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_text_content(text)
 
 def create_image_content(
@@ -78,7 +78,7 @@ def create_image_content(
     """
     This function creates a ChatContent object from image bytes.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     identifier = "画像データのコンテンツ"
     document_type = FileUtilDocument(data=image_bytes, identifier=identifier)
     return llm_client.create_image_content(document_type, detail)
@@ -90,7 +90,7 @@ def create_image_content_from_file(
     """
     This function creates a ChatContent object from an image file.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_image_content_from_file(file_path, detail)
 
 def create_pdf_content(
@@ -100,7 +100,7 @@ def create_pdf_content(
     """
     This function creates a ChatContent object from PDF file data.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_pdf_content(document_type, detail)
 
 def create_pdf_content_from_file(
@@ -110,7 +110,7 @@ def create_pdf_content_from_file(
     """
     This function creates a ChatContent object from a file.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_pdf_content_from_file(file_path, detail)
 
 def create_office_content(
@@ -120,7 +120,7 @@ def create_office_content(
     """
     This function creates a ChatContent object from Office document file data.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_office_content(document_type, detail)
 
 def create_office_content_from_file(
@@ -130,7 +130,7 @@ def create_office_content_from_file(
     """
     This function creates a ChatContent object from an Office document file.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_office_content_from_file(file_path, detail)
 
 def create_multi_format_contents_from_file(
@@ -140,7 +140,7 @@ def create_multi_format_contents_from_file(
     """
     This function creates a ChatContent object from a multi-format file.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     return llm_client.create_multi_format_contents_from_file(file_path, detail)
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
@@ -151,7 +151,7 @@ async def run_chat(
     """
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
-    client = LLMFactory.create_llm_client(LLMConfig(), chat_request)
+    client = LLMFactory.create_llm_client(chat_request=chat_request)
     return await client.chat()
 
 
@@ -161,7 +161,7 @@ async def run_simple_chat(
     """
     This function processes a simple chat with the specified prompt and returns the chat response.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     response = await llm_client.simple_chat(prompt)
     return response
 
@@ -222,7 +222,7 @@ async def analyze_image_urls(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
 
     return response.output
@@ -236,7 +236,7 @@ async def analyze_image_files(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     resolved_paths = _resolve_existing_file_paths(file_list)
     response = await llm_client.analyze_image_files(resolved_paths, prompt, detail)
     return response.output
@@ -266,7 +266,7 @@ async def analyze_pdf_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     path_list = llm_client.download_files(pdf_path_urls, tmpdir.name)
     response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
     return response.output
@@ -288,7 +288,7 @@ async def analyze_pdf_files(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     resolved_paths = _resolve_existing_file_paths(pdf_path_list)
     response = await llm_client.analyze_pdf_files(resolved_paths, prompt, detail)
     return response.output
@@ -312,7 +312,7 @@ async def analyze_office_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     path_list = llm_client.download_files(office_path_urls, tmpdir.name)
 
     response = await llm_client.analyze_office_files(path_list, prompt, detail)
@@ -334,7 +334,7 @@ async def analyze_office_files(
     """
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     resolved_paths = _resolve_existing_file_paths(office_path_list)
     response = await llm_client.analyze_office_files(resolved_paths, prompt, detail=detail)
     return response.output
@@ -357,7 +357,7 @@ async def analyze_urls(
     """
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     path_list = llm_client.download_files(file_path_urls, tmpdir.name)
     response = await llm_client.analyze_files(path_list, prompt, detail)
     return response.output
@@ -378,7 +378,7 @@ async def analyze_files(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     resolved_paths = _resolve_existing_file_paths(file_path_list)
     response = await llm_client.analyze_files(resolved_paths, prompt, detail=detail)
     return response.output
@@ -399,6 +399,6 @@ async def analyze_documents_data(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client(LLMConfig())
+    llm_client = LLMFactory.create_llm_client()
     response = await llm_client.analyze_documents_data(document_type_list, prompt, detail=detail)
     return response.output

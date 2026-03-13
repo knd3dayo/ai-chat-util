@@ -11,9 +11,8 @@ import atexit
 import requests
 
 
-from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.config.runtime import get_runtime_config
-from ai_chat_util.llm.model import (
+from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
+from ai_chat_util.model.models import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )
@@ -27,14 +26,14 @@ logger = log_settings.getLogger(__name__)
 
 class LLMClient(ABC):
 
-    llm_config: LLMConfig
+    llm_config: AiChatUtilConfig
     chat_request: ChatRequest
 
     concurrency_limit: int = 16
     
     @abstractmethod
     def create(
-        cls, llm_config: LLMConfig | None = None,
+        cls, llm_config: AiChatUtilConfig | None = None,
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(messages=[]), chat_request_context=None
         )
@@ -164,7 +163,7 @@ class LLMClient(ABC):
         return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
     
     def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
-        use_custom = self.llm_config.use_custom_pdf_analyzer
+        use_custom = self.llm_config.features.use_custom_pdf_analyzer
         if use_custom:
             return self._create_custom_pdf_content_(document_type, detail=detail)
         else:
@@ -368,7 +367,7 @@ class LLMClient(ABC):
         prompt_content = self.create_text_content(text=prompt)
         pdf_content_list = []
         for file_path in file_list:
-            if self.llm_config.use_custom_pdf_analyzer:
+            if self.llm_config.features.use_custom_pdf_analyzer:
                 logger.info(f"Using custom PDF analyzer for file: {file_path}")
                 pdf_content = self._create_custom_pdf_content_from_file(file_path, detail)
             else:
@@ -783,7 +782,7 @@ class LLMClient(ABC):
 import base64
 
 class LiteLLMClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_request: ChatRequest | None = None):
+    def __init__(self, llm_config: AiChatUtilConfig, chat_request: ChatRequest | None = None):
 
         self.llm_config = llm_config
 
@@ -795,11 +794,11 @@ class LiteLLMClient(LLMClient):
         self.chat_request = chat_request
 
     def create(
-        self, llm_config: LLMConfig | None = None,
+        self, llm_config: AiChatUtilConfig | None = None,
         chat_request: ChatRequest | None = None
     ) -> "LLMClient":
         if llm_config is None:
-            llm_config = LLMConfig()
+            llm_config = get_runtime_config()
         return LiteLLMClient(llm_config, chat_request)
 
     def get_user_role_name(self) -> str:
@@ -815,7 +814,7 @@ class LiteLLMClient(LLMClient):
         messages = self.chat_request.chat_history.messages
         message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
         response = litellm.completion(
-            model=self.llm_config.get_model_path(),
+            model=f"{self.llm_config.llm.provider}/{self.llm_config.llm.completion_model}",
             messages=message_dict_list,
             **kwargs
         )
@@ -869,5 +868,9 @@ class LiteLLMClient(LLMClient):
         file_url = f"data:application/pdf;base64,{base64_file}"    
         params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
         return [ChatContent(params=params)]
+
+
+
+
 
 

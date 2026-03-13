@@ -8,8 +8,7 @@ from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework.openai import OpenAIChatClient
 from agent_framework import ChatAgent
 
-from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.config.runtime import init_runtime
+from ai_chat_util.config.runtime import get_runtime_config, init_runtime, AiChatUtilConfig
 
 import litellm
 
@@ -110,12 +109,12 @@ class MSAIAgentFactory(BaseModel):
     # ここでは最小変更として任意型を許可し、設定クラスはそのまま利用する。
     model_config = {"arbitrary_types_allowed": True}
 
-    llm_config: LLMConfig = Field(default_factory=lambda: LLMConfig())
+    llm_config: AiChatUtilConfig = Field(default_factory=lambda: get_runtime_config())
 
     def __create_llm_dict(self) -> dict:
         completion_dict = {}
         completion_dict["api_key"] = litellm.api_key
-        completion_dict["model_id"] = self.llm_config.completion_model
+        completion_dict["model_id"] = self.llm_config.llm.completion_model
         if litellm.api_base:
             completion_dict["base_url"] = litellm.api_base
         return completion_dict
@@ -123,8 +122,8 @@ class MSAIAgentFactory(BaseModel):
     def __create_tools(self) -> list[Any]:
         # MCP Stdio Toolのデフォルト設定を作成
         tools = [self.__create_default_mcp_server()]
-        if self.llm_config.mcp_server_config_file_path:
-            mcp_tools = MSAIAgentMcpSetting.create_mcp_tools_from_settings(self.llm_config.mcp_server_config_file_path)
+        if self.llm_config.paths.mcp_server_config_file_path:
+            mcp_tools = MSAIAgentMcpSetting.create_mcp_tools_from_settings(self.llm_config.paths.mcp_server_config_file_path)
             tools.extend(mcp_tools)
         return tools
     
@@ -135,7 +134,7 @@ class MSAIAgentFactory(BaseModel):
         if instructions:
             params.instructions = instructions
         else:
-            params.instructions = self.__create_default_instructions(self.llm_config.custom_instructions_file_path) if self.llm_config.custom_instructions_file_path else ""
+            params.instructions = self.__create_default_instructions(self.llm_config.paths.custom_instructions_file_path) if self.llm_config.paths.custom_instructions_file_path else ""
 
         if tools:
             params.tools = tools
@@ -150,19 +149,19 @@ class MSAIAgentFactory(BaseModel):
 
         params_dict = params.model_dump()
 
-        if (self.llm_config.llm_provider == "azure_openai"):
+        if (self.llm_config.llm.provider == "azure_openai"):
             client = AzureOpenAIChatClient(
                 **self.__create_llm_dict()
             )
 
             return client.create_agent(**params_dict)
-        if (self.llm_config.llm_provider == "openai"):
+        if (self.llm_config.llm.provider == "openai"):
             client = OpenAIChatClient(
                 **self.__create_llm_dict()
             )
             return client.create_agent(**params_dict)
         
-        raise ValueError(f"Unsupported LLM provider: {self.llm_config.llm_provider}")
+        raise ValueError(f"Unsupported LLM provider: {self.llm_config.llm.provider}")
 
     def __create_default_mcp_server(self) -> MCPStdioTool:
         tool = MCPStdioTool(
@@ -224,11 +223,11 @@ async def async_main():
     init_runtime(args.config or None)
 
     # Create an agent using OpenAI ChatCompletion
-    llm_config = LLMConfig()
-    llm_config.mcp_server_config_file_path = args.mcp_server_config_file_path
+    llm_config = get_runtime_config()
+    llm_config.paths.mcp_server_config_file_path = args.mcp_server_config_file_path
     working_directory = args.working_directory
     allow_outside_modifications = args.allow_outside_modifications
-    llm_config.custom_instructions_file_path = args.custom_instructions_file_path
+    llm_config.paths.custom_instructions_file_path = args.custom_instructions_file_path
     
     if working_directory and os.path.isdir(working_directory):
         os.chdir(working_directory)
@@ -237,10 +236,10 @@ async def async_main():
         logger.warning(f"Working directory '{working_directory}' is invalid. Using current directory.")
 
     if allow_outside_modifications:
-        llm_config.allow_outside_modifications = True
+        llm_config.features.allow_outside_modifications = True
         logger.info("Modifications to files outside the working directory are allowed.")
     else:
-        llm_config.allow_outside_modifications = False
+        llm_config.features.allow_outside_modifications = False
         logger.info("Modifications to files outside the working directory are NOT allowed.")
 
 

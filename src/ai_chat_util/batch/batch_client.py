@@ -90,7 +90,7 @@ class LLMBatchClient:
         ) -> None:
 
         llm_client = LLMFactory.create_llm_client()
-        use_custom_pdf_analyzer = llm_client.llm_config.use_custom_pdf_analyzer
+        use_custom_pdf_analyzer = llm_client.llm_config.features.use_custom_pdf_analyzer
         # Excelファイルを読み込む
         df = pd.read_excel(input_excel_path)
 
@@ -145,4 +145,5 @@ class LLMBatchClient:
 
         # 結果を新しいExcelファイルに保存
         df.to_excel(output_excel_path, index=False)
+
 

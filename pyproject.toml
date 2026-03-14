@@ -23,6 +23,7 @@ dependencies = [
     "anthropic",
     "google-generativeai",
     "langchain",
+    "langgraph-supervisor",
     "langchain-litellm",
     "langchain-mcp-adapters",
     "fastmcp",

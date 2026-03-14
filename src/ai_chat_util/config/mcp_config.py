@@ -1,13 +1,29 @@
 import json
-import asyncio
-from typing import Dict, Any, Optional, List, Literal
+from typing import Dict, Optional, List, Literal
+
 from pydantic import BaseModel, Field
+
+try:
+    # Pydantic v2
+    from pydantic import AliasChoices  # type: ignore
+except Exception:  # pragma: no cover
+    AliasChoices = None  # type: ignore
 
 from langchain_mcp_adapters.sessions import Connection
 
 # サーバー設定のモデル定義
 class MCPServerConfig(BaseModel):
-    type: Literal["stdio", "sse", "http"] = "stdio" # httpもsseとして扱うのが一般的
+    # langchain-mcp-adapters は `transport` を要求する。
+    # 既存設定との互換のため、入力では `type` も受け付ける。
+    if AliasChoices is not None:
+        transport: Literal["stdio", "sse", "websocket", "http"] = Field(
+            default="stdio",
+            validation_alias=AliasChoices("transport", "type"),
+            serialization_alias="transport",
+        )
+    else:  # pragma: no cover
+        transport: Literal["stdio", "sse", "websocket", "http"] = Field(default="stdio", alias="transport")
+
     command: Optional[str] = None
     args: Optional[List[str]] = Field(default_factory=list)
     env: Optional[Dict[str, str]] = None
@@ -23,10 +39,23 @@ class MCPConfigParser:
     def __init__(self, config_path: str):
         with open(config_path, 'r') as f:
             data = json.load(f)
-        self.servers: Dict[str, MCPServerConfig] = {
-            name: MCPServerConfig(**cfg) 
-            for name, cfg in data.get("mcpServers", {}).items()
-        }
+
+        raw_servers = data.get("mcpServers", {})
+        if not isinstance(raw_servers, dict):
+            raise ValueError("mcpServers must be an object")
+
+        normalized: Dict[str, dict] = {}
+        for name, cfg in raw_servers.items():
+            if not isinstance(cfg, dict):
+                raise ValueError(f"mcpServers.{name} must be an object")
+
+            cfg2 = dict(cfg)
+            # Backward/compat input: allow `type` but normalize it to `transport`.
+            if "transport" not in cfg2 and "type" in cfg2:
+                cfg2["transport"] = cfg2.get("type")
+            normalized[name] = cfg2
+
+        self.servers = {name: MCPServerConfig(**cfg) for name, cfg in normalized.items()}
 
 
     def to_langchain_config(self) -> dict[str, Connection]:
@@ -36,18 +65,21 @@ class MCPConfigParser:
         """
         lc_config = {}
         for name, cfg in self.servers.items():
-            if cfg.type == "stdio":
+            transport = cfg.transport
+            if transport == "stdio":
                 # stdio形式のパラメータ
                 lc_config[name] = {
+                    "transport": "stdio",
                     "command": cfg.command,
                     "args": cfg.args,
-                    "env": cfg.env
+                    "env": cfg.env,
                 }
-            elif cfg.type in ["sse", "http"]:
-                # SSE/HTTP形式のパラメータ
+            elif transport in {"sse", "http", "websocket"}:
+                # SSE/HTTP/WebSocket形式のパラメータ
                 lc_config[name] = {
+                    "transport": transport,
                     "url": cfg.url,
-                    "headers": cfg.headers
+                    "headers": cfg.headers,
                 }
         return lc_config
 

@@ -1,7 +1,6 @@
 from typing import Optional, Any, cast
 import os
 import uuid
-import copy
 import asyncio
 import tempfile
 import atexit
@@ -9,13 +8,14 @@ import requests
 import base64
 from abc import ABC, abstractmethod
 
-from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.model.models import (
+from ..config.runtime import get_runtime_config, AiChatUtilConfig
+from ..model.models import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )
-from ai_chat_util.util.office2pdf import Office2PDFUtil
+from ..util.office2pdf import Office2PDFUtil
 from file_util.model import FileUtilDocument
+from .mcp_client import MCPClient
 
 import litellm
 
@@ -116,6 +116,49 @@ class LLMClientUtil:
                 file_paths.append(file_path)
 
         return file_paths
+
+    @classmethod
+    async def run_mcp_chat_completion(
+        cls, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
+    ) -> ChatResponse:
+        messages = chat_request.chat_history.messages
+        mcp_client = MCPClient(llm_config)
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            llm_config.llm.provider,
+            llm_config.llm.completion_model,
+            len(messages),
+            kwargs.get("timeout"),
+        )
+        try:
+            response = await asyncio.wait_for(
+                mcp_client.chat(chat_request),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
+                "対処: config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
+
+        if isinstance(response, ChatResponse):
+            return response
+
+        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
 
     @classmethod
     async def run_litellm_chat_completion(
@@ -583,7 +626,7 @@ class LLMClientBase(ABC):
         return chat_response
 
 
-    async def simple_chat(self, prompt: str) -> str:
+    async def simple_chat(self, prompt: str,) -> str:
         '''
         簡易的なChatCompletionを実行する.
         引数として渡されたプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
@@ -854,9 +897,10 @@ class LLMClient(LLMClientBase):
 
     default_timeout_seconds: float = 300.0
     
-    def __init__(self, llm_config: AiChatUtilConfig, chat_request: Optional[ChatRequest] = None):
+    def __init__(self, llm_config: AiChatUtilConfig, use_mcp: bool = False):
 
         self.llm_config = llm_config
+        self.use_mcp = use_mcp
 
         # config.yml の non-secret 設定を既定値として採用
         try:
@@ -870,11 +914,11 @@ class LLMClient(LLMClientBase):
         return self.llm_config
 
     def create(
-        self, llm_config: AiChatUtilConfig | None = None, chat_request: Optional[ChatRequest] = None
+        self, llm_config: AiChatUtilConfig | None = None, use_mcp: bool = False
         ) -> "LLMClient":
         if llm_config is None:
             llm_config = get_runtime_config()
-        return LLMClient(llm_config, chat_request)
+        return LLMClient(llm_config, use_mcp=use_mcp)
 
     def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
         base64_image = base64.b64encode(document_type.data).decode('utf-8')
@@ -890,12 +934,20 @@ class LLMClient(LLMClientBase):
 
 
     async def _chat_completion_(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
-        return await LLMClientUtil.run_litellm_chat_completion(
+        if self.use_mcp:
+            return await LLMClientUtil.run_mcp_chat_completion(
                 self.llm_config, 
                 chat_request, 
                 self.default_timeout_seconds, 
                 **kwargs
-        )
+            )
+        else:
+            return await LLMClientUtil.run_litellm_chat_completion(
+                    self.llm_config, 
+                    chat_request, 
+                    self.default_timeout_seconds, 
+                    **kwargs
+            )
 
     async def __normal_chat__(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
         '''

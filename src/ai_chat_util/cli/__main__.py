@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプト文字列",
     )
+    chat_parser.add_argument(
+        "--use_mcp",
+        action="store_true",
+        help="MCPを使用してチャットする場合は指定します。指定しない場合は通常のLLMクライアントを使用します。",
+    )
     # batch_chat
     batch_chat_parser = subparsers.add_parser(
         "batch_chat", help="LLM へテキストでバッチチャットします"
@@ -59,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプトテンプレート文字列",
     )
+    batch_chat_parser.add_argument(
+        "--use_mcp",
+        action="store_true",
+        help="MCPを使用してチャットする場合は指定します。指定しない場合は通常のLLMクライアントを使用します。",
+    )
+
     batch_chat_parser.add_argument(
         "-i",
         "--input_excel_path",
@@ -244,14 +255,14 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = LLMFactory.create_llm_client(use_mcp=args.use_mcp)
         response = await llm_client.simple_chat(args.prompt)
         print(response)
         return
     
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
-        llm_batch_client = LLMBatchClient()
+        llm_batch_client = LLMBatchClient(use_mcp=args.use_mcp)
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,
             output_excel_path=args.output_excel_path,

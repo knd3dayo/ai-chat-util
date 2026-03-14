@@ -5,6 +5,7 @@ from tqdm.asyncio import tqdm_asyncio
 from ai_chat_util.llm.llm_factory import LLMFactory
 
 from ai_chat_util.model.models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
+from ai_chat_util.config.runtime import AiChatUtilConfig
 
 import pandas as pd
 
@@ -12,8 +13,8 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class LLMBatchClient:
-    def __init__(self):
-        self.llm_client = LLMFactory.create_llm_client()
+    def __init__(self, llm_config: AiChatUtilConfig | None = None, use_mcp: bool = False):
+        self.llm_client = LLMFactory.create_llm_client(llm_config, use_mcp=use_mcp)
 
     async def _run_one_(self, i: int, chat_history: ChatRequest, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse]:
         # Semaphore is effective only when each task acquires it.

@@ -29,10 +29,25 @@ class LLMClient:
     chat_request: ChatRequest
 
     concurrency_limit: int = 16
+
+    default_timeout_seconds: float = 60.0
     
     def __init__(self, llm_config: AiChatUtilConfig):
 
         self.llm_config = llm_config
+
+        # config.yml の non-secret 設定を既定値として採用
+        try:
+            self.default_timeout_seconds = float(getattr(self.llm_config.llm, "timeout_seconds", 60.0) or 60.0)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"llm.timeout_seconds は数値である必要があります: {getattr(self.llm_config.llm, 'timeout_seconds', None)!r}"
+            )
+        # chat() に chat_request を渡さない利用形態もあるため、常に初期化しておく
+        self.chat_request = ChatRequest(
+            chat_history=ChatHistory(messages=[]),
+            chat_request_context=None,
+        )
 
     def create(
         self, llm_config: AiChatUtilConfig | None = None
@@ -54,7 +69,10 @@ class LLMClient:
         messages = self.chat_request.chat_history.messages
         message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
         params = {}
-        params["api_key"] = self.llm_config.llm.api_key
+        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
+        provider = (self.llm_config.llm.provider or "").lower()
+        api_key = self.llm_config.llm.api_key
+        params["api_key"] = api_key
         params["model"] = f"{self.llm_config.llm.provider}/{self.llm_config.llm.completion_model}"
         params["messages"] = message_dict_list
         if self.llm_config.llm.base_url:
@@ -62,10 +80,41 @@ class LLMClient:
         if self.llm_config.llm.api_version:
             params["api_version"] = self.llm_config.llm.api_version
 
-        response = litellm.completion(
-            **params,
-            **kwargs
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", self.default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = self.default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            provider,
+            params.get("model"),
+            len(message_dict_list),
+            kwargs.get("timeout"),
         )
+        try:
+            response = await asyncio.wait_for(
+                litellm.acompletion(
+                    **params,
+                    **kwargs
+                ),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
+                "対処: config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
+
         if isinstance(response, litellm.ModelResponse):
             # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
             # 属性として見えないことがあるため dict-style access を使う。
@@ -87,6 +136,27 @@ class LLMClient:
                     output = message.get("content") or ""
                 else:
                     output = getattr(message, "content", "") or ""
+
+            # choicesが空 or contentが空の場合は、明示的に失敗させて原因をユーザーに見せる。
+            # （"何も出力されない" 体験を避ける）
+            if not choices:
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の choices が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
+            if not str(output).strip():
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の content が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
 
             return ChatResponse(
                 output=output,
@@ -164,13 +234,56 @@ class LLMClient:
         
         file_paths = []
         for item in urls:
-            res = requests.get(url=item.url, headers=item.headers, verify=verify)
+            # タイムアウト無しだと接続/読み取りで無限待ちになり得る
+            res = requests.get(url=item.url, headers=item.headers, verify=verify, timeout=(10, 60))
             res.raise_for_status()
             
             file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
             with open(file_path, "wb") as f:
                 f.write(res.content)
             file_paths.append(file_path)
+        return file_paths
+
+    @classmethod
+    async def download_files_async(cls, urls: list[WebRequestModel], download_dir: str) -> list[str]:
+        """Download files asynchronously (for use inside async flows).
+
+        This avoids blocking the event loop (sync requests.get) and ensures
+        HTTP resources are closed via `async with`.
+        """
+        cfg = get_runtime_config()
+
+        verify_enabled = cfg.network.requests_verify
+        ca_bundle = cfg.network.ca_bundle
+        verify: bool | str
+        if ca_bundle:
+            verify = ca_bundle
+        else:
+            verify = verify_enabled
+
+        def get_file_name_from_url(url: str) -> str:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(url)
+            return os.path.basename(parsed_url.path)
+
+        try:
+            import httpx
+        except Exception as e:
+            raise RuntimeError("httpx が見つかりません。依存関係を確認してください。") from e
+
+        timeout = httpx.Timeout(60.0, connect=10.0)
+
+        file_paths: list[str] = []
+        async with httpx.AsyncClient(verify=verify, timeout=timeout, follow_redirects=True) as client:
+            for item in urls:
+                resp = await client.get(item.url, headers=item.headers)
+                resp.raise_for_status()
+
+                file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
+                with open(file_path, "wb") as f:
+                    f.write(resp.content)
+                file_paths.append(file_path)
+
         return file_paths
 
     def create_user_message(self, chat_content_list: list[ChatContent]) -> ChatMessage:
@@ -207,6 +320,11 @@ class LLMClient:
 
         file_paths = self.download_files([file_url], tmpdir.name)
         return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
+
+    async def create_image_content_from_url_async(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_paths = await self.download_files_async([file_url], tmp_dir)
+            return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
     
     def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
         use_custom = self.llm_config.features.use_custom_pdf_analyzer
@@ -375,10 +493,10 @@ class LLMClient:
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
         prompt_content = self.create_text_content(text=prompt)
-        image_content_list = []
+        image_content_list: list[ChatContent] = []
         for image_path in file_list:
-            image_content = self.create_image_content_from_file(image_path, detail)
-            image_content_list.append(image_content)
+            image_contents = self.create_image_content_from_file(image_path, detail)
+            image_content_list.extend(image_contents)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
@@ -391,10 +509,10 @@ class LLMClient:
         複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
         prompt_content = self.create_text_content(text=prompt)
-        image_content_list = []
+        image_content_list: list[ChatContent] = []
         for image_url in image_url_list:
-            image_content = self.create_image_content_from_url(image_url, detail)
-            image_content_list.append(image_content)
+            image_contents = await self.create_image_content_from_url_async(image_url, detail)
+            image_content_list.extend(image_contents)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
@@ -508,7 +626,6 @@ class LLMClient:
             content=[self.create_text_content(prompt)]
         )
         chat_history = ChatHistory(messages=[chat_message])
-        chat_history.add_message(chat_message)
         
         response = await self.chat(ChatRequest(chat_history=chat_history, chat_request_context=None))
         return response.output
@@ -529,6 +646,9 @@ class LLMClient:
         '''
         if chat_request is None:
             chat_request = self.chat_request
+        else:
+            # 内部処理が self.chat_request を参照するため、渡された request を反映する
+            self.chat_request = chat_request
         if chat_request.chat_request_context:
             return await self.__chat_with_request_context__(
                 chat_request.chat_history.messages, chat_request.chat_request_context, **kwargs
@@ -538,7 +658,7 @@ class LLMClient:
                 chat_request.chat_history.messages, **kwargs
             )   
 
-    async def __normal_chat__(self, chat_message_list: list[ChatMessage] = [], **kwargs) -> ChatResponse:
+    async def __normal_chat__(self, chat_message_list: Optional[list[ChatMessage]] = None, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageをそのままLLMに対してChatCompletionを実行する.
@@ -550,15 +670,18 @@ class LLMClient:
         Returns:
             CompletionResponse: LLMからの応答
         '''
-        if len(chat_message_list) == 0:
+        # IMPORTANT:
+        # chat() から渡される chat_message_list は self.chat_request.chat_history.messages と同一オブジェクトのことがある。
+        # そのリストを反復しつつ add_message() で同じリストに追記すると、リストが伸び続けて無限ループする。
+        # ここでは「既存履歴をそのまま使う」か「渡されたリストのコピーを履歴として採用」し、重複追加はしない。
+        if not chat_message_list:
+            # 既に chat_history に入っている前提で処理する
             chat_messages = self.chat_request.chat_history.get_last_role_messages(self.get_user_role_name())
             if len(chat_messages) == 0:
                 raise ValueError("No chat messages to process.")
         else:
-            chat_messages = chat_message_list
-
-        for chat_message in chat_messages:
-            self.chat_request.chat_history.add_message(chat_message)
+            if chat_message_list is not self.chat_request.chat_history.messages:
+                self.chat_request.chat_history.messages = list(chat_message_list)
         chat_response =  await self._chat_completion_(**kwargs)
         text_content = self.create_text_content(chat_response.output)
         self.chat_request.chat_history.add_message(ChatMessage(
@@ -744,28 +867,32 @@ class LLMClient:
 
         result_chat_message_list: list[ChatMessage] = []
 
-        # messageごとに処理を実施
         for chat_message in chat_message_list:
             image_url_contents = [
                 content for content in chat_message.content if self._is_image_content_(content)
             ]
-            if len(image_url_contents) == 0:
-                # chat_messageをそのまま追加
+
+            # 画像が無い、または分割不要ならそのまま
+            if len(image_url_contents) == 0 or len(image_url_contents) <= max_images:
                 result_chat_message_list.append(chat_message)
                 continue
 
-            # textタイプのcontentを抽出する
+            # 分割時は、テキスト＋その他（画像以外）を各分割メッセージに維持する
             text_contents = [
                 content for content in chat_message.content if self._is_text_content_(content)
             ]
+            other_contents = [
+                content
+                for content in chat_message.content
+                if (not self._is_text_content_(content)) and (not self._is_image_content_(content))
+            ]
+            base_contents = text_contents + other_contents
+
             for i in range(0, len(image_url_contents), max_images):
-                split_image_url_contents: list[ChatContent] = image_url_contents[i:i + max_images]
-                split_contents = text_contents + split_image_url_contents
-                
-                split_chat_message = ChatMessage(
-                    role=chat_message.role,
-                    content=split_contents
-                )
+                split_image_url_contents: list[ChatContent] = image_url_contents[i : i + max_images]
+                split_contents = base_contents + split_image_url_contents
+
+                split_chat_message = ChatMessage(role=chat_message.role, content=split_contents)
                 result_chat_message_list.append(split_chat_message)
 
         return result_chat_message_list

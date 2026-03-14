@@ -309,6 +309,14 @@ def cli_main() -> None:
         raise
     except KeyboardInterrupt:
         raise SystemExit(130)
+    except Exception as e:
+        import sys
+        import ai_chat_util.log.log_settings as log_settings
+
+        logger = log_settings.getLogger(__name__)
+        logger.exception("Unhandled CLI error")
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

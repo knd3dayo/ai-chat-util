@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 CONFIG_ENV_VAR = "AI_CHAT_UTIL_CONFIG"
@@ -21,7 +21,10 @@ class LLMSection(BaseModel):
     completion_model: str = Field(default="gpt-5")
     embedding_model: str = Field(default="text-embedding-3-small")
 
-    # secret API key (must be provided via env reference; e.g. os.environ/OPENAI_API_KEY)
+    # non-secret default timeout (seconds) for chat completion calls
+    timeout_seconds: float = Field(default=60.0, ge=0.0)
+
+    # secret API key (must be provided via env reference; e.g. os.environ/ENV_VAR_NAME)
     api_key: str | None = Field(default=None)
 
     # non-secret endpoint/base url
@@ -29,6 +32,17 @@ class LLMSection(BaseModel):
 
     # non-secret api version (mainly for Azure OpenAI via LiteLLM)
     api_version: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_api_key_required(self) -> "LLMSection":
+        provider = (self.provider or "").lower()
+        providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
+        if provider in providers_requiring_key and not self.api_key:
+            raise ValueError(
+                "llm.api_key が未設定です。config.yml で 'llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
+                "参照先の環境変数を設定してください。"
+            )
+        return self
 
     def create_litellm_model_list(self) -> list[dict[str, Any]]:
         """Create a list of model names to try with LiteLLM, based on the config."""
@@ -265,32 +279,9 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
         raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
 
     _runtime_state = _RuntimeState(config_path=resolved, config=config)
-
-    _apply_secret_runtime_side_effects(config)
     _apply_non_secret_runtime_side_effects(config)
 
     return config
-
-
-def _apply_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:
-    """Apply secret-derived overrides to process env.
-
-    This keeps downstream dependencies (LiteLLM) working while still enforcing
-    that secrets come from environment variables (not YAML literals).
-    """
-
-    if not config.llm.api_key:
-        return
-
-    provider = (config.llm.provider or "").lower()
-    provider_to_env = {
-        "openai": "OPENAI_API_KEY",
-        "azure": "AZURE_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-    }
-    env_name = provider_to_env.get(provider)
-    if env_name:
-        os.environ[env_name] = config.llm.api_key
 
 
 def apply_logging_overrides(level: str | None = None, file: str | None = None) -> None:
@@ -329,8 +320,27 @@ def _apply_non_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:
 
 
 def _configure_python_logging(config: AiChatUtilConfig) -> None:
-    # Keep this lightweight: callers may have already created loggers.
+    # Keep this lightweight but deterministic: CLI/test runs often reconfigure logging.
+    # We reset handlers to avoid duplicated output and to enforce UTF-8 file encoding.
     import logging
+    import re
+
+    class _RedactingFormatter(logging.Formatter):
+        _replacements: list[tuple[re.Pattern[str], str]] = [
+            # common api_key patterns
+            (re.compile(r"(api_key\s*=\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\\1\\2***\\2"),
+            (re.compile(r"(api_key\s*:\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\\1\\2***\\2"),
+            # Bearer tokens
+            (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s\"]+", re.IGNORECASE), r"\\1***"),
+            # OpenAI-style keys (best-effort)
+            (re.compile(r"\bsk-[A-Za-z0-9_-]{10,}\b"), "sk-***"),
+        ]
+
+        def format(self, record: logging.LogRecord) -> str:
+            s = super().format(record)
+            for pattern, repl in self._replacements:
+                s = pattern.sub(repl, s)
+            return s
 
     level_name = (config.logging.level or "INFO").upper()
     level = logging.getLevelName(level_name)
@@ -340,28 +350,46 @@ def _configure_python_logging(config: AiChatUtilConfig) -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
-    formatter = logging.Formatter(
+    formatter: logging.Formatter = _RedactingFormatter(
         "%(asctime)s - %(levelname)s - %(pathname)s -  %(lineno)d - %(funcName)s - %(message)s"
     )
 
-    # Ensure at least one handler exists
-    if not root.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
-        handler.setLevel(level)
-        root.addHandler(handler)
+    # Reset handlers to avoid duplicates across repeated init/apply overrides.
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
 
-    # Optionally add file handler once
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(level)
+    root.addHandler(stream_handler)
+
     if config.logging.file:
-        has_file_handler = any(
-            getattr(h, "baseFilename", None) == str(Path(config.logging.file).resolve())
-            for h in root.handlers
-        )
-        if not has_file_handler:
-            file_handler = logging.FileHandler(config.logging.file)
-            file_handler.setFormatter(formatter)
-            file_handler.setLevel(level)
-            root.addHandler(file_handler)
+        file_handler = logging.FileHandler(config.logging.file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(level)
+        root.addHandler(file_handler)
+
+    # Prevent accidental secret leakage / huge logs from 3rd-party debug.
+    noisy_loggers = {
+        # LiteLLM uses several logger names depending on version
+        "litellm": logging.WARNING,
+        "LiteLLM": logging.WARNING,
+        # OpenAI SDK can log request details at DEBUG
+        "openai": logging.WARNING,
+        # HTTP clients
+        "httpx": logging.WARNING,
+        "httpcore": logging.WARNING,
+        "aiohttp": logging.WARNING,
+        "urllib3": logging.WARNING,
+        # event loop chatter
+        "asyncio": logging.WARNING,
+    }
+    for name, lvl in noisy_loggers.items():
+        logging.getLogger(name).setLevel(lvl)
 
 
 def _configure_litellm(config: AiChatUtilConfig) -> None:
@@ -370,6 +398,14 @@ def _configure_litellm(config: AiChatUtilConfig) -> None:
         import litellm
     except Exception:
         return
+
+    # Windows で aiohttp transport 経由の実行後にプロセスが異常終了することがあるため、
+    # 既定では httpx transport を使う（必要なら env: DISABLE_AIOHTTP_TRANSPORT=False で上書き可能）。
+    try:
+        if os.name == "nt" and getattr(litellm, "disable_aiohttp_transport", False) is False:
+            litellm.disable_aiohttp_transport = True
+    except Exception:
+        pass
 
     if config.llm.base_url:
         litellm.api_base = config.llm.base_url

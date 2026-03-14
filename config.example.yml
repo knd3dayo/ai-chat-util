@@ -13,6 +13,9 @@ llm:
   # Provider name used by LiteLLM. Examples: openai, azure, anthropic
   provider: openai
 
+  # Default timeout (seconds) for LLM requests.
+  timeout_seconds: 60
+
   # Optional: API key reference (secret).
   # - Secrets themselves must NOT be written in config.yml.
   # - Use env reference format:

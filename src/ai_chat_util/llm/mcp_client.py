@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence, cast
+
 import asyncio
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
@@ -20,7 +21,7 @@ from ..config.runtime import (
 )
 from ..util.file_path_resolver import resolve_existing_file_path
 from ..model.models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory
-
+from .llm_factory import LLMFactory
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -181,9 +182,9 @@ class MCPClientUtil:
         )
 
         # Compile and run
-        app = workflow.compile(name="mcp_supervisor")
+        graph = workflow.compile(name="mcp_supervisor")
 
-        return app
+        return graph
 
 class MCPClient:
     def __init__(self, runtime_config: AiChatUtilConfig):
@@ -353,6 +354,7 @@ class MCPClient:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
 
 if __name__ == "__main__":
     runtime_config = get_runtime_config()  # ここは適宜、実際の設定に合わせて初期化してください

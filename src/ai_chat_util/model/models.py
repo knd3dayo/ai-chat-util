@@ -163,3 +163,4 @@ class ChatResponse(BaseModel):
     output_tokens: int = Field(default=0, description="The number of tokens in the model's output.")
 
     documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")
+

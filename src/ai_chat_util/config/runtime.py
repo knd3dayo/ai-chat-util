@@ -30,6 +30,39 @@ class LLMSection(BaseModel):
     # non-secret api version (mainly for Azure OpenAI via LiteLLM)
     api_version: str | None = Field(default=None)
 
+    def create_litellm_model_list(self) -> list[dict[str, Any]]:
+        """Create a list of model names to try with LiteLLM, based on the config."""
+        completion_litellm_dict = {}
+        completion_litellm_dict["model"] = f"{self.provider}/{self.completion_model}"
+        completion_litellm_dict["api_key"] = self.api_key
+        if self.base_url:
+            completion_litellm_dict["api_base"] = self.base_url
+        if self.api_version:
+            completion_litellm_dict["api_version"] = self.api_version
+
+        completion_model_dict = {
+            "model_name": self.completion_model,
+            "litellm_params": completion_litellm_dict
+        }
+
+        embedding_litellm_dict = {}
+        embedding_litellm_dict["model"] = f"{self.provider}/{self.embedding_model}"
+        embedding_litellm_dict["api_key"] = self.api_key
+        if self.base_url:
+            embedding_litellm_dict["api_base"] = self.base_url
+        if self.api_version:
+            embedding_litellm_dict["api_version"] = self.api_version
+        embedding_model_dict = {
+            "model_name": self.embedding_model,
+            "litellm_params": embedding_litellm_dict
+        }
+
+        models: list[dict[str, Any]] = []
+        if self.completion_model:
+            models.append(completion_model_dict)
+        if self.embedding_model:
+            models.append(embedding_model_dict)
+        return models
 
 class PathsSection(BaseModel):
     mcp_server_config_file_path: str | None = Field(default=None)

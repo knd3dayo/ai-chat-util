@@ -13,23 +13,22 @@ logger = log_settings.getLogger(__name__)
 
 class LLMBatchClient:
 
-    async def _run_one_(self, i: int, chat_history: ChatHistory, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse, ChatHistory]:
+    async def _run_one_(self, i: int, chat_history: ChatRequest, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse, ChatHistory]:
         # Semaphore is effective only when each task acquires it.
         async with sem:
             return await self._process_row_(i, chat_history, progress)
 
     async def _process_row_(
-            self, row_num: int, chat_history: ChatHistory, progress: tqdm_asyncio
+            self, row_num: int, chat_request: ChatRequest, progress: tqdm_asyncio
             ) -> tuple[int, ChatResponse, ChatHistory]:
 
-        if not chat_history.messages:
+        if not chat_request.chat_history.messages:
             # メッセージが空の場合はスキップして空のレスポンスを返す
             chat_response = ChatResponse(output="", input_tokens=0, output_tokens=0, documents=[])
-            result_chat_history = chat_history
+            result_chat_history = chat_request.chat_history
         else:
-            chat_request = ChatRequest(chat_history=chat_history)
             llm_client = LLMFactory.create_llm_client()
-            chat_response = await llm_client.chat()
+            chat_response = await llm_client.chat(chat_request)
             result_chat_history = llm_client.chat_request.chat_history
 
         progress.update(1)  # Update progress after processing the row
@@ -37,18 +36,18 @@ class LLMBatchClient:
 
 
     async def run_batch_chat(
-            self, chat_histories: list[ChatHistory], concurrency: int = 5
+            self, chat_requests: list[ChatRequest], concurrency: int = 5
             ) -> list[tuple[int, ChatResponse, ChatHistory]]:
         '''
         指定されたメッセージリストに対して、指定されたプロンプトを用いてバッチ処理を行う。
         '''
-        progress = tqdm_asyncio(total=len(chat_histories), desc="progress")
+        progress = tqdm_asyncio(total=len(chat_requests), desc="progress")
         # 進捗バーのフォーマット
         progress.bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 
         sem = asyncio.Semaphore(concurrency)
 
-        tasks = [asyncio.create_task(self._run_one_(i, chat_history, sem, progress)) for i, chat_history in enumerate(chat_histories)]
+        tasks = [asyncio.create_task(self._run_one_(i, chat_request, sem, progress)) for i, chat_request in enumerate(chat_requests)]
 
         try:
             responses = await asyncio.gather(*tasks)
@@ -64,14 +63,14 @@ class LLMBatchClient:
         指定されたメッセージリストに対して、指定されたプロンプトを用いてバッチ処理を行う。
         '''
         llm_client = LLMFactory.create_llm_client()
-        chat_histories: list[ChatHistory] = []
+        chat_requests: list[ChatRequest] = []
         for msg in messages:
             chat_content = llm_client.create_text_content(text=f"{prompt}\n{msg}")
             chat_message = ChatMessage(role="user", content=[chat_content])
             chat_history = ChatHistory(messages=[chat_message])
-            chat_histories.append(chat_history)
-    
-        responses = await self.run_batch_chat(chat_histories, concurrency)
+            chat_requests.append(ChatRequest(chat_history=chat_history))
+
+        responses = await self.run_batch_chat(chat_requests, concurrency)
         response_messages = []
         for _, chat_response, _ in responses:
             response_messages.append(chat_response.output)
@@ -111,14 +110,14 @@ class LLMBatchClient:
 
         # 指定された入力列からメッセージを取得
         # 1行ずつ読み込んで、ChatHistoryオブジェクトのリストを作成
-        chat_histories: list[ChatHistory] = []
+        chat_requests: list[ChatRequest] = []
         for _, row in df.iterrows():
             contents: list[ChatContent] = []
             input_message = str(row[content_column])
             file_path = str(row[file_path_column])
             # input_messageとfile_pathの両方が空の場合はスキップ
             if not input_message and not file_path:
-                chat_histories.append(ChatHistory(messages=[]))
+                chat_requests.append(ChatRequest(chat_history=ChatHistory(messages=[])))
                 continue
             contents.append(llm_client.create_text_content(text=f"{prompt}\n{input_message}"))
             # ファイルが存在しない場合はfile_pathを無視
@@ -135,10 +134,10 @@ class LLMBatchClient:
                 content=contents
             )
             chat_history = ChatHistory(messages=[chat_message])
-            chat_histories.append(chat_history)
+            chat_requests.append(ChatRequest(chat_history=chat_history))
 
         # バッチ処理を実行
-        results = await self.run_batch_chat(chat_histories, concurrency)
+        results = await self.run_batch_chat(chat_requests, concurrency)
 
         # 結果を指定された出力列に追加
         df[output_column] = [ response.output for _, response, _ in results ]

@@ -1,5 +1,3 @@
-# 抽象クラス
-from abc import ABC, abstractmethod
 from typing import Optional, Any, cast
 import os
 import uuid
@@ -9,6 +7,7 @@ import asyncio
 import tempfile
 import atexit
 import requests
+import base64
 
 
 from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
@@ -24,54 +23,104 @@ import litellm
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-class LLMClient(ABC):
+class LLMClient:
 
     llm_config: AiChatUtilConfig
     chat_request: ChatRequest
 
     concurrency_limit: int = 16
     
-    @abstractmethod
+    def __init__(self, llm_config: AiChatUtilConfig):
+
+        self.llm_config = llm_config
+
     def create(
-        cls, llm_config: AiChatUtilConfig | None = None,
-    ) -> "LLMClient":
-        pass
+        self, llm_config: AiChatUtilConfig | None = None
+        ) -> "LLMClient":
+        if llm_config is None:
+            llm_config = get_runtime_config()
+        return LLMClient(llm_config)
 
-    @abstractmethod
     def get_user_role_name(self) -> str:
-        pass
+        return "user"
 
-    @abstractmethod
     def get_assistant_role_name(self) -> str:
-        pass
+        return "assistant"
 
-    @abstractmethod
     def get_system_role_name(self) -> str:
-        pass
+        return "system"
 
-    @abstractmethod
-    async def _chat_completion_(self, **kwargs) ->  ChatResponse:
-        pass
+    async def _chat_completion_(self,  **kwargs) -> ChatResponse:
+        messages = self.chat_request.chat_history.messages
+        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
+        params = {}
+        params["api_key"] = self.llm_config.llm.api_key
+        params["model"] = f"{self.llm_config.llm.provider}/{self.llm_config.llm.completion_model}"
+        params["messages"] = message_dict_list
+        if self.llm_config.llm.base_url:
+            params["base_url"] = self.llm_config.llm.base_url
+        if self.llm_config.llm.api_version:
+            params["api_version"] = self.llm_config.llm.api_version
 
-    @abstractmethod
-    def _create_image_content_(cls, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
-        pass
-    
-    @abstractmethod
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
-        pass
+        response = litellm.completion(
+            **params,
+            **kwargs
+        )
+        if isinstance(response, litellm.ModelResponse):
+            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
+            # 属性として見えないことがあるため dict-style access を使う。
+            usage = response.get("usage") or {}
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
+            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
 
-    @abstractmethod
+            choices = cast(list[Any], response.get("choices") or [])
+            output = ""
+            if choices:
+                first_choice = cast(Any, choices[0])
+                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                else:
+                    message = getattr(first_choice, "message", None)
+
+                if isinstance(message, dict):
+                    output = message.get("content") or ""
+                else:
+                    output = getattr(message, "content", "") or ""
+
+            return ChatResponse(
+                output=output,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
+            )
+        raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+
+
     def _is_text_content_(self, content: ChatContent) -> bool:
-        pass
+        return content.params.get("type") == "text"
 
-    @abstractmethod
     def _is_image_content_(self, content: ChatContent) -> bool:
-        pass
-
-    @abstractmethod    
+        return content.params.get("type") == "image_url"
+    
     def _is_file_content_(self, content: ChatContent) -> bool:
-        pass
+        return content.params.get("type") == "file"
+
+
+    
+    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(document_type.data).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
+        return [ChatContent(params=params)]
+    
+    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(document_type.data).decode('utf-8')
+        file_url = f"data:application/pdf;base64,{base64_file}"    
+        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
+        return [ChatContent(params=params)]
+
+
 
     @classmethod
     def get_token_count(cls, model: str, input_text: str) -> int:
@@ -775,91 +824,4 @@ class LLMClient(ABC):
             chat_history=ChatHistory(messages=[message], ), chat_request_context=None)
         summarize_response = await client.chat(chat_request)
         return summarize_response
-
-import base64
-
-class LiteLLMClient(LLMClient):
-    def __init__(self, llm_config: AiChatUtilConfig):
-
-        self.llm_config = llm_config
-
-    def create(
-        self, llm_config: AiChatUtilConfig | None = None
-        ) -> "LLMClient":
-        if llm_config is None:
-            llm_config = get_runtime_config()
-        return LiteLLMClient(llm_config)
-
-    def get_user_role_name(self) -> str:
-        return "user"
-
-    def get_assistant_role_name(self) -> str:
-        return "assistant"
-
-    def get_system_role_name(self) -> str:
-        return "system"
-
-    async def _chat_completion_(self,  **kwargs) -> ChatResponse:
-        messages = self.chat_request.chat_history.messages
-        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
-        response = litellm.completion(
-            model=f"{self.llm_config.llm.provider}/{self.llm_config.llm.completion_model}",
-            messages=message_dict_list,
-            **kwargs
-        )
-        if isinstance(response, litellm.ModelResponse):
-            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
-            # 属性として見えないことがあるため dict-style access を使う。
-            usage = response.get("usage") or {}
-            output_tokens = int(usage.get("completion_tokens", 0) or 0)
-            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
-
-            choices = cast(list[Any], response.get("choices") or [])
-            output = ""
-            if choices:
-                first_choice = cast(Any, choices[0])
-                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
-                if isinstance(first_choice, dict):
-                    message = first_choice.get("message")
-                else:
-                    message = getattr(first_choice, "message", None)
-
-                if isinstance(message, dict):
-                    output = message.get("content") or ""
-                else:
-                    output = getattr(message, "content", "") or ""
-
-            return ChatResponse(
-                output=output,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens
-            )
-        raise TypeError(f"Unexpected response type: {type(response)!r}")
-
-
-    def _is_text_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "text"
-
-    def _is_image_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "image_url"
-    
-    def _is_file_content_(self, content: ChatContent) -> bool:
-        return content.params.get("type") == "file"
-    
-    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_image = base64.b64encode(document_type.data).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
-        return [ChatContent(params=params)]
-    
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_file = base64.b64encode(document_type.data).decode('utf-8')
-        file_url = f"data:application/pdf;base64,{base64_file}"    
-        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
-        return [ChatContent(params=params)]
-
-
-
-
-
 

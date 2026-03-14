@@ -5,7 +5,7 @@ from pydantic import Field
 from ai_chat_util.model.models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.config.runtime import get_runtime_config
-from ai_chat_util.batch.batch_client import LLMBatchClient
+from ai_chat_util.llm.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util.config.runtime import get_runtime_config
@@ -178,14 +178,14 @@ async def run_simple_batch_chat(
     return results
 
 async def run_batch_chat(
-        chat_histories: Annotated[list[ChatHistory], Field(description="List of chat histories for batch processing")],
+        chat_requests: Annotated[list[ChatRequest], Field(description="List of chat histories for batch processing")],
         concurrency: Annotated[int, Field(description="Number of concurrent requests to process")]=5
 ) -> Annotated[list[ChatResponse], Field(description="List of chat responses from batch processing")]:
     """
     This function processes a batch of chat histories concurrently and returns the list of chat responses.
     """
     batch_client = LLMBatchClient()
-    results = await batch_client.run_batch_chat(chat_histories, concurrency)
+    results = await batch_client.run_batch_chat(chat_requests, concurrency)
     return [response for _, response, _ in results]
 
 async def run_batch_chat_from_excel(

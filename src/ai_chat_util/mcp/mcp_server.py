@@ -62,10 +62,6 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
 
     else:
         # デフォルトのツールを登録
-        mcp.tool()(run_chat)
-        mcp.tool()(run_batch_chat)
-        mcp.tool()(run_simple_batch_chat)
-        mcp.tool()(run_batch_chat_from_excel)
         mcp.tool()(analyze_image_files)
         mcp.tool()(analyze_pdf_files)
         mcp.tool()(analyze_office_files)

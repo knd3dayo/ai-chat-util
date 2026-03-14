@@ -1,5 +1,5 @@
 from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.llm.llm_client import LLMClient, LiteLLMClient
+from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util.model.models import ChatHistory, ChatRequestContext, ChatRequest
 
 class LLMFactory:
@@ -9,7 +9,7 @@ class LLMFactory:
     ) -> LLMClient:
         if llm_config is None:
             llm_config = get_runtime_config()
-        return LiteLLMClient(llm_config)
+        return LLMClient(llm_config)
         
 
 

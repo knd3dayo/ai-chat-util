@@ -10,9 +10,26 @@ authors = [
 ]
 requires-python = ">=3.11,<=3.13"
 
-dynamic = ["dependencies"]
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = [
+    "python-dotenv",
+    "pydantic",
+    "PyYAML",
+    "pandas",
+    "openpyxl",
+    "litellm",
+    "openai",
+    "tiktoken",
+    "boto3",
+    "anthropic",
+    "google-generativeai",
+    "langchain",
+    "langchain-litellm",
+    "langchain-mcp-adapters",
+    "fastmcp",
+    "fastapi",
+    "PyMuPDF",
+    "file_util @ git+https://github.com/knd3dayo/file-util.git@main"
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

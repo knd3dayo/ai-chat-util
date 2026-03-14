@@ -4,6 +4,7 @@ import atexit
 from pydantic import Field
 from ai_chat_util.model.models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
+from ai_chat_util.llm.llm_client import LLMClientUtil
 from ai_chat_util.config.runtime import get_runtime_config
 from ai_chat_util.llm.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
@@ -143,6 +144,7 @@ def create_multi_format_contents_from_file(
     llm_client = LLMFactory.create_llm_client()
     return llm_client.create_multi_format_contents_from_file(file_path, detail)
 
+
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
 async def run_chat(
@@ -152,7 +154,7 @@ async def run_chat(
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
     client = LLMFactory.create_llm_client()
-    return await client.chat()
+    return await client.chat(chat_request)
 
 
 async def run_simple_chat(
@@ -186,7 +188,7 @@ async def run_batch_chat(
     """
     batch_client = LLMBatchClient()
     results = await batch_client.run_batch_chat(chat_requests, concurrency)
-    return [response for _, response, _ in results]
+    return [response for _, response in results]
 
 async def run_batch_chat_from_excel(
         prompt: Annotated[str, Field(description="Prompt for the batch chat")],
@@ -267,7 +269,7 @@ async def analyze_pdf_urls(
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = llm_client.download_files(pdf_path_urls, tmpdir.name)
+    path_list = LLMClientUtil.download_files(pdf_path_urls, tmpdir.name)
     response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
     return response.output
 
@@ -313,7 +315,7 @@ async def analyze_office_urls(
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = llm_client.download_files(office_path_urls, tmpdir.name)
+    path_list = LLMClientUtil.download_files(office_path_urls, tmpdir.name)
 
     response = await llm_client.analyze_office_files(path_list, prompt, detail)
     return response.output
@@ -358,7 +360,7 @@ async def analyze_urls(
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = llm_client.download_files(file_path_urls, tmpdir.name)
+    path_list = LLMClientUtil.download_files(file_path_urls, tmpdir.name)
     response = await llm_client.analyze_files(path_list, prompt, detail)
     return response.output
 

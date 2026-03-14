@@ -79,9 +79,27 @@ class LLMSection(BaseModel):
         return models
 
 class PathsSection(BaseModel):
+    # Preferred key name for MCP settings JSON path.
+    # Kept compatible with older key: mcp_server_config_file_path.
+    mcp_config_path: str | None = Field(default=None)
     mcp_server_config_file_path: str | None = Field(default=None)
     custom_instructions_file_path: str | None = Field(default=None)
     working_directory: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _coalesce_mcp_config_path(self) -> "PathsSection":
+        a = self.mcp_config_path
+        b = self.mcp_server_config_file_path
+        if a and b and a != b:
+            raise ValueError(
+                "paths.mcp_config_path と paths.mcp_server_config_file_path の両方が設定されていますが一致しません。"
+                "どちらか一方に統一してください。"
+            )
+        if a and not b:
+            self.mcp_server_config_file_path = a
+        if b and not a:
+            self.mcp_config_path = b
+        return self
 
 
 class FeaturesSection(BaseModel):

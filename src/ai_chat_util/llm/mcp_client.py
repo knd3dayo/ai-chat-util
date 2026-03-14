@@ -5,12 +5,30 @@ from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
 
 from ..config.mcp_config import MCPConfigParser
-from ..config.runtime import AiChatUtilConfig, get_runtime_config
+from ..config.runtime import AiChatUtilConfig, get_runtime_config, get_runtime_config_path
+from ..util.file_path_resolver import resolve_existing_file_path
 
 class MCPClient:
-    def __init__(self, runtime_config: AiChatUtilConfig, mcp_config_path: str):
+    def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
-        self.config_parser = MCPConfigParser(mcp_config_path)
+        mcp_config_path = (
+            self.runtime_config.paths.mcp_config_path
+            or self.runtime_config.paths.mcp_server_config_file_path
+        )
+        if not mcp_config_path:
+            raise ValueError(
+                "MCP 設定ファイルパスが未設定です。config.yml の paths.mcp_config_path（または互換の paths.mcp_server_config_file_path）を設定してください。"
+            )
+
+        # config.yml からの相対パスも解決できるよう、設定ファイルのディレクトリも探索対象に入れる
+        config_dir = str(get_runtime_config_path().parent)
+        resolved = resolve_existing_file_path(
+            mcp_config_path,
+            working_directory=self.runtime_config.paths.working_directory,
+            extra_search_dirs=[config_dir],
+        ).resolved_path
+
+        self.config_parser = MCPConfigParser(resolved)
         # 2. LangChain用設定の生成
         self.mcp_config = self.config_parser.to_langchain_config()
 
@@ -45,4 +63,4 @@ class MCPClient:
 
 if __name__ == "__main__":
     runtime_config = get_runtime_config()  # ここは適宜、実際の設定に合わせて初期化してください
-    asyncio.run(MCPClient(runtime_config, "mcp_config.json").main())
+    asyncio.run(MCPClient(runtime_config).main())

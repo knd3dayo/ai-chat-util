@@ -38,7 +38,10 @@ llm:
   api_version: null
 
 paths:
-  # Optional: MCP client settings path
+  # Optional: MCP client settings JSON path
+  # - Preferred key: mcp_config_path
+  # - Backward compatible key: mcp_server_config_file_path
+  mcp_config_path: null
   mcp_server_config_file_path: null
 
   # Optional: custom instructions path

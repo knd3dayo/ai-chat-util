@@ -1,9 +1,7 @@
 # 抽象クラス
 from typing import Any, ClassVar, Literal, Optional
-from pydantic import BaseModel, Field
-from typing import Optional, Any
-from typing import ClassVar, Optional, Any
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, model_validator
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -158,9 +156,50 @@ class ChatRequest(BaseModel):
     chat_request_context: Optional[ChatRequestContext] = Field(default=ChatRequestContext(), description="The context for the chat request.")
 
 class ChatResponse(BaseModel):
-    output: str = Field(default="", description="The output text from the chat model.")
+    messages: list[ChatMessage] = Field(default_factory=list, description="The output messages from the chat model.")
     input_tokens: int = Field(default=0, description="The number of tokens in the input to the model.")
     output_tokens: int = Field(default=0, description="The number of tokens in the model's output.")
 
     documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_output_payload(cls, data: Any) -> Any:
+        """Accept legacy payloads like {"output": "..."}.
+
+        This keeps backward compatibility for callers that still send `output`.
+        The model output (model_dump) remains messages-based.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        messages = data.get("messages")
+        if messages:
+            return data
+
+        legacy_output = data.get("output")
+        if isinstance(legacy_output, str) and legacy_output.strip():
+            copied = dict(data)
+            copied["messages"] = [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"params": {"type": "text", "text": legacy_output}},
+                    ],
+                }
+            ]
+            return copied
+
+        return data
+
+    # messagesを文字列として結合して返すユーティリティプロパティ
+    @property
+    def output(self) -> str:
+        return "\n".join(
+            [
+                "".join(
+                    content.params.get("text", "") for content in message.content if content.params.get("type") == "text"
+                )
+                for message in self.messages
+            ]
+        )

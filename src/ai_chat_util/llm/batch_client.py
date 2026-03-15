@@ -29,7 +29,24 @@ class LLMBatchClient:
             # メッセージが空の場合はスキップして空のレスポンスを返す
             chat_response = ChatResponse(messages=[ChatMessage(role="assistant", content=[])], input_tokens=0, output_tokens=0, documents=[])
         else:
-            chat_response = await self.llm_client.chat(chat_request)
+            try:
+                chat_response = await self.llm_client.chat(chat_request)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.exception("Batch row failed: row=%s", row_num)
+                err_text = f"[ERROR] row={row_num}: {type(e).__name__}: {e}"
+                chat_response = ChatResponse(
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": err_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
+                    documents=[],
+                )
 
         progress.update(1)  # Update progress after processing the row
         return (row_num, chat_response)
@@ -91,7 +108,6 @@ class LLMBatchClient:
             concurrency: int = 16,
         ) -> None:
 
-        llm_client = self.llm_client
         # Excelファイルを読み込む
         df = pd.read_excel(input_excel_path)
 

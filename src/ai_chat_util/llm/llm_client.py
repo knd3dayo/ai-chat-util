@@ -689,14 +689,35 @@ class LLMClientBase(ABC):
         '''
         if chat_request is None:
             raise ValueError("chat_request must be provided")
-        if chat_request.chat_request_context:
+
+        # NOTE:
+        # ChatRequest.chat_request_context はモデル定義上デフォルト値が入るため、常に truthy になり得る。
+        # 分割/テンプレ/画像分割などの前処理が必要なときだけ request_context 経路を使い、
+        # それ以外は通常経路へフォールバックする。
+        ctx = chat_request.chat_request_context
+        needs_context = False
+        if ctx is not None:
+            try:
+                split_mode = getattr(ctx, "split_mode", ChatRequestContext.split_mode_name_none)
+                max_images = int(getattr(ctx, "max_images_per_request", 0) or 0)
+                prompt_template = str(getattr(ctx, "prompt_template_text", "") or "")
+
+                needs_context = (
+                    split_mode != ChatRequestContext.split_mode_name_none
+                    or max_images > 0
+                    or bool(prompt_template.strip())
+                )
+            except Exception:
+                # If ctx is malformed, be conservative and use the context path.
+                needs_context = True
+
+        if needs_context and ctx is not None:
             return await self.__chat_with_request_context__(
-                chat_request, chat_request.chat_request_context, **kwargs
+                chat_request, ctx, **kwargs
             )
-        else:
-            return await self.__normal_chat__(
-                chat_request, **kwargs
-            )   
+        return await self.__normal_chat__(
+            chat_request, **kwargs
+        )   
 
     @abstractmethod
     async def __chat_with_request_context__(
@@ -1023,7 +1044,8 @@ class LLMClient(LLMClientBase):
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message__(message_num: int, message: ChatMessage, previous_messages: list[ChatMessage]) -> tuple[int, ChatResponse]:
-            client = self.create(self.llm_config)
+            # Preserve MCP mode when creating per-task clients.
+            client = self.create(self.llm_config, use_mcp=self.use_mcp)
             chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=previous_messages), chat_request_context=request_context)
             
             chat_request.chat_history.add_message(message)

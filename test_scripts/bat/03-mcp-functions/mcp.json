@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "AssuranceProxy": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:\\Users\\user\\source\\repos\\util\\ai-chat-util",
+        "run",
+        "-m",
+        "ai_chat_util.mcp.mcp_server",
+        "--config",
+        "work/test/openai/config.yml",
+        "--log_level",
+        "INFO",
+        "--log_file",
+        "work/test/openai/mcp_server.log"
+      ]
+    }
+  }
+}

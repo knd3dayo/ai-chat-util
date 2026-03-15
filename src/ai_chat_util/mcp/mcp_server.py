@@ -1,5 +1,6 @@
-import asyncio, os
+import asyncio
 import argparse
+from typing import Callable
 from fastmcp import FastMCP
 
 from ai_chat_util.config.runtime import init_runtime
@@ -53,7 +54,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     # -m オプションを追加
-    parser.add_argument("-m", "--mode", choices=["sse", "http", "stdio"], default="stdio", help="Mode to run the server in: 'http' for Streamable HTTP , 'stdio' for standard input/output.")
+    parser.add_argument(
+        "-m",
+        "--mode",
+        choices=["sse", "http", "stdio"],
+        default="stdio",
+        help=(
+            "Transport mode: 'stdio' (default), 'sse', or 'http' (streamable-http)."
+        ),
+    )
     # -t tools オプションを追加 toolsはカンマ区切りの文字列. search_wikipedia_ja_mcp, vector_search, etc. 指定されていない場合は空文字を設定
     parser.add_argument(
         "-t",
@@ -64,6 +73,12 @@ def parse_args() -> argparse.Namespace:
             "Comma-separated list of tool function names to load (e.g., 'run_chat,analyze_pdf_files'). "
             "If not specified, the default tools are loaded."
         ),
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Bind host for sse/http",
     )
     # -p オプションを追加　ポート番号を指定する modeがsseの場合に使用.defaultは5001
     parser.add_argument("-p", "--port", type=int, default=5001, help="Port number to run the server on. Default is 5001.")
@@ -83,24 +98,61 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def prepare_mcp(mcp: FastMCP, tools_option: str):
-    # tools オプションが指定されている場合は、ツールを登録
-    if tools_option:
-        tools = [tool.strip() for tool in tools_option.split(",")]
-        for tool in tools:
-            global_namespace = globals()
-            if tool in global_namespace:
-                mcp.tool()(global_namespace[tool])
+    tool_registry: dict[str, Callable[..., object]] = {
+        # analysis tools
+        "analyze_image_files": analyze_image_files,
+        "analyze_pdf_files": analyze_pdf_files,
+        "analyze_office_files": analyze_office_files,
+        "analyze_files": analyze_files,
+        "analyze_documents_data": analyze_documents_data,
+        "analyze_image_urls": analyze_image_urls,
+        "analyze_pdf_urls": analyze_pdf_urls,
+        "analyze_office_urls": analyze_office_urls,
+        "analyze_urls": analyze_urls,
+        # chat/batch
+        "run_chat": run_chat,
+        "run_simple_chat": run_simple_chat,
+        "run_batch_chat": run_batch_chat,
+        "run_simple_batch_chat": run_simple_batch_chat,
+        "run_batch_chat_from_excel": run_batch_chat_from_excel,
+        # message/content helpers
+        "use_custom_pdf_analyzer": use_custom_pdf_analyzer,
+        "get_completion_model": get_completion_model,
+        "create_user_message": create_user_message,
+        "create_system_message": create_system_message,
+        "create_assistant_message": create_assistant_message,
+        "create_text_content": create_text_content,
+        "create_pdf_content_from_file": create_pdf_content_from_file,
+        "create_image_content": create_image_content,
+        "create_image_content_from_file": create_image_content_from_file,
+        "create_office_content_from_file": create_office_content_from_file,
+        "create_multi_format_contents_from_file": create_multi_format_contents_from_file,
+    }
 
-    else:
-        # デフォルトのツールを登録
-        mcp.tool()(analyze_image_files)
-        mcp.tool()(analyze_pdf_files)
-        mcp.tool()(analyze_office_files)
-        mcp.tool()(analyze_files)
-        mcp.tool()(analyze_image_urls)
-        mcp.tool()(analyze_pdf_urls)
-        mcp.tool()(analyze_office_urls)
-        mcp.tool()(analyze_urls)
+    if tools_option:
+        tools = [tool.strip() for tool in tools_option.split(",") if tool.strip()]
+        missing = [t for t in tools if t not in tool_registry]
+        if missing:
+            raise ValueError(
+                f"Unknown tool(s): {missing}. Supported: {sorted(tool_registry.keys())}"
+            )
+        for tool in tools:
+            mcp.tool()(tool_registry[tool])
+        return
+
+    # デフォルトのツールを登録（後方互換: 以前の default と同等 + analyze_documents_data）
+    for name in (
+        "analyze_image_files",
+        "analyze_pdf_files",
+        "analyze_office_files",
+        "analyze_files",
+        "analyze_documents_data",
+        "analyze_image_urls",
+        "analyze_pdf_urls",
+        "analyze_office_urls",
+        "analyze_urls",
+    ):
+        mcp.tool()(tool_registry[name])
     
 
 async def main():
@@ -118,28 +170,23 @@ async def main():
 
     mode = args.mode
 
-    mcp = FastMCP() 
+    mcp = FastMCP("ai_chat_util")
 
     prepare_mcp(mcp, args.tools)
 
 
     if mode == "stdio":
         await mcp.run_async()
+        return
 
-    elif mode == "sse":
-        # port番号を取得
-        port = args.port
-        await mcp.run_async(transport="sse", host="0.0.0.0", port=port)
+    host = args.host
+    port = args.port
+    if mode == "sse":
+        await mcp.run_async(transport="sse", host=host, port=port)
+        return
 
-    elif mode == "sse":
-        # port番号を取得
-        port = args.port
-        await mcp.run_async(transport="sse", host="0.0.0.0", port=port)
-
-    elif mode == "http":
-        # port番号を取得
-        port = args.port
-        await mcp.run_async(transport="streamable-http", host="0.0.0.0", port=port)
+    # mode == "http"
+    await mcp.run_async(transport="streamable-http", host=host, port=port)
 
 
 if __name__ == "__main__":

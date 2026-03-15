@@ -3,6 +3,7 @@ import argparse
 from fastmcp import FastMCP
 
 from ai_chat_util.config.runtime import init_runtime
+from ai_chat_util.config.runtime import apply_logging_overrides
 
 from ai_chat_util.core.resource_app import (
     use_custom_pdf_analyzer,
@@ -69,6 +70,16 @@ def parse_args() -> argparse.Namespace:
     # -v LOG_LEVEL オプションを追加 ログレベルを指定する. デフォルトは空白文字
     parser.add_argument("-v", "--log_level", type=str, default="", help="Log level to set for the server. Default is empty, which uses the default log level.")
 
+    parser.add_argument(
+        "--log_file",
+        type=str,
+        default="",
+        help=(
+            "Log file path for the MCP server process. "
+            "Use this when running in stdio mode to avoid mixing logs into stdout."
+        ),
+    )
+
     return parser.parse_args()
 
 def prepare_mcp(mcp: FastMCP, tools_option: str):
@@ -98,6 +109,12 @@ async def main():
 
     # Initialize runtime config first (config.yml required)
     init_runtime(args.config or None)
+
+    # Apply process-local logging overrides (especially useful for stdio MCP server).
+    apply_logging_overrides(
+        level=(args.log_level or None),
+        file=(args.log_file or None),
+    )
 
     mode = args.mode
 

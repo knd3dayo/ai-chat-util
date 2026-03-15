@@ -1,6 +1,10 @@
 from typing import Annotated, Literal
 import tempfile
 import atexit
+import time
+from itertools import count
+from pathlib import Path
+
 from pydantic import Field
 from ai_chat_util.model.models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
@@ -10,6 +14,27 @@ from ai_chat_util.llm.batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util.config.runtime import get_runtime_config
+
+import ai_chat_util.log.log_settings as log_settings
+
+logger = log_settings.getLogger(__name__)
+
+_TOOL_CALL_SEQ = count(1)
+
+
+def _summarize_path_basenames(paths: list[str], *, limit: int = 5) -> str:
+    names: list[str] = []
+    for p in paths[:limit]:
+        try:
+            names.append(Path(p).name)
+        except Exception:
+            names.append(str(p))
+    more = "" if len(paths) <= limit else f" (+{len(paths) - limit} more)"
+    return f"[{', '.join(names)}]{more}"
+
+
+def _prompt_len(prompt: str) -> int:
+    return len((prompt or "").strip())
 
 
 def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
@@ -30,10 +55,29 @@ async def analyze_image_urls(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_image_urls call_id=%s urls=%d detail=%s prompt_len=%d",
+        call_id,
+        len(image_path_urls or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
-
-    return response.output
+    try:
+        response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_image_urls call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_image_urls call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 # 複数の画像の分析を行う
 async def analyze_image_files(
@@ -44,10 +88,36 @@ async def analyze_image_files(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_image_files call_id=%s files=%d detail=%s prompt_len=%d",
+        call_id,
+        len(file_list or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    resolved_paths = _resolve_existing_file_paths(file_list)
-    response = await llm_client.analyze_image_files(resolved_paths, prompt, detail)
-    return response.output
+    try:
+        resolved_paths = _resolve_existing_file_paths(file_list)
+        logger.info(
+            "MCP_TOOL_INPUT tool=analyze_image_files call_id=%s resolved_files=%d basenames=%s",
+            call_id,
+            len(resolved_paths),
+            _summarize_path_basenames(resolved_paths),
+        )
+        response = await llm_client.analyze_image_files(resolved_paths, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_image_files call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_image_files call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 
 # 複数のPDFの分析を行う URLからPDFをダウンロードして分析する
@@ -72,12 +142,32 @@ async def analyze_pdf_urls(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_pdf_urls call_id=%s urls=%d detail=%s prompt_len=%d",
+        call_id,
+        len(pdf_path_urls or []),
+        detail,
+        _prompt_len(prompt),
+    )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = LLMClientUtil.download_files(pdf_path_urls, tmpdir.name)
-    response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
-    return response.output
+    try:
+        path_list = LLMClientUtil.download_files(pdf_path_urls, tmpdir.name)
+        response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_pdf_urls call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_pdf_urls call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 # 複数のPDFの分析を行う
 async def analyze_pdf_files(
@@ -96,10 +186,30 @@ async def analyze_pdf_files(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_pdf_files call_id=%s files=%d detail=%s prompt_len=%d",
+        call_id,
+        len(pdf_path_list or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    resolved_paths = _resolve_existing_file_paths(pdf_path_list)
-    response = await llm_client.analyze_pdf_files(resolved_paths, prompt, detail)
-    return response.output
+    try:
+        resolved_paths = _resolve_existing_file_paths(pdf_path_list)
+        response = await llm_client.analyze_pdf_files(resolved_paths, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_pdf_files call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_pdf_files call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 # 複数のOfficeドキュメントの分析を行う URLからOfficeドキュメントをダウンロードして分析する
 async def analyze_office_urls(
@@ -118,13 +228,32 @@ async def analyze_office_urls(
     """ 
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_office_urls call_id=%s urls=%d detail=%s prompt_len=%d",
+        call_id,
+        len(office_path_urls or []),
+        detail,
+        _prompt_len(prompt),
+    )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = LLMClientUtil.download_files(office_path_urls, tmpdir.name)
-
-    response = await llm_client.analyze_office_files(path_list, prompt, detail)
-    return response.output
+    try:
+        path_list = LLMClientUtil.download_files(office_path_urls, tmpdir.name)
+        response = await llm_client.analyze_office_files(path_list, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_office_urls call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_office_urls call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 async def analyze_office_files(
         office_path_list: Annotated[list[str], Field(description="List of absolute paths to the Office files to analyze. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
@@ -142,10 +271,30 @@ async def analyze_office_files(
     """
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_office_files call_id=%s files=%d detail=%s prompt_len=%d",
+        call_id,
+        len(office_path_list or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    resolved_paths = _resolve_existing_file_paths(office_path_list)
-    response = await llm_client.analyze_office_files(resolved_paths, prompt, detail=detail)
-    return response.output
+    try:
+        resolved_paths = _resolve_existing_file_paths(office_path_list)
+        response = await llm_client.analyze_office_files(resolved_paths, prompt, detail=detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_office_files call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_office_files call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 async def analyze_urls(
         file_path_urls: Annotated[list[WebRequestModel], Field(description="List of urls to the files to analyze. e.g., http://path/to/document1.pdf, http://path/to/image1.jpg")],
@@ -163,12 +312,32 @@ async def analyze_urls(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_urls call_id=%s urls=%d detail=%s prompt_len=%d",
+        call_id,
+        len(file_path_urls or []),
+        detail,
+        _prompt_len(prompt),
+    )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
-    path_list = LLMClientUtil.download_files(file_path_urls, tmpdir.name)
-    response = await llm_client.analyze_files(path_list, prompt, detail)
-    return response.output
+    try:
+        path_list = LLMClientUtil.download_files(file_path_urls, tmpdir.name)
+        response = await llm_client.analyze_files(path_list, prompt, detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_urls call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_urls call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 async def analyze_files(
         file_path_list: Annotated[list[str], Field(description="List of absolute paths to the files to analyze. e.g., [/path/to/document1.pdf, /path/to/image1.jpg]")],
@@ -186,10 +355,30 @@ async def analyze_files(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_files call_id=%s files=%d detail=%s prompt_len=%d",
+        call_id,
+        len(file_path_list or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    resolved_paths = _resolve_existing_file_paths(file_path_list)
-    response = await llm_client.analyze_files(resolved_paths, prompt, detail=detail)
-    return response.output
+    try:
+        resolved_paths = _resolve_existing_file_paths(file_path_list)
+        response = await llm_client.analyze_files(resolved_paths, prompt, detail=detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_files call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_files call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
 
 async def analyze_documents_data(
         document_type_list: Annotated[list[FileUtilDocument], Field(description="List of FileUtilDocument objects to analyze.")],
@@ -207,6 +396,26 @@ async def analyze_documents_data(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=analyze_documents_data call_id=%s docs=%d detail=%s prompt_len=%d",
+        call_id,
+        len(document_type_list or []),
+        detail,
+        _prompt_len(prompt),
+    )
     llm_client = LLMFactory.create_llm_client()
-    response = await llm_client.analyze_documents_data(document_type_list, prompt, detail=detail)
-    return response.output
+    try:
+        response = await llm_client.analyze_documents_data(document_type_list, prompt, detail=detail)
+        return response.output
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=analyze_documents_data call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=analyze_documents_data call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )

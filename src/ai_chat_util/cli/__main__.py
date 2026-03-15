@@ -296,7 +296,14 @@ async def main(argv: Iterable[str] | None = None) -> None:
             else:
                 print("\n[HITL] 次の質問に回答してください:")
             print(prompt)
-            answer = input("HITL> ").strip()
+            import sys
+
+            sys.stdout.flush()
+            try:
+                answer = input("HITL> ").strip()
+            except EOFError:
+                print("\n標準入力が閉じているため、HITL の入力待ちができません。")
+                raise SystemExit(1)
             if not answer:
                 print("入力が空です。再度入力してください。")
                 continue

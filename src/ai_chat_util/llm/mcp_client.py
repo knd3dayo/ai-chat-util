@@ -16,7 +16,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
-from langgraph.checkpoint.sqlite import SqliteSaver
+try:
+    # Async checkpointer for LangGraph when using app.ainvoke()/astream()
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+except Exception:  # pragma: no cover
+    AsyncSqliteSaver = None  # type: ignore[assignment]
 
 from ..config.mcp_config import MCPConfigParser
 from ..config.runtime import (
@@ -47,6 +51,30 @@ def _parse_supervisor_xml(output_text: str) -> tuple[str | None, str | None, str
     return resp_type, payload_text, hitl_kind, hitl_tool
 
 
+def _infer_hitl_from_plain_text(text: str) -> tuple[str | None, str | None]:
+    """Best-effort HITL inference when agents don't follow the XML contract.
+
+    Some models may ignore the required XML output and return a plain Japanese
+    approval prompt that still contains guidance like "APPROVE analyze_image_files".
+    In that case, we infer an approval HITL so the CLI can show `HITL>`.
+    """
+
+    t = (text or "").strip()
+    if not t:
+        return None, None
+
+    # Common approval guidance pattern.
+    m = re.search(r"\bAPPROVE\s+([A-Za-z0-9_\-:.]+)", t)
+    if m:
+        return "approval", m.group(1)
+
+    # Generic HITL hint without tool name.
+    if "APPROVE" in t or "REJECT" in t or "承認" in t:
+        return "approval", None
+
+    return None, None
+
+
 def _default_checkpoint_db_path(runtime_config: AiChatUtilConfig) -> Path:
     """Pick a stable per-config SQLite path for LangGraph checkpoints."""
 
@@ -60,25 +88,39 @@ def _default_checkpoint_db_path(runtime_config: AiChatUtilConfig) -> Path:
     return p
 
 
-def _create_sqlite_checkpointer(db_path: Path, *, exit_stack: contextlib.ExitStack) -> Any:
-    """Create a long-lived SQLite checkpointer.
+async def _create_sqlite_checkpointer(db_path: Path, *, exit_stack: contextlib.AsyncExitStack) -> Any | None:
+    """Create a SQLite checkpointer compatible with async LangGraph execution.
 
-    NOTE: SqliteSaver.from_conn_string() returns a context manager in some versions.
-    We enter it via ExitStack so the underlying connection stays open.
+    When running async graphs (app.ainvoke/astream), LangGraph requires AsyncSqliteSaver.
+    If it's unavailable, we disable checkpointing (return None) to avoid crashing.
     """
 
+    if AsyncSqliteSaver is None:
+        logger.warning(
+            "AsyncSqliteSaver が利用できないため、LangGraph のチェックポイントを無効化します。"
+            "（対処: langgraph-checkpoint-sqlite と aiosqlite をインストール）"
+        )
+        return None
+
     last_err: Exception | None = None
-    for conn in (f"sqlite:///{db_path}", str(db_path)):
+    # AsyncSqliteSaver expects a filesystem path (it passes this into aiosqlite.connect()).
+    for conn in (str(db_path),):
         try:
-            cm_or_saver = SqliteSaver.from_conn_string(conn)
-            # If it's a context manager, enter it.
-            if hasattr(cm_or_saver, "__enter__") and hasattr(cm_or_saver, "__exit__"):
-                return exit_stack.enter_context(cm_or_saver)
+            cm_or_saver = AsyncSqliteSaver.from_conn_string(conn)
+            # Some versions return an async context manager.
+            if hasattr(cm_or_saver, "__aenter__") and hasattr(cm_or_saver, "__aexit__"):
+                return await exit_stack.enter_async_context(cm_or_saver)
             return cm_or_saver
         except Exception as e:
             last_err = e
             continue
-    raise RuntimeError(f"Failed to create SQLite checkpointer: db_path={db_path}") from last_err
+
+    logger.warning(
+        "SQLite checkpointer の初期化に失敗したため、チェックポイントを無効化します。db_path=%s",
+        db_path,
+        exc_info=last_err,
+    )
+    return None
 
 class MCPClientUtil:
     @classmethod
@@ -188,11 +230,13 @@ class MCPClientUtil:
             hitl_policy_text = (
                 "\n\n[HITL承認ポリシー]\n"
                 f"- 次のツールは人間の承認があるまで絶対に実行してはいけません: {approval_tools_text}\n"
+                "- 承認が必要なツール一覧が (なし) の場合、承認要求はせず、必要に応じてツールを実行してください。\n"
                 "- 上記ツールを実行したくなったら、ツールを呼ばずに必ず質問として止めてください。\n"
                 "- 承認が必要な場合は、次のタグを含むXMLで返してください:"
                 "  <RESPONSE_TYPE>question</RESPONSE_TYPE><HITL_KIND>approval</HITL_KIND><HITL_TOOL>TOOL_NAME</HITL_TOOL>\n"
                 "- 人間の返答は 'APPROVE TOOL_NAME' または 'REJECT TOOL_NAME' の形式を推奨します。\n"
                 "- 直前のユーザー入力に 'APPROVE TOOL_NAME' があれば実行して構いません。\n"
+                "- ユーザーがローカルファイルパスやURLを提示した場合、アクセス不能と決めつけず、まずは該当ツールで実行を試みてください。\n"
             )
 
         # ツール実行用のエージェント
@@ -202,6 +246,13 @@ class MCPClientUtil:
             "スーパーバイザーを助けるために、必要に応じてツールを使用してください。"
             "利用可能なツールのみを使用してください。"
             f"{hitl_policy_text}"
+            "\n\n[実行優先]\n"
+            "- ユーザー入力にローカルファイルパス/URLが含まれ、対応する解析ツールが利用可能なら、原則としてツールを実行して結果を返してください。\n"
+            "- 承認ツール一覧が (なし) の場合、承認要求は不要です（質問せず実行してください）。\n"
+            "\n\n[ループ抑制: 重要]\n"
+            "- 1つのユーザー要求に対して、原則としてツール呼び出しは最大1回にしてください（同じツールの再実行禁止）。\n"
+            "- 最初のツール実行が成功して結果が得られたら、それ以上ツールを呼ばず、結果を要約して complete で終了してください。\n"
+            "- ツール実行が失敗した場合のみ、別ツールを最大1回だけ試して構いません。2回目も失敗したら question で止めてください。\n"
             """
             出力フォーマットはXML形式で、以下のルールに従ってください。
             <OUTPUT>
@@ -229,6 +280,10 @@ class MCPClientUtil:
             "スーパーバイザーの指示を受け取り、実行計画を作成し、必要に応じてツール実行エージェントへ指示してください。"
             f"利用可能なツールは以下の通りです:\n{tools_description}\n"
             f"{hitl_policy_text}"
+            "\n\n[重要: 制約]\n"
+            "- あなた（planner_agent）はツールを実行できません。画像/PDF/Office/URL 等の内容を“解析した”と断定したり、結果を捏造してはいけません。\n"
+            "- 出力は『計画』と『tool_agent に渡すべき具体的なツール名・引数案』のみに限定してください。\n"
+            "- ローカルファイルパスやURLが入力に含まれている場合は、まず tool_agent に実行させる前提で、最小の前処理（パス抽出・引数整形）だけを提案してください。\n"
             """
             出力フォーマットはXML形式で、以下のルールに従ってください。
             <OUTPUT>
@@ -262,12 +317,28 @@ class MCPClientUtil:
             supervisor_hitl_policy_text = (
                 "[HITL承認ポリシー]\n"
                 f"- 次のツールは人間の承認があるまで実行してはいけません: {approval_tools_text}\n"
+                "- 承認が必要なツール一覧が (なし) の場合、承認要求はせず、必要に応じて tool_agent に実行させてください。\n"
                 "- 承認が必要なら、<RESPONSE_TYPE>question</RESPONSE_TYPE> と <HITL_KIND>approval</HITL_KIND> と <HITL_TOOL>TOOL_NAME</HITL_TOOL> を含めて止めてください。\n"
             )
 
-        supervisor_prompt = f"""あなたはチームのスーパーバイザーです。planner_agent（計画）と tool_agent（ツール実行）の各エージェントを管理し、スーパーバイザーの目的を達成してください。
-計画が必要なら planner_agent を使い、具体的な実行が必要なら tool_agent を使ってください。
-あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。
+        supervisor_prompt = f"""あなたはチームのスーパーバイザーです。tool_agent（ツール実行）と planner_agent（計画）の各エージェントを管理し、スーパーバイザーの目的を達成してください。
+
+    [重要: 委譲の原則]
+    - ユーザーがローカルファイルパス/URLの分析を求めている場合、あなた自身の推測で「アクセスできない」と断定しないでください。必ず最初に tool_agent に実行させてください（planner_agent ではありません）。
+    - 承認ツール一覧が (なし) の場合、承認要求は不要です。tool_agent に必要なツールを実行させてください。
+    - planner_agent は補助です。ツールが明確な場合は planner_agent を挟まず、即 tool_agent に委譲してください。
+    - planner_agent を使った場合でも、計画で推奨されたツールがあるなら、必ず次のステップで tool_agent に実行させてください。
+
+    [ローカルパス/URLの扱い]
+    - ローカルパスが与えられたら、tool_agent にそのまま渡してツール実行を試みてください。ユーザーに「アップロードして」と返すのは tool_agent が実行失敗した場合に限ります。
+    - tool_agent がツール実行に成功した場合、あなたはその結果を要約して <RESPONSE_TYPE>complete</RESPONSE_TYPE> で返してください。
+
+    [ループ抑制: 重要]
+    - 同一のユーザー入力に対して tool_agent へ何度も再委譲しないでください。原則1回だけ委譲し、結果を使って完了させてください。
+    - tool_agent が失敗を返した場合のみ、planner_agent に原因切り分け（使うツール/引数の修正案）を出させたうえで、tool_agent に再実行を1回だけ許可します。
+
+    計画が必要なら planner_agent を使い、具体的な実行が必要なら tool_agent を使ってください。
+    あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。
 
 各エージェントからの出力フォーマットはXML形式です。
 <OUTPUT>
@@ -284,17 +355,21 @@ class MCPClientUtil:
 {supervisor_hitl_policy_text}
 """
 
+        # Prefer tool execution agent first to reduce accidental planner-only loops.
         workflow = create_supervisor(
-            [planner_agent, tool_agent],
+            [tool_agent, planner_agent],
             model=llm,
             prompt=supervisor_prompt,
         )
 
         # Compile and run
-        try:
-            graph = workflow.compile(name="mcp_supervisor", checkpointer=checkpointer)
-        except TypeError:
-            # Some versions may not accept checkpointer; fall back to no persistence.
+        if checkpointer is not None:
+            try:
+                graph = workflow.compile(name="mcp_supervisor", checkpointer=checkpointer)
+            except TypeError:
+                # Some versions may not accept checkpointer; fall back to no persistence.
+                graph = workflow.compile(name="mcp_supervisor")
+        else:
             graph = workflow.compile(name="mcp_supervisor")
 
         return graph
@@ -302,7 +377,6 @@ class MCPClientUtil:
 class MCPClient:
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
-        self._exit_stack = contextlib.ExitStack()
         mcp_config_path = (
             self.runtime_config.paths.mcp_config_path
             or self.runtime_config.paths.mcp_server_config_file_path
@@ -452,54 +526,92 @@ class MCPClient:
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
+        # Safety valve: cap LangGraph step recursion to avoid runaway agent/tool loops.
+        # This does not affect normal flows, but prevents excessive repeated handoffs.
+        recursion_limit = 60
         auto_approve = bool(getattr(chat_request, "auto_approve", False))
         try:
             max_retries_raw = int(getattr(chat_request, "auto_approve_max_retries", 0) or 0)
         except (TypeError, ValueError):
             max_retries_raw = 0
         max_retries = max(0, min(10, max_retries_raw))
-        checkpointer = _create_sqlite_checkpointer(
-            _default_checkpoint_db_path(self.runtime_config),
-            exit_stack=self._exit_stack,
-        )
+        async with contextlib.AsyncExitStack() as exit_stack:
+            checkpointer = await _create_sqlite_checkpointer(
+                _default_checkpoint_db_path(self.runtime_config),
+                exit_stack=exit_stack,
+            )
 
-        app = await MCPClientUtil.create_workflow(
-            self.mcp_config,
-            self.config_parser,
-            llm,
-            checkpointer=checkpointer,
-            hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
-            auto_approve=auto_approve,
-        )
+            app = await MCPClientUtil.create_workflow(
+                self.mcp_config,
+                self.config_parser,
+                llm,
+                checkpointer=checkpointer,
+                hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
+                auto_approve=auto_approve,
+            )
 
-        # 実行
-        lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
-        if not lc_messages:
-            raise ValueError("chat_request.chat_history.messages が空です。")
+            # 実行
+            lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
+            if not lc_messages:
+                raise ValueError("chat_request.chat_history.messages が空です。")
 
-        result = await app.ainvoke(
-            {"messages": lc_messages},
-            config={"configurable": {"thread_id": run_trace_id}},
-        )
-        output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
+            result = await app.ainvoke(
+                {"messages": lc_messages},
+                config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+            )
+            output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
 
-        resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
-        user_text = extracted_text or output_text
+            resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+            user_text = extracted_text or output_text
 
-        # AUTO_APPROVE: if we still get a question, try to push the supervisor to complete without pausing.
-        if auto_approve and resp_type == "question" and max_retries > 0:
-            for attempt in range(1, max_retries + 1):
-                directive = (
+            # Fallback: if the model ignored/misused the XML contract, infer HITL from plain text.
+            inferred_kind, inferred_tool = _infer_hitl_from_plain_text(user_text)
+            if inferred_kind is not None:
+                # If the model asked a question but didn't specify HITL_KIND, still tag it.
+                if resp_type == "question" and not hitl_kind:
+                    hitl_kind = inferred_kind
+                    hitl_tool = hitl_tool or inferred_tool
+                # If the model incorrectly returned complete, force question so CLI can pause.
+                if resp_type != "question":
+                    resp_type = "question"
+                    hitl_kind = inferred_kind
+                    hitl_tool = inferred_tool
+
+            # AUTO_APPROVE: if we still get a question, try to push the supervisor to complete without pausing.
+            if auto_approve and resp_type == "question" and max_retries > 0:
+                for attempt in range(1, max_retries + 1):
+                    directive = (
+                        "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
+                        "直前に提示した質問/承認要求は、あなた自身で合理的に仮定して解決し、作業を完了してください。\n"
+                        "不確実性や仮定は TEXT に明記してください。\n"
+                        "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
+                        f"(attempt {attempt}/{max_retries})\n"
+                        f"直前の質問: {user_text}"
+                    )
+                    result = await app.ainvoke(
+                        {"messages": [HumanMessage(content=directive)]},
+                        config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+                    )
+                    output_text, add_in, add_out = self._extract_output_and_usage(result)
+                    input_tokens += add_in
+                    output_tokens += add_out
+
+                    resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+                    user_text = extracted_text or output_text
+                    if resp_type != "question":
+                        break
+
+            if auto_approve and resp_type == "question":
+                # Final attempt: even if you cannot fully answer, do not ask.
+                final_directive = (
                     "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
-                    "直前に提示した質問/承認要求は、あなた自身で合理的に仮定して解決し、作業を完了してください。\n"
-                    "不確実性や仮定は TEXT に明記してください。\n"
+                    "あなたが自力で完了できない場合でも、質問はせず、現時点でできる範囲の回答と限界（不足情報/前提）を説明して完了してください。\n"
                     "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
-                    f"(attempt {attempt}/{max_retries})\n"
                     f"直前の質問: {user_text}"
                 )
                 result = await app.ainvoke(
-                    {"messages": [HumanMessage(content=directive)]},
-                    config={"configurable": {"thread_id": run_trace_id}},
+                    {"messages": [HumanMessage(content=final_directive)]},
+                    config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                 )
                 output_text, add_in, add_out = self._extract_output_and_usage(result)
                 input_tokens += add_in
@@ -507,64 +619,43 @@ class MCPClient:
 
                 resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
                 user_text = extracted_text or output_text
-                if resp_type != "question":
-                    break
 
-        if auto_approve and resp_type == "question":
-            # Final attempt: even if you cannot fully answer, do not ask.
-            final_directive = (
-                "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
-                "あなたが自力で完了できない場合でも、質問はせず、現時点でできる範囲の回答と限界（不足情報/前提）を説明して完了してください。\n"
-                "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
-                f"直前の質問: {user_text}"
+            status: str = "completed"
+            hitl: HitlRequest | None = None
+            if resp_type == "question":
+                if auto_approve:
+                    # Do not pause; return best-effort completion message (avoid asking).
+                    status = "completed"
+                    hitl = None
+                    user_text = (
+                        "追加確認が必要な状況でしたが、auto_approve が有効なため pause せずに処理を終了します。\n"
+                        "現時点で確定できない点/不足情報（参考）:\n"
+                        f"- {user_text}\n"
+                        "上記が提供されれば、より正確に継続できます。"
+                    )
+                else:
+                    status = "paused"
+                    kind = "approval" if hitl_kind == "approval" else "input"
+                    hitl = HitlRequest(
+                        kind=cast(Any, kind),
+                        prompt=user_text,
+                        action_id=str(uuid.uuid4()),
+                        source=("supervisor" + (f":{hitl_tool}" if hitl_tool else "")),
+                    )
+
+            return ChatResponse(
+                status=cast(Any, status),
+                trace_id=run_trace_id,
+                hitl=hitl,
+                messages=[
+                    ChatMessage(
+                        role="assistant",
+                        content=[ChatContent(params={"type": "text", "text": user_text})],
+                    )
+                ],
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
-            result = await app.ainvoke(
-                {"messages": [HumanMessage(content=final_directive)]},
-                config={"configurable": {"thread_id": run_trace_id}},
-            )
-            output_text, add_in, add_out = self._extract_output_and_usage(result)
-            input_tokens += add_in
-            output_tokens += add_out
-
-            resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
-            user_text = extracted_text or output_text
-
-        status: str = "completed"
-        hitl: HitlRequest | None = None
-        if resp_type == "question":
-            if auto_approve:
-                # Do not pause; return best-effort completion message (avoid asking).
-                status = "completed"
-                hitl = None
-                user_text = (
-                    "追加確認が必要な状況でしたが、auto_approve が有効なため pause せずに処理を終了します。\n"
-                    "現時点で確定できない点/不足情報（参考）:\n"
-                    f"- {user_text}\n"
-                    "上記が提供されれば、より正確に継続できます。"
-                )
-            else:
-                status = "paused"
-                kind = "approval" if hitl_kind == "approval" else "input"
-                hitl = HitlRequest(
-                    kind=cast(Any, kind),
-                    prompt=user_text,
-                    action_id=str(uuid.uuid4()),
-                    source=("supervisor" + (f":{hitl_tool}" if hitl_tool else "")),
-                )
-
-        return ChatResponse(
-            status=cast(Any, status),
-            trace_id=run_trace_id,
-            hitl=hitl,
-            messages=[
-                ChatMessage(
-                    role="assistant",
-                    content=[ChatContent(params={"type": "text", "text": user_text})],
-                )
-            ],
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
 
 
 if __name__ == "__main__":

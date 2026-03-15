@@ -41,6 +41,10 @@ class LLMBatchClient:
         '''
         指定されたメッセージリストに対して、指定されたプロンプトを用いてバッチ処理を行う。
         '''
+        # バッチ処理の場合、HITLが発生すると大量にpauseが発生する可能性があるため、ChatRequestのauto_approveをTrueにする。
+        for chat_request in chat_requests:
+            chat_request.auto_approve = True
+
         progress = tqdm_asyncio(total=len(chat_requests), desc="progress")
         # 進捗バーのフォーマット
         progress.bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"

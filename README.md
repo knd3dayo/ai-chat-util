@@ -182,6 +182,7 @@ paths:
 
 - HITL（pause/resume）が発生するのは **`--use_mcp`（内部MCPクライアント）を使う場合のみ**です。
   - `--use_mcp` を付けない場合（LiteLLM経由の直接呼び出し）は、HITLは発生しません。
+- `run_simple_chat` / `run_simple_batch_chat` は常に LiteLLM 経由の直接呼び出し（MCP非対応）で実行されます（`use_mcp` 引数はありません）。
 - `--use_mcp` を使う場合は、`config.yml` の `paths.mcp_config_path`（互換: `paths.mcp_server_config_file_path`）が必要です。
 
 ### レスポンス形（API/ライブラリ利用時）

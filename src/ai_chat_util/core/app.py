@@ -26,25 +26,23 @@ async def run_chat(
 
 async def run_simple_chat(
         prompt: Annotated[str, Field(description="Prompt for the chat")],
-        use_mcp: Annotated[bool, Field(description="Whether to use MCP for the chat or not")]=False
 ) -> Annotated[str, Field(description="Chat response from the LLM")]:
     """
     This function processes a simple chat with the specified prompt and returns the chat response.
     """
-    llm_client = LLMFactory.create_llm_client(use_mcp=use_mcp)
+    llm_client = LLMFactory.create_llm_client(use_mcp=False)
     response = await llm_client.simple_chat(prompt)
     return response
 
 async def run_simple_batch_chat(
         prompt: Annotated[str, Field(description="Prompt for the batch chat")],
         messages: Annotated[list[str], Field(description="List of messages for the batch chat")],
-        use_mcp: Annotated[bool, Field(description="Whether to use MCP for the chat or not")]=False,
         concurrency: Annotated[int, Field(description="Number of concurrent requests to process")]=5
 ) -> Annotated[list[str], Field(description="List of chat responses from batch processing")]:
     """
     This function processes a simple batch chat with the specified prompt and messages, and returns the list of chat responses.
     """
-    batch_client = LLMBatchClient(use_mcp=use_mcp)
+    batch_client = LLMBatchClient(use_mcp=False)
     results = await batch_client.run_simple_batch_chat(prompt, messages, concurrency)
     return results
 

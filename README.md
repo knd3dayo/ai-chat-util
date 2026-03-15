@@ -5,8 +5,8 @@
 **ai_chat_util** は、生成AI（大規模言語モデル）を活用するためのクライアントライブラリです。  
 チャット形式での対話、バッチ処理による一括実行、画像やPDFファイルをAIに渡して解析・応答を得るなど、柔軟な利用が可能です。
 
-このライブラリは、MCP（Model Context Protocol）サーバーを通じてAIモデルと通信し、  
-開発者が簡単に生成AI機能を自分のアプリケーションに統合できるよう設計されています。
+このライブラリは、LLM への直接呼び出し（LiteLLM 経由）に加えて、MCP（Model Context Protocol）連携（内部クライアント / MCPサーバー提供）もサポートし、
+開発者が生成AI機能を自分のアプリケーションに統合しやすいよう設計されています。
 
 ---
 
@@ -35,12 +35,16 @@
 
 ```
 src/ai_chat_util/
-├── agent/          # エージェント関連ユーティリティ
-├── batch/          # バッチクライアント
-├── llm/            # LLMクライアント・モデル設定
+├── api/            # FastAPI APIサーバー
+├── cli/            # CLI（argparse + subcommand）
+├── config/         # 設定（config.yml / MCP設定JSON）
+├── core/           # コア処理（チャット/バッチ等）
+├── llm/            # LLMクライアント実装（LiteLLM / MCP内部クライアント）
 ├── log/            # ログ設定
 ├── mcp/            # MCPサーバー実装
-└── util/           # PDFなどのユーティリティ
+├── model/          # Pydanticモデル
+├── test/           # サンプル/簡易スクリプト
+└── util/           # PDF/Office等のユーティリティ
 ```
 
 ---
@@ -75,6 +79,34 @@ copy config.example.yml config.yml
 4. `<project-root>/config.yml`
 
 > `config.yml` が見つからない場合はエラーになります。
+
+#### 秘密情報（APIキー等）の扱い
+
+秘密情報は `config.yml` に直書きできません。
+
+- `llm.api_key` は **環境変数参照**（`os.environ/ENV_VAR_NAME`）の形式でのみ指定できます。
+- OpenAI / Azure OpenAI / Anthropic のプロバイダ（`llm.provider: openai | azure | anthropic`）を使う場合、`llm.api_key` は必須です（設定ロード時に検証されます）。
+
+例（OpenAI）:
+
+```yml
+llm:
+  provider: openai
+  completion_model: gpt-5
+  timeout_seconds: 60
+  api_key: os.environ/OPENAI_API_KEY
+```
+
+例（Azure OpenAI）:
+
+```yml
+llm:
+  provider: azure
+  completion_model: <AZURE_DEPLOYMENT_NAME>
+  base_url: https://<resource-name>.openai.azure.com/
+  api_version: 2024-xx-xx
+  api_key: os.environ/AZURE_API_KEY
+```
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）
 
@@ -127,6 +159,18 @@ office2pdf:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
 | `AI_CHAT_UTIL_CONFIG` | 非秘密 | `config.yml` のパス（`--config` を渡せない起動で使用） |
 
+### MCP設定（内部MCPクライアント用：任意）
+
+CLIの `chat` / `batch_chat` は `--use_mcp` を指定すると、内部の MCP クライアントを使って「MCPツール込みのワークフロー」で実行できます。
+このとき、`config.yml` の `paths.mcp_config_path`（互換キー: `paths.mcp_server_config_file_path`）に、MCPサーバー設定JSONのパスを指定してください。
+
+```yml
+paths:
+  mcp_config_path: mcp_settings.json
+```
+
+> 補足: 同梱の `sample_cline_mcp_settings.json` と同じ形式です。
+
 ---
 
 ## コマンドラインクライアント
@@ -157,6 +201,12 @@ uv run -m ai_chat_util.cli --help
 uv run -m ai_chat_util.cli chat -p "こんにちは"
 ```
 
+内部MCPクライアントを使う場合:
+
+```bash
+uv run -m ai_chat_util.cli chat -p "こんにちは" --use_mcp
+```
+
 #### batch_chat（Excel入力のバッチチャット）
 
 Excel の各行（`content` / `file_path`）を読み込み、指定した `prompt` を前置して LLM に送信し、
@@ -167,6 +217,16 @@ uv run -m ai_chat_util.cli batch_chat \
   -i data/input.xlsx \
   -p "要約してください" \
   -o output.xlsx
+```
+
+内部MCPクライアントを使う場合:
+
+```bash
+uv run -m ai_chat_util.cli batch_chat \
+  -i data/input.xlsx \
+  -p "要約してください" \
+  -o output.xlsx \
+  --use_mcp
 ```
 
 入力Excelの列（既定）:
@@ -230,7 +290,7 @@ uv run -m ai_chat_util.cli analyze_files \
 MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
 > 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
-> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定してください。`config.yml` は必須です。
+> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定し、`config.yml` の `llm.api_key` で参照してください。`config.yml` は必須です。
 
 ### 起動方法
 
@@ -261,13 +321,16 @@ uv run -m ai_chat_util.mcp.mcp_server -m http -p 5001
 ### 提供ツールの指定（任意）
 
 `-t/--tools` で、登録するツールをカンマ区切りで指定できます。
-未指定の場合は、チャット/画像/PDF/Office/複数形式（files/urls）解析系がデフォルトで登録されます。
+未指定の場合は、以下の解析系ツール（files/urls）がデフォルトで登録されます。
+
+- `analyze_image_files` / `analyze_pdf_files` / `analyze_office_files` / `analyze_files`
+- `analyze_image_urls` / `analyze_pdf_urls` / `analyze_office_urls` / `analyze_urls`
 
 ```bash
 uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
 ```
 
-> 注意: 指定できる名前は `ai_chat_util.core.app` から import されている関数名です。
+> 注意: 指定できる名前は、`ai_chat_util.mcp.mcp_server` が import 済みの関数名（= `mcp_server.py` の `globals()` に存在する名前）です。
 
 ### MCPクライアント（例: Cline）向け設定例
 
@@ -296,3 +359,32 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
   }
 }
 ```
+
+---
+
+## APIサーバー（FastAPI）
+
+FastAPI のAPIサーバーを提供します。起動時に `config.yml` が必須です。
+
+### 起動方法
+
+`uvicorn ...:app` のように `--config` を渡せない起動では、環境変数 `AI_CHAT_UTIL_CONFIG` を使って `config.yml` の場所を指定してください。
+
+```powershell
+$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\config.yml"
+uvicorn ai_chat_util.api.api_server:app
+```
+
+### エンドポイント（prefix）
+
+すべて `/api/ai_chat_util` 配下にルーティングされます。
+
+- `POST /api/ai_chat_util/analyze_image_files`
+- `POST /api/ai_chat_util/analyze_pdf_files`
+- `POST /api/ai_chat_util/analyze_office_files`
+- `POST /api/ai_chat_util/analyze_files`
+- `POST /api/ai_chat_util/analyze_documents_data`
+- `POST /api/ai_chat_util/analyze_image_urls`
+- `POST /api/ai_chat_util/analyze_pdf_urls`
+- `POST /api/ai_chat_util/analyze_office_urls`
+- `POST /api/ai_chat_util/analyze_urls`

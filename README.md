@@ -439,13 +439,13 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio --log_file mcp_server.log -v INFO
 SSE（Server-Sent Events）で起動します。
 
 ```bash
-uv run -m ai_chat_util.mcp.mcp_server -m sse -p 5001
+uv run -m ai_chat_util.mcp.mcp_server -m sse --host 0.0.0.0 -p 5001
 ```
 
 #### Streamable HTTP
 
 ```bash
-uv run -m ai_chat_util.mcp.mcp_server -m http -p 5001
+uv run -m ai_chat_util.mcp.mcp_server -m http --host 0.0.0.0 -p 5001
 ```
 
 ### 提供ツールの指定（任意）
@@ -453,14 +453,14 @@ uv run -m ai_chat_util.mcp.mcp_server -m http -p 5001
 `-t/--tools` で、登録するツールをカンマ区切りで指定できます。
 未指定の場合は、以下の解析系ツール（files/urls）がデフォルトで登録されます。
 
-- `analyze_image_files` / `analyze_pdf_files` / `analyze_office_files` / `analyze_files`
+- `analyze_image_files` / `analyze_pdf_files` / `analyze_office_files` / `analyze_files` / `analyze_documents_data`
 - `analyze_image_urls` / `analyze_pdf_urls` / `analyze_office_urls` / `analyze_urls`
 
 ```bash
 uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
 ```
 
-> 注意: 指定できる名前は、`ai_chat_util.mcp.mcp_server` が import 済みの関数名（= `mcp_server.py` の `globals()` に存在する名前）です。
+> 注意: `--tools` で指定したツール名が未対応の場合、起動時にエラーになります（黙って無視しません）。
 
 ### MCPクライアント（例: Cline）向け設定例
 

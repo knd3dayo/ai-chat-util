@@ -314,7 +314,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
         # Heavy deps (e.g., pandas) are only needed for batch_chat.
-        from ai_chat_util.llm.batch_client import LLMBatchClient
+        from ai_chat_util.llm.llm_batch_client import LLMBatchClient
 
         llm_batch_client = LLMBatchClient(use_mcp=args.use_mcp)
         await llm_batch_client.run_batch_chat_from_excel(

@@ -1,4 +1,4 @@
-from ai_chat_util.llm.batch_client import LLMBatchClient
+from ai_chat_util.llm.llm_batch_client import LLMBatchClient
 
 async def main():
 

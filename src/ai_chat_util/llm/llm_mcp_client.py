@@ -36,21 +36,6 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 
-def _parse_supervisor_xml(output_text: str) -> tuple[str | None, str | None, str | None, str | None]:
-    """Extract RESPONSE_TYPE and TEXT (and optional HITL metadata) from the XML-ish output."""
-
-    text = output_text or ""
-    m_type = re.search(r"<RESPONSE_TYPE>\s*(.*?)\s*</RESPONSE_TYPE>", text, flags=re.DOTALL | re.IGNORECASE)
-    m_text = re.search(r"<TEXT>\s*(.*?)\s*</TEXT>", text, flags=re.DOTALL | re.IGNORECASE)
-    m_kind = re.search(r"<HITL_KIND>\s*(.*?)\s*</HITL_KIND>", text, flags=re.DOTALL | re.IGNORECASE)
-    m_tool = re.search(r"<HITL_TOOL>\s*(.*?)\s*</HITL_TOOL>", text, flags=re.DOTALL | re.IGNORECASE)
-
-    resp_type = m_type.group(1).strip().lower() if m_type else None
-    payload_text = m_text.group(1).strip() if m_text else None
-    hitl_kind = m_kind.group(1).strip().lower() if m_kind else None
-    hitl_tool = m_tool.group(1).strip() if m_tool else None
-    return resp_type, payload_text, hitl_kind, hitl_tool
-
 
 def _infer_hitl_from_plain_text(text: str) -> tuple[str | None, str | None]:
     """Best-effort HITL inference when agents don't follow the XML contract.
@@ -149,7 +134,7 @@ class MCPClientUtil:
             # a relative AI_CHAT_UTIL_CONFIG like "config.yml" can break. Pass an absolute path.
             runtime_config_path = str(get_runtime_config_path())
             if mcp_config:
-                for _name, conn in mcp_config.items():
+                for _, conn in mcp_config.items():
                     if isinstance(conn, Mapping) and conn.get("transport") == "stdio":
                         conn_dict = cast(dict[str, Any], conn)
                         env = conn_dict.get("env")
@@ -180,7 +165,7 @@ class MCPClientUtil:
         allowed_map = config_parser.get_allowed_tools_map()
         # If no server specifies allowedTools (all None), allow everything.
         allowed_names: set[str] | None = None
-        for _server_name, names in allowed_map.items():
+        for _, names in allowed_map.items():
             if names is None:
                 continue
             if allowed_names is None:
@@ -199,27 +184,25 @@ class MCPClientUtil:
         
         logger.info("Loaded %d tools from MCP servers.", len(allowed_langchain_tools))
         return allowed_langchain_tools
-    
+
     @classmethod
-    async def create_workflow(
-        cls,
-        mcp_config: dict[str, Any] | None,
-        config_parser: MCPConfigParser | None,
-        llm: BaseChatModel,
-        *,
-        checkpointer: Any | None = None,
-        hitl_approval_tools: Sequence[str] | None = None,
-        auto_approve: bool = False,
-        tool_call_limit: int | None = None,
-        tool_timeout_seconds: float | None = None,
-        tool_timeout_retries: int | None = None,
-    ) -> CompiledStateGraph:
+    def _is_timeout_exception(cls, err: BaseException) -> bool:
+        if isinstance(err, asyncio.TimeoutError):
+            return True
+        if isinstance(err, RuntimeError) and "タイムアウト" in str(err):
+            return True
+        return False
 
-        # LLM + MCP ツールでエージェントを作成
-        allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(mcp_config, config_parser)
+    @classmethod
+    def _tool_error_text(cls, tool_name: str, err: BaseException) -> str:
+        err_type = type(err).__name__
+        msg = str(err).strip()
+        if msg:
+            return f"ERROR: tool={tool_name} failed ({err_type}): {msg}"
+        return f"ERROR: tool={tool_name} failed ({err_type})"
 
-        # Safety valves: cap tool calls and hard-timeout tool execution.
-        # This enforces termination even if prompts are ignored.
+    @classmethod
+    def _prepare_timeout_limits(cls, tool_call_limit: int | None, tool_timeout_seconds: float | None, tool_timeout_retries: int | None) -> tuple[int, float, int]:
         try:
             tool_call_limit_int = int(tool_call_limit) if tool_call_limit is not None else 0
         except (TypeError, ValueError):
@@ -240,21 +223,183 @@ class MCPClientUtil:
             tool_timeout_retries_int = 0
         tool_timeout_retries_int = max(0, min(5, tool_timeout_retries_int))
 
+        return tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int
+
+    @classmethod
+    async def agent_question_and_non_approval_response(
+        cls, auto_approve: bool, resp_type: str, 
+        max_retries: int, user_text: str, run_trace_id: str,
+        input_tokens: int, output_tokens: int, 
+        recursion_limit: int, app: Any) -> tuple[str, int, int]:
+        # AUTO_APPROVE: if we still get a question, try to push the supervisor to complete without pausing.
+        if auto_approve and resp_type == "question" and max_retries > 0:
+            for attempt in range(1, max_retries + 1):
+                directive = (
+                    "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
+                    "直前に提示した質問/承認要求は、あなた自身で合理的に仮定して解決し、作業を完了してください。\n"
+                    "不確実性や仮定は TEXT に明記してください。\n"
+                    "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
+                    f"(attempt {attempt}/{max_retries})\n"
+                    f"直前の質問: {user_text}"
+                )
+                result = await app.ainvoke(
+                    {"messages": [HumanMessage(content=directive)]},
+                    config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+                )
+                output_text, add_in, add_out = cls._extract_output_and_usage(result)
+                input_tokens += add_in
+                output_tokens += add_out
+
+                parsed_resp_type, extracted_text, _hitl_kind, _hitl_tool = cls._parse_supervisor_xml(output_text)
+                # _parse_supervisor_xml は Optional を返すため、ここでは前回値をフォールバックする。
+                resp_type = parsed_resp_type or resp_type
+                user_text = extracted_text or output_text
+                if resp_type != "question":
+                    break
+
+        return user_text, input_tokens, output_tokens
+
+
+    @classmethod
+    def _stringify_message_content(cls, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # OpenAI-style multi-part content.
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text") or ""))
+            return "".join(parts)
+        return str(content)
+
+
+    @classmethod
+    def _parse_supervisor_xml(cls, output_text: str|None) -> tuple[str | None, str | None, str | None, str | None]:
+        """Extract RESPONSE_TYPE and TEXT (and optional HITL metadata) from the XML-ish output."""
+
+        text = output_text or ""
+        m_type = re.search(r"<RESPONSE_TYPE>\s*(.*?)\s*</RESPONSE_TYPE>", text, flags=re.DOTALL | re.IGNORECASE)
+        m_text = re.search(r"<TEXT>\s*(.*?)\s*</TEXT>", text, flags=re.DOTALL | re.IGNORECASE)
+        m_kind = re.search(r"<HITL_KIND>\s*(.*?)\s*</HITL_KIND>", text, flags=re.DOTALL | re.IGNORECASE)
+        m_tool = re.search(r"<HITL_TOOL>\s*(.*?)\s*</HITL_TOOL>", text, flags=re.DOTALL | re.IGNORECASE)
+
+        resp_type = m_type.group(1).strip().lower() if m_type else None
+        payload_text = m_text.group(1).strip() if m_text else None
+        hitl_kind = m_kind.group(1).strip().lower() if m_kind else None
+        hitl_tool = m_tool.group(1).strip() if m_tool else None
+        return resp_type, payload_text, hitl_kind, hitl_tool
+
+
+
+    @classmethod
+    def _extract_output_and_usage(cls, result: Any) -> tuple[str, int, int]:
+        """Best-effort extract output text + token usage from agent result."""
+
+        def _usage_from_ai_message(ai: AIMessage) -> tuple[int, int]:
+            # LangChain standard
+            usage_meta = getattr(ai, "usage_metadata", None)
+            if isinstance(usage_meta, Mapping):
+                in_tok = int(usage_meta.get("input_tokens", 0) or 0)
+                out_tok = int(usage_meta.get("output_tokens", 0) or 0)
+                if in_tok or out_tok:
+                    return in_tok, out_tok
+
+            # Provider-specific (LiteLLM/OpenAI adapters often stash here)
+            resp_meta = getattr(ai, "response_metadata", None)
+            if isinstance(resp_meta, Mapping):
+                usage = resp_meta.get("usage") or resp_meta.get("token_usage") or {}
+                if isinstance(usage, Mapping):
+                    in_tok = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+                    out_tok = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+                    return in_tok, out_tok
+
+            return 0, 0
+
+        # 1) direct string
+        if isinstance(result, str):
+            return result, 0, 0
+
+        # 2) dict-like payloads
+        if isinstance(result, Mapping):
+            out = result.get("output")
+            if isinstance(out, str) and out.strip():
+                return out, 0, 0
+
+            msgs = result.get("messages")
+            if isinstance(msgs, Sequence):
+                # Prefer last AI message
+                last_ai: AIMessage | None = None
+                for m in reversed(list(msgs)):
+                    if isinstance(m, AIMessage):
+                        last_ai = m
+                        break
+                    # Sometimes messages are plain dicts
+                    if isinstance(m, Mapping) and (m.get("role") == "assistant"):
+                        content = m.get("content")
+                        return cls._stringify_message_content(content), 0, 0
+
+                if last_ai is not None:
+                    text = cls._stringify_message_content(last_ai.content)
+                    in_tok, out_tok = _usage_from_ai_message(last_ai)
+                    return text, in_tok, out_tok
+
+        # 3) fallback
+        return str(result), 0, 0
+
+    @classmethod
+    def create_tool_agent(
+        cls,
+        llm: BaseChatModel,
+        auto_approve: bool,
+        hitl_approval_tools: Sequence[str] | None,
+        allowed_langchain_tools: list[Any],
+    ) -> Any:
+        # ツール実行用のエージェント
+        # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
+        approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
+        approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
+
+        if auto_approve:
+            hitl_policy_text = Prompts.auto_approve_hitl_policy_text(approval_tools_text)
+        else:
+            hitl_policy_text = Prompts.normal_hitl_policy_text(approval_tools_text)
+
+        tool_agent_system_prompt = Prompts.tool_agent_system_prompt(hitl_policy_text)
+        tool_agent = create_agent(
+            llm,
+            allowed_langchain_tools,
+            system_prompt=tool_agent_system_prompt,
+            name="tool_agent",
+        )
+        return tool_agent
+
+    @classmethod
+    async def create_workflow(
+        cls,
+        mcp_config: dict[str, Any] | None,
+        config_parser: MCPConfigParser | None,
+        llm: BaseChatModel,
+        *,
+        checkpointer: Any | None = None,
+        hitl_approval_tools: Sequence[str] | None = None,
+        auto_approve: bool = False,
+        tool_call_limit: int | None = None,
+        tool_timeout_seconds: float | None = None,
+        tool_timeout_retries: int | None = None,
+    ) -> CompiledStateGraph:
+
+        # LLM + MCP ツールでエージェントを作成
+        allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(mcp_config, config_parser)
+
+        # Safety valves: cap tool calls and hard-timeout tool execution.
+        # This enforces termination even if prompts are ignored.
+        tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = cls._prepare_timeout_limits(
+            tool_call_limit, tool_timeout_seconds, tool_timeout_retries
+        )
+
         tool_calls_used = 0
 
-        def _is_timeout_exception(err: BaseException) -> bool:
-            if isinstance(err, asyncio.TimeoutError):
-                return True
-            if isinstance(err, RuntimeError) and "タイムアウト" in str(err):
-                return True
-            return False
-
-        def _tool_error_text(tool_name: str, err: BaseException) -> str:
-            err_type = type(err).__name__
-            msg = str(err).strip()
-            if msg:
-                return f"ERROR: tool={tool_name} failed ({err_type}): {msg}"
-            return f"ERROR: tool={tool_name} failed ({err_type})"
 
         async def _run_tool_with_guards(tool_name: str, orig_coro: Any, *args: Any, **kwargs: Any) -> str:
             nonlocal tool_calls_used
@@ -287,7 +432,7 @@ class MCPClientUtil:
                     raise
                 except Exception as e:
                     last_err = e
-                    if _is_timeout_exception(e) and attempt < attempts:
+                    if cls._is_timeout_exception(e) and attempt < attempts:
                         logger.warning(
                             "Tool timeout; retrying: tool=%s attempt=%s/%s",
                             tool_name,
@@ -303,10 +448,10 @@ class MCPClientUtil:
                         attempt,
                         attempts,
                     )
-                    return _tool_error_text(tool_name, e)
+                    return cls._tool_error_text(tool_name, e)
 
             if last_err is not None:
-                return _tool_error_text(tool_name, last_err)
+                return cls._tool_error_text(tool_name, last_err)
             return f"ERROR: tool={tool_name} failed (unknown error)"
 
         if allowed_langchain_tools and (tool_call_limit_int or (tool_timeout_seconds_f and tool_timeout_seconds_f > 0) or tool_timeout_retries_int):
@@ -343,7 +488,7 @@ class MCPClientUtil:
                             return cast(str, __orig_func(*args, **kwargs))
                         except Exception as e:
                             logger.exception("Tool invocation failed (sync): tool=%s", __tool_name)
-                            return _tool_error_text(__tool_name, e)
+                            return cls._tool_error_text(__tool_name, e)
                     try:
                         setattr(tool, "func", _wrapped_func)
                     except Exception:
@@ -352,33 +497,13 @@ class MCPClientUtil:
         approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
         approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
 
-        if auto_approve:
-            hitl_policy_text = Prompts.auto_approve_hitl_policy_text(approval_tools_text)
-        else:
-            hitl_policy_text = Prompts.normal_hitl_policy_text(approval_tools_text)
+        tools_description = "\n".join(f"- {tool.name}: {tool.description}" for tool in allowed_langchain_tools)
+        logger.info("Allowed tools:\n%s", tools_description)
+
 
         # ツール実行用のエージェント
         # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
-        tool_agent_system_prompt = Prompts.tool_agent_system_prompt(hitl_policy_text)
-        tool_agent = create_agent(
-            llm,
-            allowed_langchain_tools,
-            system_prompt=tool_agent_system_prompt,
-            name="tool_agent",
-        )
-
-        tools_description = "\n".join(f"- {tool.name}: {tool.description}" for tool in allowed_langchain_tools)
-        logger.info("Allowed tools:\n%s", tools_description)
-        # Plannerエージェントはユーザからの指示を受け取り、計画を立ててtool_agentに指示を出す役割
-        # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
-        planner_agent_system_prompt = Prompts.tool_agent_user_prompt(tools_description, hitl_policy_text)
-        planner_agent = create_agent(
-            llm,
-            [],
-            system_prompt=planner_agent_system_prompt,
-            name="planner_agent",
-        )  # ツールは持たないシンプルなエージェント
-
+        tool_agent = cls.create_tool_agent(llm, auto_approve, hitl_approval_tools, allowed_langchain_tools)
 
         if auto_approve:
             supervisor_hitl_policy_text = Prompts.supervisor_hitl_policy_text(approval_tools_text)
@@ -478,75 +603,6 @@ class MCPClient:
         return lc_messages
 
 
-    @staticmethod
-    def _stringify_message_content(content: Any) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            # OpenAI-style multi-part content.
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    parts.append(str(item.get("text") or ""))
-            return "".join(parts)
-        return str(content)
-
-
-    @classmethod
-    def _extract_output_and_usage(cls, result: Any) -> tuple[str, int, int]:
-        """Best-effort extract output text + token usage from agent result."""
-
-        def _usage_from_ai_message(ai: AIMessage) -> tuple[int, int]:
-            # LangChain standard
-            usage_meta = getattr(ai, "usage_metadata", None)
-            if isinstance(usage_meta, Mapping):
-                in_tok = int(usage_meta.get("input_tokens", 0) or 0)
-                out_tok = int(usage_meta.get("output_tokens", 0) or 0)
-                if in_tok or out_tok:
-                    return in_tok, out_tok
-
-            # Provider-specific (LiteLLM/OpenAI adapters often stash here)
-            resp_meta = getattr(ai, "response_metadata", None)
-            if isinstance(resp_meta, Mapping):
-                usage = resp_meta.get("usage") or resp_meta.get("token_usage") or {}
-                if isinstance(usage, Mapping):
-                    in_tok = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-                    out_tok = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
-                    return in_tok, out_tok
-
-            return 0, 0
-
-        # 1) direct string
-        if isinstance(result, str):
-            return result, 0, 0
-
-        # 2) dict-like payloads
-        if isinstance(result, Mapping):
-            out = result.get("output")
-            if isinstance(out, str) and out.strip():
-                return out, 0, 0
-
-            msgs = result.get("messages")
-            if isinstance(msgs, Sequence):
-                # Prefer last AI message
-                last_ai: AIMessage | None = None
-                for m in reversed(list(msgs)):
-                    if isinstance(m, AIMessage):
-                        last_ai = m
-                        break
-                    # Sometimes messages are plain dicts
-                    if isinstance(m, Mapping) and (m.get("role") == "assistant"):
-                        content = m.get("content")
-                        return cls._stringify_message_content(content), 0, 0
-
-                if last_ai is not None:
-                    text = cls._stringify_message_content(last_ai.content)
-                    in_tok, out_tok = _usage_from_ai_message(last_ai)
-                    return text, in_tok, out_tok
-
-        # 3) fallback
-        return str(result), 0, 0
-    
 
     async def chat(self, chat_request: ChatRequest) -> ChatResponse:
 
@@ -645,13 +701,14 @@ class MCPClient:
                     input_tokens=0,
                     output_tokens=0,
                 )
-            output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
+            output_text, input_tokens, output_tokens = MCPClientUtil._extract_output_and_usage(result)
 
-            resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+            resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
             user_text = extracted_text or output_text
 
             # Fallback: if the model ignored/misused the XML contract, infer HITL from plain text.
             inferred_kind, inferred_tool = _infer_hitl_from_plain_text(user_text)
+
             if inferred_kind is not None:
                 # If the model asked a question but didn't specify HITL_KIND, still tag it.
                 if resp_type == "question" and not hitl_kind:
@@ -678,11 +735,11 @@ class MCPClient:
                         {"messages": [HumanMessage(content=directive)]},
                         config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                     )
-                    output_text, add_in, add_out = self._extract_output_and_usage(result)
+                    output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
                     input_tokens += add_in
                     output_tokens += add_out
 
-                    resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+                    resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
                     user_text = extracted_text or output_text
                     if resp_type != "question":
                         break
@@ -699,11 +756,12 @@ class MCPClient:
                     {"messages": [HumanMessage(content=final_directive)]},
                     config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                 )
-                output_text, add_in, add_out = self._extract_output_and_usage(result)
+                output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
+                resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
+
+                # 後続処理で使用する。
                 input_tokens += add_in
                 output_tokens += add_out
-
-                resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
                 user_text = extracted_text or output_text
 
             status: str = "completed"

@@ -16,7 +16,7 @@ from ..model.models import (
 )
 from ..util.office2pdf import Office2PDFUtil
 from file_util.model import FileUtilDocument
-from .mcp_client import MCPClient
+from .llm_mcp_client import MCPClient
 
 import litellm
 

@@ -6,7 +6,7 @@ from ai_chat_util.model.models import ChatHistory, ChatResponse, WebRequestModel
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_client import LLMClientUtil
 from ai_chat_util.config.runtime import get_runtime_config
-from ai_chat_util.llm.batch_client import LLMBatchClient
+from ai_chat_util.llm.llm_batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util.config.runtime import get_runtime_config

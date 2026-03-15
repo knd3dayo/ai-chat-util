@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence, cast
 
+import contextlib
+import re
+import uuid
+from pathlib import Path
+
 import asyncio
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
@@ -11,6 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from ..config.mcp_config import MCPConfigParser
 from ..config.runtime import (
@@ -20,10 +26,59 @@ from ..config.runtime import (
     get_runtime_config_path,
 )
 from ..util.file_path_resolver import resolve_existing_file_path
-from ..model.models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory
-from .llm_factory import LLMFactory
+from ..model.models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
+
+
+def _parse_supervisor_xml(output_text: str) -> tuple[str | None, str | None, str | None, str | None]:
+    """Extract RESPONSE_TYPE and TEXT (and optional HITL metadata) from the XML-ish output."""
+
+    text = output_text or ""
+    m_type = re.search(r"<RESPONSE_TYPE>\s*(.*?)\s*</RESPONSE_TYPE>", text, flags=re.DOTALL | re.IGNORECASE)
+    m_text = re.search(r"<TEXT>\s*(.*?)\s*</TEXT>", text, flags=re.DOTALL | re.IGNORECASE)
+    m_kind = re.search(r"<HITL_KIND>\s*(.*?)\s*</HITL_KIND>", text, flags=re.DOTALL | re.IGNORECASE)
+    m_tool = re.search(r"<HITL_TOOL>\s*(.*?)\s*</HITL_TOOL>", text, flags=re.DOTALL | re.IGNORECASE)
+
+    resp_type = m_type.group(1).strip().lower() if m_type else None
+    payload_text = m_text.group(1).strip() if m_text else None
+    hitl_kind = m_kind.group(1).strip().lower() if m_kind else None
+    hitl_tool = m_tool.group(1).strip() if m_tool else None
+    return resp_type, payload_text, hitl_kind, hitl_tool
+
+
+def _default_checkpoint_db_path(runtime_config: AiChatUtilConfig) -> Path:
+    """Pick a stable per-config SQLite path for LangGraph checkpoints."""
+
+    base = runtime_config.paths.working_directory
+    if base:
+        root = Path(base).expanduser()
+    else:
+        root = get_runtime_config_path().parent
+    p = (root / ".ai_chat_util" / "langgraph_checkpoints.sqlite").resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _create_sqlite_checkpointer(db_path: Path, *, exit_stack: contextlib.ExitStack) -> Any:
+    """Create a long-lived SQLite checkpointer.
+
+    NOTE: SqliteSaver.from_conn_string() returns a context manager in some versions.
+    We enter it via ExitStack so the underlying connection stays open.
+    """
+
+    last_err: Exception | None = None
+    for conn in (f"sqlite:///{db_path}", str(db_path)):
+        try:
+            cm_or_saver = SqliteSaver.from_conn_string(conn)
+            # If it's a context manager, enter it.
+            if hasattr(cm_or_saver, "__enter__") and hasattr(cm_or_saver, "__exit__"):
+                return exit_stack.enter_context(cm_or_saver)
+            return cm_or_saver
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Failed to create SQLite checkpointer: db_path={db_path}") from last_err
 
 class MCPClientUtil:
     @classmethod
@@ -103,10 +158,42 @@ class MCPClientUtil:
         return allowed_langchain_tools
     
     @classmethod
-    async def create_workflow(cls, mcp_config: dict[str, Any]| None, config_parser: MCPConfigParser| None, llm: BaseChatModel) -> CompiledStateGraph:
+    async def create_workflow(
+        cls,
+        mcp_config: dict[str, Any] | None,
+        config_parser: MCPConfigParser | None,
+        llm: BaseChatModel,
+        *,
+        checkpointer: Any | None = None,
+        hitl_approval_tools: Sequence[str] | None = None,
+        auto_approve: bool = False,
+    ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
         allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(mcp_config, config_parser)
+
+        approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
+        approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
+
+        if auto_approve:
+            hitl_policy_text = (
+                "\n\n[AUTO_APPROVE]\n"
+                "- auto_approve が有効です。ユーザーに追加の質問（HITL）をせず、可能な限り自己完結してください。\n"
+                "- 不確実な点がある場合は、合理的に仮定して進め、その仮定を TEXT に明記してください。\n"
+                "- 原則として <RESPONSE_TYPE>question</RESPONSE_TYPE> を返さず、complete で完了してください。\n"
+                f"- 承認が必要なツール一覧（通常は要承認）: {approval_tools_text}\n"
+                "- auto_approve の場合、上記ツールも自動承認されたものとして扱い、必要なら実行して構いません。\n"
+            )
+        else:
+            hitl_policy_text = (
+                "\n\n[HITL承認ポリシー]\n"
+                f"- 次のツールは人間の承認があるまで絶対に実行してはいけません: {approval_tools_text}\n"
+                "- 上記ツールを実行したくなったら、ツールを呼ばずに必ず質問として止めてください。\n"
+                "- 承認が必要な場合は、次のタグを含むXMLで返してください:"
+                "  <RESPONSE_TYPE>question</RESPONSE_TYPE><HITL_KIND>approval</HITL_KIND><HITL_TOOL>TOOL_NAME</HITL_TOOL>\n"
+                "- 人間の返答は 'APPROVE TOOL_NAME' または 'REJECT TOOL_NAME' の形式を推奨します。\n"
+                "- 直前のユーザー入力に 'APPROVE TOOL_NAME' があれば実行して構いません。\n"
+            )
 
         # ツール実行用のエージェント
         # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
@@ -114,6 +201,7 @@ class MCPClientUtil:
             "あなたは複数のツールにアクセスできる有能なアシスタントです。"
             "スーパーバイザーを助けるために、必要に応じてツールを使用してください。"
             "利用可能なツールのみを使用してください。"
+            f"{hitl_policy_text}"
             """
             出力フォーマットはXML形式で、以下のルールに従ってください。
             <OUTPUT>
@@ -140,6 +228,7 @@ class MCPClientUtil:
             "あなたはプランナー（計画立案）エージェントです。"
             "スーパーバイザーの指示を受け取り、実行計画を作成し、必要に応じてツール実行エージェントへ指示してください。"
             f"利用可能なツールは以下の通りです:\n{tools_description}\n"
+            f"{hitl_policy_text}"
             """
             出力フォーマットはXML形式で、以下のルールに従ってください。
             <OUTPUT>
@@ -159,36 +248,61 @@ class MCPClientUtil:
         )  # ツールは持たないシンプルなエージェント
 
 
+        if auto_approve:
+            supervisor_hitl_policy_text = (
+                "[AUTO_APPROVE]\n"
+                "- auto_approve が有効です。ユーザーに追加確認できない前提で、可能な限り自己完結してください。\n"
+                "- 不確実な点がある場合は、合理的に仮定して進め、その仮定を TEXT に明記してください。\n"
+                "- 配下エージェントが question を返しても、あなたが合理的に仮定して回答し、完了まで導いてください。\n"
+                "- 原則として <RESPONSE_TYPE>question</RESPONSE_TYPE> を返さず complete で完了してください。\n"
+                f"- 承認が必要なツール一覧（通常は要承認）: {approval_tools_text}\n"
+                "- auto_approve の場合、上記ツールも自動承認されたものとして扱い、必要なら実行して構いません。\n"
+            )
+        else:
+            supervisor_hitl_policy_text = (
+                "[HITL承認ポリシー]\n"
+                f"- 次のツールは人間の承認があるまで実行してはいけません: {approval_tools_text}\n"
+                "- 承認が必要なら、<RESPONSE_TYPE>question</RESPONSE_TYPE> と <HITL_KIND>approval</HITL_KIND> と <HITL_TOOL>TOOL_NAME</HITL_TOOL> を含めて止めてください。\n"
+            )
+
+        supervisor_prompt = f"""あなたはチームのスーパーバイザーです。planner_agent（計画）と tool_agent（ツール実行）の各エージェントを管理し、スーパーバイザーの目的を達成してください。
+計画が必要なら planner_agent を使い、具体的な実行が必要なら tool_agent を使ってください。
+あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。
+
+各エージェントからの出力フォーマットはXML形式です。
+<OUTPUT>
+    <TEXT>スーパーバイザーへの返答テキスト（必要に応じて）</TEXT>
+    <RESPONSE_TYPE>complete|question|reject</RESPONSE_TYPE>
+</OUTPUT>
+- complete: 指示完了。スーパーバイザーへの返答テキストをTEXTに入れてください。
+- question: スーパーバイザーへの質問。スーパーバイザーに確認が必要な場合は、TEXTに質問内容を入れてこのタイプで返してください。
+- reject: 指示拒否。実行できない指示があった場合は、このタイプで返してください。TEXTは任意ですが、拒否理由などがあれば入れてください。
+<RESPONSE_TYPE>がquestion、rejectの場合は、あなたが回答可能な場合はその各エージェントに追加の指示を出すこともできます。
+
+[HITL承認ポリシー]
+
+{supervisor_hitl_policy_text}
+"""
+
         workflow = create_supervisor(
             [planner_agent, tool_agent],
             model=llm,
-            prompt=(
-                "あなたはチームのスーパーバイザーです。"
-                "planner_agent（計画）と tool_agent（ツール実行）の各エージェントを管理し、スーパーバイザーの目的を達成してください。"
-                "計画が必要なら planner_agent を使い、具体的な実行が必要なら tool_agent を使ってください。"
-                "あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。"
-                """
-                各エージェントからの出力フォーマットはXML形式です。
-                <OUTPUT>
-                    <TEXT>スーパーバイザーへの返答テキスト（必要に応じて）</TEXT>
-                    <RESPONSE_TYPE>complete|question|reject</RESPONSE_TYPE>
-                </OUTPUT>
-                - complete: 指示完了。スーパーバイザーへの返答テキストをTEXTに入れてください。
-                - question: スーパーバイザーへの質問。スーパーバイザーに確認が必要な場合は、TEXTに質問内容を入れてこのタイプで返してください。
-                - reject: 指示拒否。実行できない指示があった場合は、このタイプで返してください。TEXTは任意ですが、拒否理由などがあれば入れてください。
-                <RESPONSE_TYPE>がquestion、rejectの場合は、あなたが回答可能な場合はその各エージェントに追加の指示を出すこともできます。
-                """
-            )
+            prompt=supervisor_prompt,
         )
 
         # Compile and run
-        graph = workflow.compile(name="mcp_supervisor")
+        try:
+            graph = workflow.compile(name="mcp_supervisor", checkpointer=checkpointer)
+        except TypeError:
+            # Some versions may not accept checkpointer; fall back to no persistence.
+            graph = workflow.compile(name="mcp_supervisor")
 
         return graph
 
 class MCPClient:
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
+        self._exit_stack = contextlib.ExitStack()
         mcp_config_path = (
             self.runtime_config.paths.mcp_config_path
             or self.runtime_config.paths.mcp_server_config_file_path
@@ -334,21 +448,117 @@ class MCPClient:
         litellm_router = Router(model_list=self.runtime_config.llm.create_litellm_model_list())
         llm = ChatLiteLLMRouter(router=litellm_router, model_name=self.runtime_config.llm.completion_model)
 
-        app = await MCPClientUtil.create_workflow(self.mcp_config, self.config_parser, llm)
+        trace_id = getattr(chat_request, "trace_id", None)
+        thread_id = chat_request.thread_id or trace_id or str(uuid.uuid4())
+        auto_approve = bool(getattr(chat_request, "auto_approve", False))
+        try:
+            max_retries_raw = int(getattr(chat_request, "auto_approve_max_retries", 0) or 0)
+        except (TypeError, ValueError):
+            max_retries_raw = 0
+        max_retries = max(0, min(10, max_retries_raw))
+        checkpointer = _create_sqlite_checkpointer(
+            _default_checkpoint_db_path(self.runtime_config),
+            exit_stack=self._exit_stack,
+        )
+
+        app = await MCPClientUtil.create_workflow(
+            self.mcp_config,
+            self.config_parser,
+            llm,
+            checkpointer=checkpointer,
+            hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
+            auto_approve=auto_approve,
+        )
 
         # 実行
         lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
         if not lc_messages:
             raise ValueError("chat_request.chat_history.messages が空です。")
 
-        result = await app.ainvoke({"messages": lc_messages}) 
+        result = await app.ainvoke(
+            {"messages": lc_messages},
+            config={"configurable": {"thread_id": thread_id}},
+        )
         output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
 
+        resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+        user_text = extracted_text or output_text
+
+        # AUTO_APPROVE: if we still get a question, try to push the supervisor to complete without pausing.
+        if auto_approve and resp_type == "question" and max_retries > 0:
+            for attempt in range(1, max_retries + 1):
+                directive = (
+                    "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
+                    "直前に提示した質問/承認要求は、あなた自身で合理的に仮定して解決し、作業を完了してください。\n"
+                    "不確実性や仮定は TEXT に明記してください。\n"
+                    "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
+                    f"(attempt {attempt}/{max_retries})\n"
+                    f"直前の質問: {user_text}"
+                )
+                result = await app.ainvoke(
+                    {"messages": [HumanMessage(content=directive)]},
+                    config={"configurable": {"thread_id": thread_id}},
+                )
+                output_text, add_in, add_out = self._extract_output_and_usage(result)
+                input_tokens += add_in
+                output_tokens += add_out
+
+                resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+                user_text = extracted_text or output_text
+                if resp_type != "question":
+                    break
+
+        if auto_approve and resp_type == "question":
+            # Final attempt: even if you cannot fully answer, do not ask.
+            final_directive = (
+                "AUTO_APPROVE モードです。ユーザーに追加確認できません。\n"
+                "あなたが自力で完了できない場合でも、質問はせず、現時点でできる範囲の回答と限界（不足情報/前提）を説明して完了してください。\n"
+                "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返し、question を返さないでください。\n"
+                f"直前の質問: {user_text}"
+            )
+            result = await app.ainvoke(
+                {"messages": [HumanMessage(content=final_directive)]},
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            output_text, add_in, add_out = self._extract_output_and_usage(result)
+            input_tokens += add_in
+            output_tokens += add_out
+
+            resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)
+            user_text = extracted_text or output_text
+
+        status: str = "completed"
+        hitl: HitlRequest | None = None
+        if resp_type == "question":
+            if auto_approve:
+                # Do not pause; return best-effort completion message (avoid asking).
+                status = "completed"
+                hitl = None
+                user_text = (
+                    "追加確認が必要な状況でしたが、auto_approve が有効なため pause せずに処理を終了します。\n"
+                    "現時点で確定できない点/不足情報（参考）:\n"
+                    f"- {user_text}\n"
+                    "上記が提供されれば、より正確に継続できます。"
+                )
+            else:
+                status = "paused"
+                kind = "approval" if hitl_kind == "approval" else "input"
+                hitl = HitlRequest(
+                    kind=cast(Any, kind),
+                    prompt=user_text,
+                    action_id=str(uuid.uuid4()),
+                    source=("supervisor" + (f":{hitl_tool}" if hitl_tool else "")),
+                )
+
         return ChatResponse(
+            status=cast(Any, status),
+            thread_id=thread_id,
+            trace_id=trace_id or (thread_id if trace_id is not None else None),
+            hitl=hitl,
             messages=[
                 ChatMessage(
                     role="assistant",
-                    content=[ChatContent(params={"type": "text", "text": output_text})],
+                    content=[ChatContent(params={"type": "text", "text": user_text})],
                 )
             ],
             input_tokens=input_tokens,

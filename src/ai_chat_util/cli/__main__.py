@@ -6,6 +6,7 @@ from typing import Iterable
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.batch_client import LLMBatchClient
 from ai_chat_util.config.runtime import init_runtime, apply_logging_overrides
+from ai_chat_util.model.models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
@@ -256,8 +257,52 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client(use_mcp=args.use_mcp)
-        response = await llm_client.simple_chat(args.prompt)
-        print(response)
+        # HITL対応: status='paused' の場合は質問を表示して入力待ち→同じ thread_id で再開する。
+
+        thread_id: str | None = None
+
+        def _mk_user_request(text: str) -> ChatRequest:
+            msg = ChatMessage(
+                role="user",
+                content=[ChatContent(params={"type": "text", "text": text})],
+            )
+            return ChatRequest(
+                thread_id=thread_id,
+                chat_history=ChatHistory(messages=[msg]),
+                chat_request_context=None,
+            )
+
+        chat_response = await llm_client.chat(_mk_user_request(args.prompt))
+        print(chat_response.output)
+
+        # Only MCP workflow returns paused today; still safe to handle generically.
+        while getattr(chat_response, "status", "completed") == "paused":
+            thread_id = getattr(chat_response, "thread_id", None) or thread_id
+            prompt = None
+            hitl = getattr(chat_response, "hitl", None)
+            hitl_kind = getattr(hitl, "kind", None) if hitl is not None else None
+            hitl_source = getattr(hitl, "source", None) if hitl is not None else None
+            if hitl is not None:
+                prompt = getattr(hitl, "prompt", None)
+            if not prompt:
+                prompt = chat_response.output
+
+            if hitl_kind == "approval":
+                tool_hint = ""
+                if isinstance(hitl_source, str) and ":" in hitl_source:
+                    tool_hint = f" ({hitl_source})"
+                print(f"\n[HITL:APPROVAL]{tool_hint} 承認が必要です。")
+                print("入力例: 'APPROVE TOOL_NAME' / 'REJECT TOOL_NAME'（TOOL_NAME は質問文中のもの）")
+            else:
+                print("\n[HITL] 次の質問に回答してください:")
+            print(prompt)
+            answer = input("HITL> ").strip()
+            if not answer:
+                print("入力が空です。再度入力してください。")
+                continue
+
+            chat_response = await llm_client.chat(_mk_user_request(answer))
+            print(chat_response.output)
         return
     
     if args.command == "batch_chat":

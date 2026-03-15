@@ -54,6 +54,10 @@ features:
   allow_outside_modifications: false
   use_custom_pdf_analyzer: false
 
+  # HITL（Human in the loop）: 承認が必要なツール名リスト
+  # 例: ["analyze_files", "analyze_pdf_files"]
+  hitl_approval_tools: []
+
 logging:
   level: INFO
   file: null

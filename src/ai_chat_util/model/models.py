@@ -1,9 +1,39 @@
 # 抽象クラス
+import re
 from typing import Any, ClassVar, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
+
+
+_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+_TRACEPARENT_RE = re.compile(
+    r"^(?P<version>[0-9a-f]{2})-(?P<trace_id>[0-9a-f]{32})-(?P<span_id>[0-9a-f]{16})-(?P<trace_flags>[0-9a-f]{2})$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_trace_id(value: str) -> str:
+    v = (value or "").strip()
+    if not v:
+        return v
+
+    if _TRACE_ID_RE.fullmatch(v):
+        trace_id = v.lower()
+    else:
+        m = _TRACEPARENT_RE.fullmatch(v)
+        if not m:
+            raise ValueError(
+                "trace_id は W3C traceparent の trace_id 部分（32桁の16進数）を指定してください。"
+                "例: '4bf92f3577b34da6a3ce929d0e0e4736'"
+            )
+        trace_id = m.group("trace_id").lower()
+
+    # W3C trace-id must not be all zeros.
+    if trace_id == "0" * 32:
+        raise ValueError("trace_id が不正です（全て0は許可されません）。")
+    return trace_id
 
 class WebRequestModel(BaseModel):
     url: str
@@ -151,11 +181,82 @@ class ChatRequestContext(BaseModel):
     # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
 
+
+class HitlRequest(BaseModel):
+    """Human-in-the-loop request.
+
+    - kind="input": 人間が質問に回答する必要がある
+    - kind="approval": 人間が承認/却下する必要がある（将来拡張）
+    """
+
+    kind: Literal["input", "approval"] = Field(default="input")
+    prompt: str = Field(..., description="Human-facing prompt/question/approval summary.")
+    action_id: str = Field(..., description="Identifier for this HITL action.")
+    source: Optional[str] = Field(default=None, description="Which component requested HITL (e.g., supervisor/tool/mcp).")
+
 class ChatRequest(BaseModel):
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="LangGraph thread_id for checkpointing/resume. If omitted, a new thread is started.",
+    )
+    trace_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "BFF等が発行する相関ID（W3C traceparentの trace_id 部分: 32桁hex）。"
+            "thread_id が未指定の場合、この値を thread_id として使用できます。"
+        ),
+    )
+    auto_approve: bool = Field(
+        default=False,
+        description=(
+            "内部MCPクライアント実行時に、なるべくHITL pause（question）を発生させず自己完結するモード。"
+            "true の場合、Supervisor/配下エージェントは追加確認を求めず、合理的な仮定のもとで完了回答を返すよう試みます。"
+        ),
+    )
+    auto_approve_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description=(
+            "auto_approve=true のとき、question が返った場合に Supervisor へ追加指示して再実行する最大回数。"
+            "0 の場合はリトライせず、そのまま pause せず回答を返します。"
+        ),
+    )
     chat_history: ChatHistory = Field(..., description="The chat history for the request.")
     chat_request_context: Optional[ChatRequestContext] = Field(default=ChatRequestContext(), description="The context for the chat request.")
 
+    @model_validator(mode="after")
+    def _validate_trace_thread_consistency(self) -> "ChatRequest":
+        # Normalize trace_id to the "trace-id part only" (32-hex). If traceparent is passed by mistake,
+        # extract trace_id to keep compatibility.
+        if self.trace_id is not None:
+            stripped = self.trace_id.strip()
+            if not stripped:
+                self.trace_id = None
+            else:
+                self.trace_id = _normalize_trace_id(stripped)
+
+        # If thread_id looks like a traceparent, normalize it too so `thread_id == trace_id` can hold.
+        if self.thread_id and _TRACEPARENT_RE.fullmatch(self.thread_id.strip()):
+            self.thread_id = _normalize_trace_id(self.thread_id)
+
+        if self.thread_id and self.trace_id and self.thread_id != self.trace_id:
+            raise ValueError(
+                "ChatRequest.thread_id と ChatRequest.trace_id の両方が設定されていますが一致しません。"
+                "trace_id を thread_id として流用する場合は同一値にするか、どちらか一方だけを指定してください。"
+            )
+        return self
+
 class ChatResponse(BaseModel):
+    status: Literal["completed", "paused"] = Field(default="completed", description="Execution status.")
+    thread_id: Optional[str] = Field(default=None, description="LangGraph thread_id associated with this response.")
+    trace_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "外部相関ID（trace_id）。thread_id を trace_id で代替する運用の場合、通常は thread_id と同一になります。"
+        ),
+    )
+    hitl: Optional[HitlRequest] = Field(default=None, description="Present when status='paused'.")
     messages: list[ChatMessage] = Field(default_factory=list, description="The output messages from the chat model.")
     input_tokens: int = Field(default=0, description="The number of tokens in the input to the model.")
     output_tokens: int = Field(default=0, description="The number of tokens in the model's output.")

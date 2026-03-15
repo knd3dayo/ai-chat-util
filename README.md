@@ -173,6 +173,73 @@ paths:
 
 ---
 
+## HITL（Human-in-the-Loop：一時停止/再開）
+
+`ai_chat_util` は、内部MCPクライアント（LangGraph Supervisor + MCPツール）経由で実行する場合に限り、
+**人間への確認が必要になったタイミングで処理を一時停止（pause）し、回答/承認後に同じスレッドで再開（resume）**できます。
+
+### 前提（重要）
+
+- HITL（pause/resume）が発生するのは **`--use_mcp`（内部MCPクライアント）を使う場合のみ**です。
+  - `--use_mcp` を付けない場合（LiteLLM経由の直接呼び出し）は、HITLは発生しません。
+- `--use_mcp` を使う場合は、`config.yml` の `paths.mcp_config_path`（互換: `paths.mcp_server_config_file_path`）が必要です。
+
+### レスポンス形（API/ライブラリ利用時）
+
+内部MCPクライアントが「人間の判断が必要」と判断した場合、`ChatResponse` が以下の形で返ります。
+
+- `status: "paused"`
+- `thread_id`: 再開に必要（LangGraph checkpointのキー）
+- `hitl`: 人間向けのプロンプト
+  - `kind: "input"`（質問への回答が必要）または `"approval"`（承認/却下が必要）
+  - `prompt`: 表示すべき質問/承認内容
+
+再開は、**同じ `thread_id`（または `trace_id`）を付けて次の `ChatRequest` を送る**だけです。
+
+### SQLiteチェックポイント（状態保存）
+
+内部MCPクライアントは SQLite にチェックポイントを保存します。
+
+- 既定パス: `(<working_directory または config.yml のあるディレクトリ>)/.ai_chat_util/langgraph_checkpoints.sqlite`
+- `thread_id` が同一であれば、プロセスが変わっても（同じDBを参照できる限り）再開できます。
+
+### trace_id（BFF相関ID）運用
+
+`ChatRequest.trace_id` は **W3C trace-id 部分（32桁hex）**を想定しています。
+
+- 例: `4bf92f3577b34da6a3ce929d0e0e4736`
+- 誤って `traceparent` 全文（`00-<trace_id>-<span_id>-<flags>`）を渡しても、trace-id部分へ正規化します。
+- `trace_id == 000...0`（全ゼロ）は不正として拒否します。
+- `thread_id` と `trace_id` を両方渡す場合、値が一致しないとエラーになります。
+
+運用としては、BFFが発行した `trace_id` をそのまま `thread_id` として流用する（= 同一値にする）と扱いやすいです。
+
+### 承認（approval）対象ツールの設定
+
+`config.yml` の `features.hitl_approval_tools` に、**実行前に人間の承認を求めたいツール名**を列挙できます。
+
+```yml
+features:
+  # HITL（Human in the loop）: 承認が必要なツール名リスト
+  # 例: ["analyze_files", "analyze_pdf_files"]
+  hitl_approval_tools: []
+```
+
+注意: 現状の承認ゲートは「プロンプト規約による停止（ベストエフォート）」です。
+将来、ツール実行直前にコードで強制ブロックする形へ強化する余地があります。
+
+### auto_approve（pause抑制）
+
+`ChatRequest.auto_approve=true` を指定すると、内部MCPクライアントは **なるべく `question`（pause）を出さず自己完結**するように促します。
+
+- `question` が返ってきた場合でも、`auto_approve_max_retries` 回まで「完了（complete）で返す」よう追加指示してリトライします。
+- それでも `question` の場合は **`status="paused"` にせず、`status="completed"` でベストエフォートの回答**を返します。
+
+注意: `auto_approve=true` の場合、`features.hitl_approval_tools` に列挙したツールも「自動承認されたもの」として扱うため、
+本番利用では適用範囲や権限を限定することを推奨します。
+
+---
+
 ## コマンドラインクライアント
 
 `ai_chat_util` には、`argparse + subcommand` で実装されたCLIが含まれます。
@@ -206,6 +273,11 @@ uv run -m ai_chat_util.cli chat -p "こんにちは"
 ```bash
 uv run -m ai_chat_util.cli chat -p "こんにちは" --use_mcp
 ```
+
+HITL（pause/resume）が発生した場合:
+
+- CLIは自動で `status="paused"` を検知し、質問/承認内容を表示して入力待ちに入ります。
+- 入力後、同じ `thread_id` で自動的に再開します。
 
 #### batch_chat（Excel入力のバッチチャット）
 

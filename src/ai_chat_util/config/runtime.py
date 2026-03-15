@@ -105,6 +105,13 @@ class PathsSection(BaseModel):
 class FeaturesSection(BaseModel):
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
+    hitl_approval_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "HITL（Human-in-the-loop）承認が必要なツール名のリスト。"
+            "このリストに含まれるツールを実行する前に、エージェントは人間へ承認を求めて pause します。"
+        ),
+    )
 
 
 class LoggingSection(BaseModel):

@@ -1,0 +1,50 @@
+# Enforce LF for all text files in this repository
+# This affects checkout/merge, so "git pull" results are checked out with LF.
+* text=auto eol=lf
+
+# Keep common binary formats untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.bz2 binary
+*.7z binary
+*.jar binary
+*.war binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+
+# Shell scripts must be LF
+*.sh text eol=lf
+
+# Windows scripts (use LF to keep repo consistent)
+*.bat text eol=lf
+*.cmd text eol=lf
+
+# YAML/JSON/TOML/MD
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+
+# Python
+*.py text eol=lf
+
+# Docker/Compose
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+*.env text eol=lf
+*.env.* text eol=lf
+*.conf text eol=lf
+*.ini text eol=lf
+*.properties text eol=lf

@@ -209,10 +209,144 @@ class MCPClientUtil:
         checkpointer: Any | None = None,
         hitl_approval_tools: Sequence[str] | None = None,
         auto_approve: bool = False,
+        tool_call_limit: int | None = None,
+        tool_timeout_seconds: float | None = None,
+        tool_timeout_retries: int | None = None,
     ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
         allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(mcp_config, config_parser)
+
+        # Safety valves: cap tool calls and hard-timeout tool execution.
+        # This enforces termination even if prompts are ignored.
+        try:
+            tool_call_limit_int = int(tool_call_limit) if tool_call_limit is not None else 0
+        except (TypeError, ValueError):
+            tool_call_limit_int = 0
+        if tool_call_limit_int < 0:
+            tool_call_limit_int = 0
+
+        try:
+            tool_timeout_seconds_f = float(tool_timeout_seconds) if tool_timeout_seconds is not None else 0.0
+        except (TypeError, ValueError):
+            tool_timeout_seconds_f = 0.0
+        if tool_timeout_seconds_f < 0:
+            tool_timeout_seconds_f = 0.0
+
+        try:
+            tool_timeout_retries_int = int(tool_timeout_retries) if tool_timeout_retries is not None else 0
+        except (TypeError, ValueError):
+            tool_timeout_retries_int = 0
+        tool_timeout_retries_int = max(0, min(5, tool_timeout_retries_int))
+
+        tool_calls_used = 0
+
+        def _is_timeout_exception(err: BaseException) -> bool:
+            if isinstance(err, asyncio.TimeoutError):
+                return True
+            if isinstance(err, RuntimeError) and "タイムアウト" in str(err):
+                return True
+            return False
+
+        def _tool_error_text(tool_name: str, err: BaseException) -> str:
+            err_type = type(err).__name__
+            msg = str(err).strip()
+            if msg:
+                return f"ERROR: tool={tool_name} failed ({err_type}): {msg}"
+            return f"ERROR: tool={tool_name} failed ({err_type})"
+
+        async def _run_tool_with_guards(tool_name: str, orig_coro: Any, *args: Any, **kwargs: Any) -> str:
+            nonlocal tool_calls_used
+
+            attempts = tool_timeout_retries_int + 1
+            last_err: BaseException | None = None
+
+            for attempt in range(1, attempts + 1):
+                if tool_call_limit_int and tool_calls_used >= tool_call_limit_int:
+                    logger.warning(
+                        "Tool call budget exceeded: tool=%s used=%s limit=%s",
+                        tool_name,
+                        tool_calls_used,
+                        tool_call_limit_int,
+                    )
+                    return (
+                        "ERROR: tool call budget exceeded. "
+                        f"limit={tool_call_limit_int} used={tool_calls_used}. "
+                        "同一入力でツールが繰り返し実行されたため中断しました。"
+                    )
+
+                tool_calls_used += 1
+                try:
+                    if tool_timeout_seconds_f and tool_timeout_seconds_f > 0:
+                        # Give the tool a small cushion so inner timeouts can surface as normal output.
+                        timeout = tool_timeout_seconds_f
+                        return cast(str, await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout))
+                    return cast(str, await orig_coro(*args, **kwargs))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    if _is_timeout_exception(e) and attempt < attempts:
+                        logger.warning(
+                            "Tool timeout; retrying: tool=%s attempt=%s/%s",
+                            tool_name,
+                            attempt,
+                            attempts,
+                        )
+                        continue
+
+                    # Convert tool exceptions into normal tool output to avoid retry loops.
+                    logger.exception(
+                        "Tool invocation failed: tool=%s attempt=%s/%s",
+                        tool_name,
+                        attempt,
+                        attempts,
+                    )
+                    return _tool_error_text(tool_name, e)
+
+            if last_err is not None:
+                return _tool_error_text(tool_name, last_err)
+            return f"ERROR: tool={tool_name} failed (unknown error)"
+
+        if allowed_langchain_tools and (tool_call_limit_int or (tool_timeout_seconds_f and tool_timeout_seconds_f > 0) or tool_timeout_retries_int):
+            for tool in allowed_langchain_tools:
+                tool_name = getattr(tool, "name", "(unknown)")
+                orig_coro = getattr(tool, "coroutine", None)
+                if orig_coro is not None:
+                    async def _wrapped_coro(*args: Any, __tool_name: str = tool_name, __orig_coro: Any = orig_coro, **kwargs: Any) -> str:
+                        return await _run_tool_with_guards(__tool_name, __orig_coro, *args, **kwargs)
+                    try:
+                        setattr(tool, "coroutine", _wrapped_coro)
+                    except Exception:
+                        # If the tool object is immutable, we leave it as-is.
+                        pass
+
+                orig_func = getattr(tool, "func", None)
+                if orig_func is not None:
+                    def _wrapped_func(*args: Any, __tool_name: str = tool_name, __orig_func: Any = orig_func, **kwargs: Any) -> str:
+                        nonlocal tool_calls_used
+                        if tool_call_limit_int and tool_calls_used >= tool_call_limit_int:
+                            logger.warning(
+                                "Tool call budget exceeded (sync): tool=%s used=%s limit=%s",
+                                __tool_name,
+                                tool_calls_used,
+                                tool_call_limit_int,
+                            )
+                            return (
+                                "ERROR: tool call budget exceeded. "
+                                f"limit={tool_call_limit_int} used={tool_calls_used}. "
+                                "同一入力でツールが繰り返し実行されたため中断しました。"
+                            )
+                        tool_calls_used += 1
+                        try:
+                            return cast(str, __orig_func(*args, **kwargs))
+                        except Exception as e:
+                            logger.exception("Tool invocation failed (sync): tool=%s", __tool_name)
+                            return _tool_error_text(__tool_name, e)
+                    try:
+                        setattr(tool, "func", _wrapped_func)
+                    except Exception:
+                        pass
 
         approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
         approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
@@ -528,7 +662,32 @@ class MCPClient:
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
         # Safety valve: cap LangGraph step recursion to avoid runaway agent/tool loops.
         # This does not affect normal flows, but prevents excessive repeated handoffs.
-        recursion_limit = 60
+        try:
+            recursion_limit_raw = int(getattr(self.runtime_config.features, "mcp_recursion_limit", 15) or 15)
+        except (TypeError, ValueError):
+            recursion_limit_raw = 15
+        recursion_limit = max(1, min(200, recursion_limit_raw))
+
+        try:
+            tool_call_limit_raw = int(getattr(self.runtime_config.features, "mcp_tool_call_limit", 2) or 2)
+        except (TypeError, ValueError):
+            tool_call_limit_raw = 2
+        tool_call_limit = max(1, min(50, tool_call_limit_raw))
+
+        # Default tool hard timeout to LLM timeout. (Tool calls include file processing + LLM.)
+        tool_timeout_cfg = getattr(self.runtime_config.features, "mcp_tool_timeout_seconds", None)
+        try:
+            tool_timeout_seconds = float(tool_timeout_cfg) if tool_timeout_cfg is not None else float(self.runtime_config.llm.timeout_seconds)
+        except (TypeError, ValueError):
+            tool_timeout_seconds = float(self.runtime_config.llm.timeout_seconds)
+        if tool_timeout_seconds <= 0:
+            tool_timeout_seconds = float(self.runtime_config.llm.timeout_seconds)
+
+        try:
+            tool_timeout_retries_raw = int(getattr(self.runtime_config.features, "mcp_tool_timeout_retries", 1) or 0)
+        except (TypeError, ValueError):
+            tool_timeout_retries_raw = 1
+        tool_timeout_retries = max(0, min(5, tool_timeout_retries_raw))
         auto_approve = bool(getattr(chat_request, "auto_approve", False))
         try:
             max_retries_raw = int(getattr(chat_request, "auto_approve_max_retries", 0) or 0)
@@ -548,6 +707,9 @@ class MCPClient:
                 checkpointer=checkpointer,
                 hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
                 auto_approve=auto_approve,
+                tool_call_limit=tool_call_limit,
+                tool_timeout_seconds=(tool_timeout_seconds + 5.0 if tool_timeout_seconds > 0 else 0.0),
+                tool_timeout_retries=tool_timeout_retries,
             )
 
             # 実行
@@ -555,10 +717,36 @@ class MCPClient:
             if not lc_messages:
                 raise ValueError("chat_request.chat_history.messages が空です。")
 
-            result = await app.ainvoke(
-                {"messages": lc_messages},
-                config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
-            )
+            try:
+                result = await app.ainvoke(
+                    {"messages": lc_messages},
+                    config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+                )
+            except Exception as e:
+                # Ensure we terminate with a user-visible message (avoid apparent hangs).
+                logger.exception("MCP supervisor workflow failed: trace_id=%s", run_trace_id)
+                msg = str(e).strip()
+                if not msg:
+                    msg = type(e).__name__
+                user_text = (
+                    "ERROR: MCPワークフローが失敗しました。\n"
+                    f"- trace_id: {run_trace_id}\n"
+                    f"- error: {msg}\n"
+                    "対処: ログ（chat_timeout_*.log / mcp_server.log）を確認してください。"
+                )
+                return ChatResponse(
+                    status=cast(Any, "completed"),
+                    trace_id=run_trace_id,
+                    hitl=None,
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": user_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
+                )
             output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
 
             resp_type, extracted_text, hitl_kind, hitl_tool = _parse_supervisor_xml(output_text)

@@ -4,7 +4,6 @@ import argparse
 import asyncio
 from typing import Iterable
 from ai_chat_util.llm.llm_factory import LLMFactory
-from ai_chat_util.llm.batch_client import LLMBatchClient
 from ai_chat_util.config.runtime import init_runtime, apply_logging_overrides
 from ai_chat_util.model.models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 
@@ -314,6 +313,9 @@ async def main(argv: Iterable[str] | None = None) -> None:
     
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
+        # Heavy deps (e.g., pandas) are only needed for batch_chat.
+        from ai_chat_util.llm.batch_client import LLMBatchClient
+
         llm_batch_client = LLMBatchClient(use_mcp=args.use_mcp)
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,

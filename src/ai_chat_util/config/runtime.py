@@ -105,6 +105,38 @@ class PathsSection(BaseModel):
 class FeaturesSection(BaseModel):
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
+    mcp_recursion_limit: int = Field(
+        default=15,
+        ge=1,
+        description=(
+            "LangGraph supervisor の再帰(ステップ)上限。\n"
+            "ツール/エージェントの無限ループを防ぐ安全弁です。"
+        ),
+    )
+    mcp_tool_call_limit: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "1ユーザー入力(=1 trace_id)あたりのツール呼び出し回数上限。\n"
+            "同一入力でツールが繰り返し実行されるのを防ぎます。"
+        ),
+    )
+    mcp_tool_timeout_seconds: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "MCPツール呼び出しのアプリ側ハードタイムアウト(秒)。\n"
+            "未設定(None)の場合は llm.timeout_seconds を使用します。"
+        ),
+    )
+    mcp_tool_timeout_retries: int = Field(
+        default=1,
+        ge=0,
+        description=(
+            "MCPツールがタイムアウトした場合の再試行回数。\n"
+            "1なら『最大1回だけ再試行』です。"
+        ),
+    )
     hitl_approval_tools: list[str] = Field(
         default_factory=list,
         description=(
@@ -405,6 +437,8 @@ def _configure_python_logging(config: AiChatUtilConfig) -> None:
         "LiteLLM": logging.WARNING,
         # OpenAI SDK can log request details at DEBUG
         "openai": logging.WARNING,
+        # LangGraph checkpointing uses aiosqlite and can emit verbose SQL logs at DEBUG
+        "aiosqlite": logging.WARNING,
         # HTTP clients
         "httpx": logging.WARNING,
         "httpcore": logging.WARNING,

@@ -2,6 +2,7 @@ from typing import Optional, Any, cast
 import os
 import uuid
 import asyncio
+import time
 import tempfile
 import atexit
 import requests
@@ -503,16 +504,43 @@ class LLMClientBase(ABC):
         '''
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
+        started = time.perf_counter()
+        logger.info(
+            "IMAGE_ANALYZE_START images=%d detail=%s prompt_len=%d",
+            len(file_list or []),
+            detail,
+            len((prompt or "").strip()),
+        )
         prompt_content = self.create_text_content(text=prompt)
         image_content_list: list[ChatContent] = []
+        encode_started = time.perf_counter()
+        total_bytes = 0
         for image_path in file_list:
-            image_contents = self.create_image_content_from_file(image_path, detail)
+            doc = FileUtilDocument.from_file(document_path=image_path)
+            try:
+                total_bytes += len(doc.data or b"")
+            except Exception:
+                pass
+            image_contents = self.create_image_content(doc, detail)
             image_content_list.extend(image_contents)
+        logger.info(
+            "IMAGE_ENCODE_END images=%d total_bytes=%d elapsed_ms=%d",
+            len(file_list or []),
+            total_bytes,
+            int((time.perf_counter() - encode_started) * 1000),
+        )
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_started = time.perf_counter()
+        logger.info("IMAGE_CHAT_START")
         chat_response: ChatResponse = await self.chat(chat_request)
+        logger.info(
+            "IMAGE_CHAT_END elapsed_ms=%d total_elapsed_ms=%d",
+            int((time.perf_counter() - chat_started) * 1000),
+            int((time.perf_counter() - started) * 1000),
+        )
         return chat_response
     
     async def analyze_image_urls(self, image_url_list: list[WebRequestModel], prompt: str, detail: str) -> ChatResponse:

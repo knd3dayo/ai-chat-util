@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 import tempfile
 import atexit
 import time
+import asyncio
 from itertools import count
 from pathlib import Path
 
@@ -106,11 +107,53 @@ async def analyze_image_files(
             len(resolved_paths),
             _summarize_path_basenames(resolved_paths),
         )
-        response = await llm_client.analyze_image_files(resolved_paths, prompt, detail)
-        return response.output
-    except Exception:
-        logger.exception("MCP_TOOL_ERR tool=analyze_image_files call_id=%s", call_id)
-        raise
+        cfg = get_runtime_config()
+        tool_timeout_cfg = getattr(cfg.features, "mcp_tool_timeout_seconds", None)
+        try:
+            tool_timeout = float(tool_timeout_cfg) if tool_timeout_cfg is not None else float(cfg.llm.timeout_seconds)
+        except (TypeError, ValueError):
+            tool_timeout = float(cfg.llm.timeout_seconds)
+        if tool_timeout <= 0:
+            tool_timeout = float(cfg.llm.timeout_seconds)
+
+        try:
+            retries_raw = int(getattr(cfg.features, "mcp_tool_timeout_retries", 1) or 0)
+        except (TypeError, ValueError):
+            retries_raw = 1
+        retries = max(0, min(5, retries_raw))
+
+        last_err: Exception | None = None
+        for attempt in range(1, retries + 2):
+            try:
+                response = await asyncio.wait_for(
+                    llm_client.analyze_image_files(resolved_paths, prompt, detail),
+                    timeout=tool_timeout,
+                )
+                return response.output
+            except asyncio.TimeoutError as e:
+                last_err = e
+                logger.warning(
+                    "MCP_TOOL_TIMEOUT tool=analyze_image_files call_id=%s attempt=%s/%s timeout=%ss",
+                    call_id,
+                    attempt,
+                    retries + 1,
+                    tool_timeout,
+                )
+                if attempt <= retries:
+                    continue
+                break
+            except Exception as e:
+                # Convert tool exceptions into normal output to avoid agent-level retry loops.
+                logger.exception("MCP_TOOL_ERR tool=analyze_image_files call_id=%s", call_id)
+                return f"ERROR: analyze_image_files failed: {type(e).__name__}: {str(e).strip()}"
+
+        if last_err is not None:
+            return (
+                "ERROR: analyze_image_files timed out. "
+                f"timeout={tool_timeout}s retries={retries}. "
+                "同一入力での無限再試行を防ぐため中断しました。"
+            )
+        return "ERROR: analyze_image_files failed (unknown error)"
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(

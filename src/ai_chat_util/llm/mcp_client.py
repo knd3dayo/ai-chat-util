@@ -449,7 +449,9 @@ class MCPClient:
         llm = ChatLiteLLMRouter(router=litellm_router, model_name=self.runtime_config.llm.completion_model)
 
         trace_id = getattr(chat_request, "trace_id", None)
-        thread_id = chat_request.thread_id or trace_id or str(uuid.uuid4())
+        # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
+        # If not provided, generate a W3C-compatible 32-hex trace_id.
+        run_trace_id = (trace_id or uuid.uuid4().hex).lower()
         auto_approve = bool(getattr(chat_request, "auto_approve", False))
         try:
             max_retries_raw = int(getattr(chat_request, "auto_approve_max_retries", 0) or 0)
@@ -477,7 +479,7 @@ class MCPClient:
 
         result = await app.ainvoke(
             {"messages": lc_messages},
-            config={"configurable": {"thread_id": thread_id}},
+            config={"configurable": {"thread_id": run_trace_id}},
         )
         output_text, input_tokens, output_tokens = self._extract_output_and_usage(result)
 
@@ -497,7 +499,7 @@ class MCPClient:
                 )
                 result = await app.ainvoke(
                     {"messages": [HumanMessage(content=directive)]},
-                    config={"configurable": {"thread_id": thread_id}},
+                    config={"configurable": {"thread_id": run_trace_id}},
                 )
                 output_text, add_in, add_out = self._extract_output_and_usage(result)
                 input_tokens += add_in
@@ -518,7 +520,7 @@ class MCPClient:
             )
             result = await app.ainvoke(
                 {"messages": [HumanMessage(content=final_directive)]},
-                config={"configurable": {"thread_id": thread_id}},
+                config={"configurable": {"thread_id": run_trace_id}},
             )
             output_text, add_in, add_out = self._extract_output_and_usage(result)
             input_tokens += add_in
@@ -552,8 +554,7 @@ class MCPClient:
 
         return ChatResponse(
             status=cast(Any, status),
-            thread_id=thread_id,
-            trace_id=trace_id or (thread_id if trace_id is not None else None),
+            trace_id=run_trace_id,
             hitl=hitl,
             messages=[
                 ChatMessage(

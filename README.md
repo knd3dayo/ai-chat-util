@@ -189,19 +189,19 @@ paths:
 内部MCPクライアントが「人間の判断が必要」と判断した場合、`ChatResponse` が以下の形で返ります。
 
 - `status: "paused"`
-- `thread_id`: 再開に必要（LangGraph checkpointのキー）
+- `trace_id`: 再開に必要（LangGraph checkpointのキーとしても使用）
 - `hitl`: 人間向けのプロンプト
   - `kind: "input"`（質問への回答が必要）または `"approval"`（承認/却下が必要）
   - `prompt`: 表示すべき質問/承認内容
 
-再開は、**同じ `thread_id`（または `trace_id`）を付けて次の `ChatRequest` を送る**だけです。
+再開は、**同じ `trace_id` を付けて次の `ChatRequest` を送る**だけです。
 
 ### SQLiteチェックポイント（状態保存）
 
 内部MCPクライアントは SQLite にチェックポイントを保存します。
 
 - 既定パス: `(<working_directory または config.yml のあるディレクトリ>)/.ai_chat_util/langgraph_checkpoints.sqlite`
-- `thread_id` が同一であれば、プロセスが変わっても（同じDBを参照できる限り）再開できます。
+- `trace_id` が同一であれば、プロセスが変わっても（同じDBを参照できる限り）再開できます。
 
 ### trace_id（BFF相関ID）運用
 
@@ -210,9 +210,7 @@ paths:
 - 例: `4bf92f3577b34da6a3ce929d0e0e4736`
 - 誤って `traceparent` 全文（`00-<trace_id>-<span_id>-<flags>`）を渡しても、trace-id部分へ正規化します。
 - `trace_id == 000...0`（全ゼロ）は不正として拒否します。
-- `thread_id` と `trace_id` を両方渡す場合、値が一致しないとエラーになります。
-
-運用としては、BFFが発行した `trace_id` をそのまま `thread_id` として流用する（= 同一値にする）と扱いやすいです。
+運用としては、BFFが発行した `trace_id` をそのまま会話キーとして渡す（pause/resume でも同じ値を使う）と扱いやすいです。
 
 ### 承認（approval）対象ツールの設定
 
@@ -277,7 +275,7 @@ uv run -m ai_chat_util.cli chat -p "こんにちは" --use_mcp
 HITL（pause/resume）が発生した場合:
 
 - CLIは自動で `status="paused"` を検知し、質問/承認内容を表示して入力待ちに入ります。
-- 入力後、同じ `thread_id` で自動的に再開します。
+- 入力後、同じ `trace_id` で自動的に再開します。
 
 #### batch_chat（Excel入力のバッチチャット）
 

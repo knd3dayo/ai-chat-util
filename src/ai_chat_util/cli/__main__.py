@@ -257,9 +257,9 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client(use_mcp=args.use_mcp)
-        # HITL対応: status='paused' の場合は質問を表示して入力待ち→同じ thread_id で再開する。
+        # HITL対応: status='paused' の場合は質問を表示して入力待ち→同じ trace_id で再開する。
 
-        thread_id: str | None = None
+        trace_id: str | None = None
 
         def _mk_user_request(text: str) -> ChatRequest:
             msg = ChatMessage(
@@ -267,7 +267,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
                 content=[ChatContent(params={"type": "text", "text": text})],
             )
             return ChatRequest(
-                thread_id=thread_id,
+                trace_id=trace_id,
                 chat_history=ChatHistory(messages=[msg]),
                 chat_request_context=None,
             )
@@ -277,7 +277,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
         # Only MCP workflow returns paused today; still safe to handle generically.
         while getattr(chat_response, "status", "completed") == "paused":
-            thread_id = getattr(chat_response, "thread_id", None) or thread_id
+            trace_id = getattr(chat_response, "trace_id", None) or trace_id
             prompt = None
             hitl = getattr(chat_response, "hitl", None)
             hitl_kind = getattr(hitl, "kind", None) if hitl is not None else None

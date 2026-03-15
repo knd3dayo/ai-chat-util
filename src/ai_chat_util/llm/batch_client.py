@@ -131,8 +131,8 @@ class LLMBatchClient:
         chat_requests: list[ChatRequest] = []
         for _, row in df.iterrows():
             contents: list[ChatContent] = []
-            input_message = str(row[content_column])
-            file_path = str(row[file_path_column])
+            input_message = str(row[content_column]) if content_column in df.columns else ""
+            file_path = str(row[file_path_column]) if file_path_column in df.columns else ""
             # input_messageとfile_pathの両方が空の場合はスキップ
             if not input_message and not file_path:
                 chat_requests.append(ChatRequest(chat_history=ChatHistory(messages=[])))

@@ -1,6 +1,6 @@
 from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.model.models import ChatHistory, ChatRequestContext, ChatRequest
+from ai_chat_util.core.hitl_client import HITLClient
 
 class LLMFactory:
     @classmethod
@@ -12,7 +12,14 @@ class LLMFactory:
             llm_config = get_runtime_config()
         return LLMClient(llm_config, use_mcp=use_mcp)
         
-
+    @classmethod
+    def create_hitl_client(
+        cls, llm_client: LLMClient, runtime_config: AiChatUtilConfig | None = None, trace_id: str | None = None
+    ) -> HITLClient:
+        if runtime_config is None:
+            runtime_config = get_runtime_config()
+        from ai_chat_util.core.hitl_client import HITLClient
+        return HITLClient(llm_client, runtime_config, trace_id=trace_id)
 
 
 

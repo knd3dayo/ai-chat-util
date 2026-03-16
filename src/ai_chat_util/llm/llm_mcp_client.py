@@ -191,6 +191,8 @@ class MCPClient:
                     input_tokens=0,
                     output_tokens=0,
                 )
+            logger.debug("Extracting output and usage from agent result: %s", result)
+
             output_text, input_tokens, output_tokens = MCPClientUtil._extract_output_and_usage(result)
 
             resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)

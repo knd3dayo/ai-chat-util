@@ -32,6 +32,9 @@ dependencies = [
     "fastmcp",
     "fastapi",
     "PyMuPDF",
+    "python_on_whales",
+    "tabulate",
+    "pytest",
     "file_util @ git+https://github.com/knd3dayo/file-util.git@main",
     "ai-chat-util-base @ git+https://github.com/knd3dayo/ai-chat-util-base.git@main"
 ]

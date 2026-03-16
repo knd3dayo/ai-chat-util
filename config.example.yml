@@ -37,6 +37,14 @@ llm:
   # Non-secret API version (mainly for Azure OpenAI; optional)
   api_version: null
 
+  # Optional: extra HTTP headers for LLM requests (may contain secrets).
+  # Values MUST be env references (do NOT write secrets directly in YAML).
+  # Example:
+  #   extra_headers:
+  #     Authorization: os.environ/OPENAI_AUTH_HEADER
+  #     X-My-Org: os.environ/MY_ORG_ID
+  extra_headers: null
+
 paths:
   # Optional: MCP client settings JSON path
   # - Preferred key: mcp_config_path

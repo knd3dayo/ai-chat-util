@@ -33,6 +33,10 @@ class LLMSection(BaseModel):
     # non-secret api version (mainly for Azure OpenAI via LiteLLM)
     api_version: str | None = Field(default=None)
 
+    # secret/non-secret mixed: extra headers for outbound LLM requests.
+    # For safety, values must be provided via env reference in config.yml and are resolved at load time.
+    extra_headers: dict[str, str] | None = Field(default=None)
+
     @model_validator(mode="after")
     def _validate_api_key_required(self) -> "LLMSection":
         provider = (self.provider or "").lower()
@@ -53,6 +57,8 @@ class LLMSection(BaseModel):
             completion_litellm_dict["api_base"] = self.base_url
         if self.api_version:
             completion_litellm_dict["api_version"] = self.api_version
+        if self.extra_headers:
+            completion_litellm_dict["extra_headers"] = self.extra_headers
 
         completion_model_dict = {
             "model_name": self.completion_model,
@@ -66,6 +72,8 @@ class LLMSection(BaseModel):
             embedding_litellm_dict["api_base"] = self.base_url
         if self.api_version:
             embedding_litellm_dict["api_version"] = self.api_version
+        if self.extra_headers:
+            embedding_litellm_dict["extra_headers"] = self.extra_headers
         embedding_model_dict = {
             "model_name": self.embedding_model,
             "litellm_params": embedding_litellm_dict
@@ -290,30 +298,60 @@ def _resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:
 def _apply_secret_overrides_from_yaml(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
     """Apply secret settings from YAML in a safe way.
 
-    - Only supports llm.api_key
-    - llm.api_key must be provided as env reference: os.environ/VAR
+    - Supports llm.api_key
+    - Supports llm.extra_headers (values only)
+    - Secrets must be provided as env reference: os.environ/VAR
     """
 
     llm = raw.get("llm")
     if not isinstance(llm, dict):
         return raw
 
-    if "api_key" not in llm:
-        return raw
+    copied_llm = dict(llm)
+    changed = False
 
-    api_key_value = llm.get("api_key")
-    if api_key_value is None:
-        return raw
-    if not isinstance(api_key_value, str):
-        raise ConfigError(
-            f"llm.api_key は文字列である必要があります: {config_path} (llm.api_key)"
-        )
+    if "api_key" in llm:
+        api_key_value = llm.get("api_key")
+        if api_key_value is not None:
+            if not isinstance(api_key_value, str):
+                raise ConfigError(
+                    f"llm.api_key は文字列である必要があります: {config_path} (llm.api_key)"
+                )
+            copied_llm["api_key"] = _resolve_env_ref(
+                api_key_value, config_path=config_path, field_path="llm.api_key"
+            )
+            changed = True
 
-    resolved = _resolve_env_ref(api_key_value, config_path=config_path, field_path="llm.api_key")
+    if "extra_headers" in llm:
+        extra_headers_value = llm.get("extra_headers")
+        if extra_headers_value is not None:
+            if not isinstance(extra_headers_value, dict):
+                raise ConfigError(
+                    f"llm.extra_headers は mapping(dict) である必要があります: {config_path} (llm.extra_headers)"
+                )
+            resolved_headers: dict[str, str] = {}
+            for k, v in extra_headers_value.items():
+                if not isinstance(k, str) or not k.strip():
+                    raise ConfigError(
+                        f"llm.extra_headers のキーは空でない文字列である必要があります: {config_path} (llm.extra_headers)"
+                    )
+                if not isinstance(v, str):
+                    raise ConfigError(
+                        f"llm.extra_headers.{k} は文字列である必要があります: {config_path} (llm.extra_headers.{k})"
+                    )
+                resolved_headers[k] = _resolve_env_ref(
+                    v,
+                    config_path=config_path,
+                    field_path=f"llm.extra_headers.{k}",
+                )
+
+            copied_llm["extra_headers"] = resolved_headers
+            changed = True
+
+    if not changed:
+        return raw
 
     copied = dict(raw)
-    copied_llm = dict(llm)
-    copied_llm["api_key"] = resolved
     copied["llm"] = copied_llm
     return copied
 

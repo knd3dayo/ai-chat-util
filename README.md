@@ -85,6 +85,7 @@ copy config.example.yml config.yml
 秘密情報は `config.yml` に直書きできません。
 
 - `llm.api_key` は **環境変数参照**（`os.environ/ENV_VAR_NAME`）の形式でのみ指定できます。
+- `llm.extra_headers` も秘密情報を含み得るため、**各ヘッダー値は環境変数参照**（`os.environ/ENV_VAR_NAME`）でのみ指定できます。
 - OpenAI / Azure OpenAI / Anthropic のプロバイダ（`llm.provider: openai | azure | anthropic`）を使う場合、`llm.api_key` は必須です（設定ロード時に検証されます）。
 
 例（OpenAI）:
@@ -106,6 +107,18 @@ llm:
   base_url: https://<resource-name>.openai.azure.com/
   api_version: 2024-xx-xx
   api_key: os.environ/AZURE_API_KEY
+```
+
+例（追加ヘッダーを付けたい場合）:
+
+```yml
+llm:
+  provider: openai
+  completion_model: gpt-5
+  api_key: os.environ/OPENAI_API_KEY
+  extra_headers:
+    Authorization: os.environ/OPENAI_AUTH_HEADER
+    X-My-Org: os.environ/MY_ORG_ID
 ```
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）

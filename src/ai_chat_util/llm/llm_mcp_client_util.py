@@ -7,9 +7,11 @@ import re
 from pathlib import Path
 
 import asyncio
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools.structured import StructuredTool
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
@@ -33,6 +35,146 @@ logger = log_settings.getLogger(__name__)
 
 
 class MCPClientUtil:
+    @classmethod
+    def _maybe_wrap_req_nested_tool(cls, tool: Any) -> Any:
+        """Wrap tools whose schema is `{req: {...}}` so callers can pass flat args.
+
+        This is a generic integration hardening for MCP tools that use a single
+        nested `req` field. Many LLMs tend to emit flat kwargs (prompt=..., timeout=...)
+        which fails validation for such schemas. We absorb that here without
+        coupling to a specific server implementation.
+        """
+
+        try:
+            if getattr(tool, "name", None) is None:
+                return tool
+
+            schema = getattr(tool, "args_schema", None)
+            if not isinstance(schema, Mapping):
+                return tool
+
+            required = schema.get("required")
+            if not isinstance(required, Sequence) or "req" not in set(required):
+                return tool
+
+            props = schema.get("properties")
+            if not isinstance(props, Mapping):
+                return tool
+
+            req_schema = props.get("req")
+            if not isinstance(req_schema, Mapping):
+                return tool
+
+            # Only wrap the common pattern: a single required top-level `req` object.
+            top_required = set(required)
+            if top_required != {"req"}:
+                return tool
+
+            inner_props = req_schema.get("properties")
+            if not isinstance(inner_props, Mapping) or not inner_props:
+                return tool
+
+            inner_required_raw = req_schema.get("required")
+            inner_required = set(inner_required_raw) if isinstance(inner_required_raw, Sequence) else set()
+            inner_keys = [k for k in inner_props.keys() if isinstance(k, str)]
+            if not inner_keys:
+                return tool
+
+            # Build a permissive schema for the wrapper tool.
+            # - Accept either `req={...}` or flat keys.
+            # - Allow extra keys to avoid hard failures on harmless hallucinated kwargs.
+            def _infer_py_type(json_schema: Any) -> Any:
+                if isinstance(json_schema, Mapping):
+                    t = json_schema.get("type")
+                    if t == "string":
+                        return str
+                    if t == "integer":
+                        return int
+                    if t == "number":
+                        return float
+                    if t == "boolean":
+                        return bool
+                    if t == "object":
+                        return dict[str, Any]
+                    if t == "array":
+                        return list[Any]
+                return Any
+
+            field_defs: dict[str, Any] = {
+                "req": (dict[str, Any] | None, Field(default=None, description="Nested request payload")),
+            }
+            for k in inner_keys:
+                js = inner_props.get(k)
+                desc = js.get("description") if isinstance(js, Mapping) else None
+                py_t = _infer_py_type(js)
+                field_defs[k] = (py_t | None, Field(default=None, description=(str(desc) if desc else None)))
+
+            # Avoid reserved pydantic create_model kwargs and help type checkers.
+            safe_field_defs = {k: v for k, v in field_defs.items() if not k.startswith("__")}
+
+            WrapperArgs: type[BaseModel] = create_model(  # type: ignore[assignment]
+                f"ReqNormalized_{getattr(tool, 'name', 'tool')}",
+                __config__=ConfigDict(extra="allow"),
+                **cast(Any, safe_field_defs),
+            )
+
+            original_tool = tool
+            original_response_format = cast(str | None, getattr(original_tool, "response_format", None))
+
+            async def _wrapper_coroutine(**kwargs: Any) -> Any:
+                req_in = kwargs.get("req")
+                merged: dict[str, Any] = {}
+
+                if isinstance(req_in, Mapping):
+                    merged.update(dict(req_in))
+
+                # Flat keys override nested values.
+                for k in inner_keys:
+                    if k in kwargs and kwargs[k] is not None:
+                        merged[k] = kwargs[k]
+
+                # Keep only keys defined by the inner schema.
+                normalized = {k: merged.get(k) for k in inner_keys if k in merged and merged.get(k) is not None}
+
+                missing = [k for k in inner_required if k not in normalized]
+                if missing:
+                    raise ValueError(
+                        "Missing required fields for nested `req`: "
+                        + ", ".join(sorted(missing))
+                        + ". Provide them either inside `req` or as top-level arguments."
+                    )
+
+                # Delegate to the original tool with the canonical `{req:{...}}` payload.
+                orig_coro = getattr(original_tool, "coroutine", None)
+                if orig_coro is None:
+                    # Fallback: best-effort via ainvoke (may drop artifact in some versions).
+                    return await original_tool.ainvoke({"req": normalized})
+
+                # MCP adapter tools commonly expose `coroutine(runtime=None, **arguments)`
+                # and return `(content, artifact)` when response_format='content_and_artifact'.
+                return await orig_coro(runtime=None, req=normalized)
+
+            desc = str(getattr(tool, "description", "") or "")
+            if desc:
+                desc2 = desc.rstrip() + "\n\n(入力は `req` ネスト／フラットどちらでも可。内部で正規化します。)"
+            else:
+                desc2 = "(入力は `req` ネスト／フラットどちらでも可。内部で正規化します。)"
+
+            wrapped = StructuredTool.from_function(
+                func=None,
+                coroutine=_wrapper_coroutine,
+                name=str(getattr(tool, "name")),
+                description=desc2,
+                args_schema=WrapperArgs,
+                infer_schema=False,
+                response_format=cast(Any, original_response_format or "content"),
+            )
+
+            return wrapped
+        except Exception:
+            # If wrapping fails for any reason, fall back to the original tool.
+            return tool
+
     @classmethod
     def create_mcp_config(cls, runtime_config: AiChatUtilConfig, mcp_config_path: str| None) -> tuple[dict, MCPConfigParser|None]:
         if not mcp_config_path:
@@ -167,7 +309,7 @@ class MCPClientUtil:
         for tool in langchain_tools:
             tool_name = tool.name
             if allowed_names is None or tool_name in allowed_names:
-                allowed_langchain_tools.append(tool)
+                allowed_langchain_tools.append(cls._maybe_wrap_req_nested_tool(tool))
             else:
                 logger.debug("Tool %s is not in allowedTools; skipped", tool_name)
         # あとはこれを LangChain の Agent や LLM (bind_tools) に渡すだけ！

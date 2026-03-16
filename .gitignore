@@ -3,6 +3,8 @@ work/
 __pycache__/
 *.py[cod]
 *$py.class
+.ai_chat_util/
+
 
 # C extensions
 *.so

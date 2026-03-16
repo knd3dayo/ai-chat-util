@@ -15,6 +15,7 @@ name = "ai-chat-util"
 version = "0.1.10"
 source = { editable = "." }
 dependencies = [
+    { name = "ai-chat-util-interface" },
     { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "boto3" },
@@ -41,6 +42,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ai-chat-util-interface", git = "https://github.com/knd3dayo/ai-chat-util-interface.git?rev=main" },
     { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "boto3" },
@@ -63,6 +65,16 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "tiktoken" },
+]
+
+[[package]]
+name = "ai-chat-util-interface"
+version = "0.1.0"
+source = { git = "https://github.com/knd3dayo/ai-chat-util-interface.git?rev=main#2957bb8e22ccd0816cc929f260511db640706a37" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [[package]]

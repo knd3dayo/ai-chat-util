@@ -32,7 +32,8 @@ dependencies = [
     "fastmcp",
     "fastapi",
     "PyMuPDF",
-    "file_util @ git+https://github.com/knd3dayo/file-util.git@main"
+    "file_util @ git+https://github.com/knd3dayo/file-util.git@main",
+    "ai-chat-util-interface @ git+https://github.com/knd3dayo/ai-chat-util-interface.git@main"
 ]
 
 [tool.setuptools.packages.find]

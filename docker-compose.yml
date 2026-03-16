@@ -12,10 +12,10 @@ services:
     # ホスト側の work/ をコンテナの /app/work に bind mount して永続化
     volumes:
       - ./work:/app/work
-      # config.yml は必須（config.example.yml をコピーして作成してください）
-      - ./config.yml:/app/config.yml:ro
+      # ai-chat-util-config.yml は必須（config.example.yml をコピーして作成してください）
+      - ./ai-chat-util-config.yml:/app/ai-chat-util-config.yml:ro
     environment:
-      - AI_CHAT_UTIL_CONFIG=/app/config.yml
+      - AI_CHAT_UTIL_CONFIG=/app/ai-chat-util-config.yml
     # HOST_PORT を指定すると、ホスト側の公開ポートだけ変更できます（コンテナ内は 5001 固定）
     ports:
       - "${HOST_PORT:-5001}:5001"

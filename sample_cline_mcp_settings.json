@@ -13,7 +13,7 @@
             ],
             "env": {
                 "OPENAI_API_KEY": "sk-****",
-                "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\config.yml"
+                "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
             }
         }
     }

@@ -12,7 +12,7 @@
         "-m",
         "ai_chat_util.mcp.mcp_server",
         "--config",
-        "work/test/openai/config.yml",
+        "work/test/openai/ai-chat-util-config.yml",
         "--log_level",
         "INFO",
         "--log_file",

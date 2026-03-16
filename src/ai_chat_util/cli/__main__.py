@@ -12,13 +12,13 @@ def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
         "--loglevel",
         type=str,
         default="",
-        help="ログレベルを上書きします（例: DEBUG, INFO）。未指定の場合は config.yml の設定を使用します。",
+        help="ログレベルを上書きします（例: DEBUG, INFO）。未指定の場合は ai-chat-util-config.yml の設定を使用します。",
     )
     parser.add_argument(
         "--logfile",
         type=str,
         default="",
-        help="ログのファイル出力先を上書きします。未指定の場合は config.yml の設定を使用します。",
+        help="ログのファイル出力先を上書きします。未指定の場合は ai-chat-util-config.yml の設定を使用します。",
     )
 
 
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="",
         help=(
-            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "設定ファイル(ai-chat-util-config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
             "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
         ),
     )
@@ -244,7 +244,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    # Initialize runtime config first (config.yml required)
+    # Initialize runtime config first (ai-chat-util-config.yml required)
     init_runtime(args.config or None)
 
     # Optional logging overrides (process-local; does not touch env)

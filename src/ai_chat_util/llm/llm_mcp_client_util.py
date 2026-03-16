@@ -179,11 +179,11 @@ class MCPClientUtil:
     def create_mcp_config(cls, runtime_config: AiChatUtilConfig, mcp_config_path: str| None) -> tuple[dict, MCPConfigParser|None]:
         if not mcp_config_path:
             logger.warning(
-                "MCP 設定ファイルパスが未設定です。config.yml の paths.mcp_config_path（または互換の paths.mcp_server_config_file_path）を設定してください。"
+                "MCP 設定ファイルパスが未設定です。ai-chat-util-config.yml の paths.mcp_config_path（または互換の paths.mcp_server_config_file_path）を設定してください。"
             )
             return {}, None
         else:
-            # config.yml からの相対パスも解決できるよう、設定ファイルのディレクトリも探索対象に入れる
+            # ai-chat-util-config.yml からの相対パスも解決できるよう、設定ファイルのディレクトリも探索対象に入れる
             config_dir = str(get_runtime_config_path().parent)
             resolved = resolve_existing_file_path(
                 mcp_config_path,
@@ -248,7 +248,7 @@ class MCPClientUtil:
                             env = {}
                         if isinstance(env, Mapping):
                             env2 = dict(env)
-                            # config.yml (runtime_config) takes precedence
+                            # ai-chat-util-config.yml (runtime_config) takes precedence
                             env2.update(mcp_env)
                             conn_dict["env"] = env2
 
@@ -258,13 +258,13 @@ class MCPClientUtil:
                             headers = {}
                         if isinstance(headers, Mapping):
                             headers2 = dict(headers)
-                            # config.yml (runtime_config) takes precedence
+                            # ai-chat-util-config.yml (runtime_config) takes precedence
                             headers2.update(mcp_headers)
                             conn_dict["headers"] = headers2
 
-            # Ensure the MCP server subprocess can resolve the same config.yml as this process.
+            # Ensure the MCP server subprocess can resolve the same ai-chat-util-config.yml as this process.
             # When stdio servers are launched with a different working directory (e.g., `uv --directory`),
-            # a relative AI_CHAT_UTIL_CONFIG like "config.yml" can break. Pass an absolute path.
+            # a relative AI_CHAT_UTIL_CONFIG like "ai-chat-util-config.yml" can break. Pass an absolute path.
             runtime_config_path = str(get_runtime_config_path())
             if mcp_config:
                 for _, conn in mcp_config.items():

@@ -4,7 +4,7 @@ setlocal
 chcp 65001 >nul
 pushd "%~dp0" || exit /b 1
 
-set "AI_CHAT_UTIL_CONFIG=%~dp0config.yml"
+set "AI_CHAT_UTIL_CONFIG=%~dp0ai-chat-util-config.yml"
 
 rem 分析対象のファイル1つ目を指定
 set "input_file1="

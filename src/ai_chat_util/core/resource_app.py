@@ -24,7 +24,7 @@ def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
     """
-    This function checks whether to use the custom PDF analyzer based on config.yml.
+    This function checks whether to use the custom PDF analyzer based on ai-chat-util-config.yml.
     """
     cfg = get_runtime_config()
     return cfg.features.use_custom_pdf_analyzer

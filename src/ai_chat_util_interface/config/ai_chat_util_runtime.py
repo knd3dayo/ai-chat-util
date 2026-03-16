@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 CONFIG_ENV_VAR = "AI_CHAT_UTIL_CONFIG"
-DEFAULT_CONFIG_FILENAME = "config.yml"
+DEFAULT_CONFIG_FILENAME = "ai-chat-util-config.yml"
 
 
 class ConfigError(RuntimeError):
@@ -34,7 +34,7 @@ class LLMSection(BaseModel):
     api_version: str | None = Field(default=None)
 
     # secret/non-secret mixed: extra headers for outbound LLM requests.
-    # For safety, values must be provided via env reference in config.yml and are resolved at load time.
+    # For safety, values must be provided via env reference in ai-chat-util-config.yml and are resolved at load time.
     extra_headers: dict[str, str] | None = Field(default=None)
 
     @model_validator(mode="after")
@@ -43,7 +43,7 @@ class LLMSection(BaseModel):
         providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
         if provider in providers_requiring_key and not self.api_key:
             raise ValueError(
-                "llm.api_key が未設定です。config.yml で 'llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
+                "llm.api_key が未設定です。ai-chat-util-config.yml で 'llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
                 "参照先の環境変数を設定してください。"
             )
         return self
@@ -256,7 +256,7 @@ def resolve_config_path(cli_config_path: str | None) -> Path:
 
     tried_str = "\n".join(f"- {p}" for p in tried)
     raise ConfigError(
-        "設定ファイル config.yml が見つかりません。以下を探索しました:\n" + tried_str +
+        "設定ファイル ai-chat-util-config.yml が見つかりません。以下を探索しました:\n" + tried_str +
         f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、カレント/プロジェクトルートに {DEFAULT_CONFIG_FILENAME} を配置してください。"
     )
 
@@ -275,7 +275,7 @@ def _load_yaml_config(path: Path) -> dict[str, Any]:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ConfigError(f"config.yml のルートは mapping(dict) である必要があります: {path}")
+        raise ConfigError(f"ai-chat-util-config.yml のルートは mapping(dict) である必要があります: {path}")
     return data
 
 
@@ -285,7 +285,7 @@ _ENV_REF_PREFIX = "os.environ/"
 def _resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:
     if not value.startswith(_ENV_REF_PREFIX):
         raise ConfigError(
-            f"秘密情報は config.yml に直書きできません: {config_path} ({field_path})\n"
+            f"秘密情報は ai-chat-util-config.yml に直書きできません: {config_path} ({field_path})\n"
             f"対処: '{field_path}: os.environ/ENV_VAR_NAME' の形式で環境変数参照にしてください。"
         )
 

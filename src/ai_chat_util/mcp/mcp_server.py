@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="",
         help=(
-            "設定ファイル(config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
+            "設定ファイル(ai-chat-util-config.yml)のパス。指定時は環境変数 AI_CHAT_UTIL_CONFIG にも反映し、"
             "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
         ),
     )
@@ -159,7 +159,7 @@ async def main():
     # 引数を解析
     args = parse_args()
 
-    # Initialize runtime config first (config.yml required)
+    # Initialize runtime config first (ai-chat-util-config.yml required)
     init_runtime(args.config or None)
 
     # Apply process-local logging overrides (especially useful for stdio MCP server).

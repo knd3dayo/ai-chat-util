@@ -152,7 +152,7 @@ class LLMClientUtil:
             raise RuntimeError(
                 "LLM呼び出しがタイムアウトしました。"
                 f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
-                "対処: config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
             ) from e
         logger.debug("LLM completion response type: %s", type(response))
 
@@ -217,7 +217,7 @@ class LLMClientUtil:
             raise RuntimeError(
                 "LLM呼び出しがタイムアウトしました。"
                 f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
-                "対処: config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
             ) from e
         logger.debug("LLM completion response type: %s", type(response))
 
@@ -958,7 +958,7 @@ class LLMClient(LLMClientBase):
         self.llm_config = llm_config
         self.use_mcp = use_mcp
 
-        # config.yml の non-secret 設定を既定値として採用
+        # ai-chat-util-config.yml の non-secret 設定を既定値として採用
         try:
             self.default_timeout_seconds = float(getattr(self.llm_config.llm, "timeout_seconds", 60.0) or 60.0)
         except (TypeError, ValueError):

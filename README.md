@@ -16,7 +16,7 @@
 - 対話型のAIチャットを実現。
 - LLM（大規模言語モデル）との自然な会話をサポート。
 - コンテキストを保持した継続的な会話が可能。
-- OpenAI / Azure OpenAI / Anthropic をサポート（`config.yml` の `llm.provider` で切り替え）
+- OpenAI / Azure OpenAI / Anthropic をサポート（`ai-chat-util-config.yml` の `llm.provider` で切り替え）
 
 ### ⚙️ バッチクライアント
 - 複数の入力をまとめてAIに処理させるバッチ実行機能。
@@ -37,7 +37,7 @@
 src/ai_chat_util/
 ├── api/            # FastAPI APIサーバー
 ├── cli/            # CLI（argparse + subcommand）
-├── config/         # 設定（config.yml / MCP設定JSON）
+├── config/         # 設定（ai-chat-util-config.yml / MCP設定JSON）
 ├── core/           # コア処理（チャット/バッチ等）
 ├── llm/            # LLMクライアント実装（LiteLLM / MCP内部クライアント）
 ├── log/            # ログ設定
@@ -54,35 +54,35 @@ src/ai_chat_util/
 ```bash
 uv sync
 ```
-## 設定（config.yml + .env）
+## 設定（ai-chat-util-config.yml + .env）
 
 本プロジェクトは、
 
-- **非秘密設定** → `config.yml`
+- **非秘密設定** → `ai-chat-util-config.yml`
 - **秘密情報（APIキー/トークン等）** → 環境変数 / `.env`
 
 に分離しています。
 
-### 1) config.yml（必須）
+### 1) ai-chat-util-config.yml（必須）
 
-`config.example.yml` をコピーして `config.yml` を作成してください。
+`config.example.yml` をコピーして `ai-chat-util-config.yml` を作成してください。
 
 ```bash
-copy config.example.yml config.yml
+copy config.example.yml ai-chat-util-config.yml
 ```
 
 設定ファイルの探索順は以下です。
 
 1. `--config`
 2. 環境変数 `AI_CHAT_UTIL_CONFIG`
-3. `./config.yml`（実行時カレント）
-4. `<project-root>/config.yml`
+3. `./ai-chat-util-config.yml`（実行時カレント）
+4. `<project-root>/ai-chat-util-config.yml`
 
-> `config.yml` が見つからない場合はエラーになります。
+> `ai-chat-util-config.yml` が見つからない場合はエラーになります。
 
 #### 秘密情報（APIキー等）の扱い
 
-秘密情報は `config.yml` に直書きできません。
+秘密情報は `ai-chat-util-config.yml` に直書きできません。
 
 - `llm.api_key` は **環境変数参照**（`os.environ/ENV_VAR_NAME`）の形式でのみ指定できます。
 - `llm.extra_headers` も秘密情報を含み得るため、**各ヘッダー値は環境変数参照**（`os.environ/ENV_VAR_NAME`）でのみ指定できます。
@@ -128,10 +128,10 @@ llm:
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）
 
-環境変数 `AI_CHAT_UTIL_CONFIG` で `config.yml` の場所を指定してください。
+環境変数 `AI_CHAT_UTIL_CONFIG` で `ai-chat-util-config.yml` の場所を指定してください。
 
 ```powershell
-$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\config.yml"
+$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\ai-chat-util-config.yml"
 uvicorn ai_chat_util.api.api_server:app
 ```
 
@@ -148,7 +148,7 @@ copy .env.example .env
 `analyze_*_urls` / `download_files` は URL からファイルを取得します。
 社内Proxyが SSL インスペクション（MITM）を行う環境では、CA を信頼できずエラーになることがあります。
 
-推奨は **社内CAをPEMにして `config.yml` の `network.ca_bundle` で指定**することです。
+推奨は **社内CAをPEMにして `ai-chat-util-config.yml` の `network.ca_bundle` で指定**することです。
 
 ```yml
 network:
@@ -160,7 +160,7 @@ network:
 
 ### LibreOffice（Office→PDF 変換）
 
-Office 解析で LibreOffice を使う場合は、`config.yml` の `office2pdf.libreoffice_path` を設定します。
+Office 解析で LibreOffice を使う場合は、`ai-chat-util-config.yml` の `office2pdf.libreoffice_path` を設定します。
 
 ```yml
 office2pdf:
@@ -175,12 +175,12 @@ office2pdf:
 | `AZURE_API_KEY` | 秘密 | Azure OpenAI APIキー |
 | `ANTHROPIC_API_KEY` | 秘密 | Anthropic APIキー |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
-| `AI_CHAT_UTIL_CONFIG` | 非秘密 | `config.yml` のパス（`--config` を渡せない起動で使用） |
+| `AI_CHAT_UTIL_CONFIG` | 非秘密 | `ai-chat-util-config.yml` のパス（`--config` を渡せない起動で使用） |
 
 ### MCP設定（内部MCPクライアント用：任意）
 
 CLIの `chat` / `batch_chat` は `--use_mcp` を指定すると、内部の MCP クライアントを使って「MCPツール込みのワークフロー」で実行できます。
-このとき、`config.yml` の `paths.mcp_config_path`（互換キー: `paths.mcp_server_config_file_path`）に、MCPサーバー設定JSONのパスを指定してください。
+このとき、`ai-chat-util-config.yml` の `paths.mcp_config_path`（互換キー: `paths.mcp_server_config_file_path`）に、MCPサーバー設定JSONのパスを指定してください。
 
 ```yml
 paths:
@@ -205,7 +205,7 @@ paths:
       "args": ["--directory", "<REPO_PATH>", "run", "-m", "ai_chat_util.mcp.mcp_server"],
       "env": {
         "OPENAI_API_KEY": "sk-****",
-        "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\config.yml"
+        "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       },
       "allowedTools": ["analyze_pdf_files", "analyze_files"]
     }
@@ -217,7 +217,7 @@ paths:
 
 ### 内部MCPクライアントの安全弁（無限ループ/タイムアウト）
 
-内部MCPクライアント（LangGraph Supervisor + MCPツール）は、暴走/無限ループ/長時間停止を避けるために `config.yml` の `features` で上限を設定できます。
+内部MCPクライアント（LangGraph Supervisor + MCPツール）は、暴走/無限ループ/長時間停止を避けるために `ai-chat-util-config.yml` の `features` で上限を設定できます。
 
 ```yml
 features:
@@ -246,7 +246,7 @@ features:
 - HITL（pause/resume）が発生するのは **`--use_mcp`（内部MCPクライアント）を使う場合のみ**です。
   - `--use_mcp` を付けない場合（LiteLLM経由の直接呼び出し）は、HITLは発生しません。
 - `run_simple_chat` / `run_simple_batch_chat` は常に LiteLLM 経由の直接呼び出し（MCP非対応）で実行されます（`use_mcp` 引数はありません）。
-- `--use_mcp` を使う場合は、`config.yml` の `paths.mcp_config_path`（互換: `paths.mcp_server_config_file_path`）が必要です。
+- `--use_mcp` を使う場合は、`ai-chat-util-config.yml` の `paths.mcp_config_path`（互換: `paths.mcp_server_config_file_path`）が必要です。
 - CLI の `chat` は、同一プロセス内での対話として pause/resume を処理します（プロセスを跨いだ再開のための `trace_id` 指定オプションは現状ありません）。
   - プロセスを跨いで再開したい場合は、API/ライブラリ利用で `ChatRequest.trace_id` を指定してください。
 
@@ -266,7 +266,7 @@ features:
 
 内部MCPクライアントは SQLite にチェックポイントを保存します。
 
-- 既定パス: `(<working_directory または config.yml のあるディレクトリ>)/.ai_chat_util/langgraph_checkpoints.sqlite`
+- 既定パス: `(<working_directory または ai-chat-util-config.yml のあるディレクトリ>)/.ai_chat_util/langgraph_checkpoints.sqlite`
 - `trace_id` が同一であれば、プロセスが変わっても（同じDBを参照できる限り）再開できます。
 
 ### trace_id（BFF相関ID）運用
@@ -280,7 +280,7 @@ features:
 
 ### 承認（approval）対象ツールの設定
 
-`config.yml` の `features.hitl_approval_tools` に、**実行前に人間の承認を求めたいツール名**を列挙できます。
+`ai-chat-util-config.yml` の `features.hitl_approval_tools` に、**実行前に人間の承認を求めたいツール名**を列挙できます。
 
 ```yml
 features:
@@ -320,14 +320,14 @@ uv run -m ai_chat_util.cli --help
 uv run ai-chat-util --help
 ```
 
-> 補足: 起動時に `.env` を読み込みます（秘密情報のみ）。`config.yml` は必須です。
+> 補足: 起動時に `.env` を読み込みます（秘密情報のみ）。`ai-chat-util-config.yml` は必須です。
 
 ### 共通オプション
 
 ```text
 --loglevel  ログレベルを上書き（例: DEBUG, INFO）
 --logfile   ログのファイル出力先を上書き
---config    設定ファイル(config.yml)のパス
+--config    設定ファイル(ai-chat-util-config.yml)のパス
 ```
 
 ### サブコマンド
@@ -432,7 +432,7 @@ uv run -m ai_chat_util.cli analyze_files \
 MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
 > 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
-> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定し、`config.yml` の `llm.api_key` で参照してください。`config.yml` は必須です。
+> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定し、`ai-chat-util-config.yml` の `llm.api_key` で参照してください。`ai-chat-util-config.yml` は必須です。
 
 ### 起動方法
 
@@ -501,7 +501,7 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
       ],
       "env": {
         "OPENAI_API_KEY": "sk-****",
-        "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\config.yml"
+        "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       }
     }
   }
@@ -512,14 +512,14 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
 
 ## APIサーバー（FastAPI）
 
-FastAPI のAPIサーバーを提供します。起動時に `config.yml` が必須です。
+FastAPI のAPIサーバーを提供します。起動時に `ai-chat-util-config.yml` が必須です。
 
 ### 起動方法
 
-`uvicorn ...:app` のように `--config` を渡せない起動では、環境変数 `AI_CHAT_UTIL_CONFIG` を使って `config.yml` の場所を指定してください。
+`uvicorn ...:app` のように `--config` を渡せない起動では、環境変数 `AI_CHAT_UTIL_CONFIG` を使って `ai-chat-util-config.yml` の場所を指定してください。
 
 ```powershell
-$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\config.yml"
+$env:AI_CHAT_UTIL_CONFIG = "C:\\path\\to\\ai-chat-util-config.yml"
 uvicorn ai_chat_util.api.api_server:app
 ```
 

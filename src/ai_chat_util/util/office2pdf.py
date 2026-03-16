@@ -349,7 +349,7 @@ class Office2PDFUtil:
             input_path: Path to the Office document to convert.
             output_path: Target PDF path or directory. When omitted, a sibling PDF is created.
             libreoffice_path: Override path to the LibreOffice binary; otherwise use
-                config.yml の ``office2pdf.libreoffice_path`` または PATH を使用。
+                ai-chat-util-config.yml の ``office2pdf.libreoffice_path`` または PATH を使用。
             timeout: Seconds to wait for LibreOffice. ``None`` disables the timeout.
 
         Returns:
@@ -465,7 +465,7 @@ class Office2PDFUtil:
 
         Preference order:
         1) explicit path argument
-        2) config.yml: office2pdf.libreoffice_path
+        2) ai-chat-util-config.yml: office2pdf.libreoffice_path
         3) ``soffice`` or ``libreoffice`` on PATH
         """
         cfg = get_runtime_config()
@@ -485,6 +485,6 @@ class Office2PDFUtil:
                 return executable
 
         raise RuntimeError(
-            "LibreOffice binary not found. Set office2pdf.libreoffice_path in config.yml "
+            "LibreOffice binary not found. Set office2pdf.libreoffice_path in ai-chat-util-config.yml "
             "or ensure LibreOffice is on PATH."
         )

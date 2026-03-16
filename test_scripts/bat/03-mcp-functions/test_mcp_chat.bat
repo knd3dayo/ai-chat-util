@@ -6,7 +6,7 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
 cd "%~dp0"
-set AI_CHAT_UTIL_CONFIG=config.yml
+set AI_CHAT_UTIL_CONFIG=ai-chat-util-config.yml
 
 rem start with a fresh log file each run
 del /q chat_timeout_5s.log 2>nul

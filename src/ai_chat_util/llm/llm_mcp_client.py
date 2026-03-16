@@ -10,12 +10,12 @@ from langchain.agents import create_agent
 from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from ..config.runtime import (
+from ai_chat_util_interface.config.ai_chat_util_runtime import (
     CONFIG_ENV_VAR,
     AiChatUtilConfig,
     get_runtime_config,
 )
-from ..model.models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
+from ai_chat_util_interface.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 

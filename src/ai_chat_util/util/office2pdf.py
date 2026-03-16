@@ -11,7 +11,7 @@ import os
 import shutil
 import tempfile
 
-from ai_chat_util.config.runtime import get_runtime_config
+from ai_chat_util_interface.config.ai_chat_util_runtime import get_runtime_config
 
 class Office2PDFUtil:
     DEFAULT_TIMEOUT_SECONDS = 600  # 10 minutes

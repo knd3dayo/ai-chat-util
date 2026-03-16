@@ -22,8 +22,8 @@ try:
 except Exception:  # pragma: no cover
     AsyncSqliteSaver = None  # type: ignore[assignment]
 
-from ..config.mcp_config import MCPConfigParser
-from ..config.runtime import (
+from ai_chat_util_interface.config.ai_chat_util_mcp_config import MCPConfigParser
+from ai_chat_util_interface.config.ai_chat_util_runtime import (
     CONFIG_ENV_VAR,
     ConfigError,
     AiChatUtilConfig,

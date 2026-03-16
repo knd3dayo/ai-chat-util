@@ -4,8 +4,7 @@ import argparse
 import asyncio
 from typing import Iterable
 from ai_chat_util.llm.llm_factory import LLMFactory
-from ai_chat_util.config.runtime import init_runtime, apply_logging_overrides
-from ai_chat_util.model.models import ChatRequest, ChatHistory, ChatMessage, ChatContent
+from ai_chat_util_interface.config.ai_chat_util_runtime import init_runtime, apply_logging_overrides
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:

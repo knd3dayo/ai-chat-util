@@ -86,6 +86,7 @@ copy config.example.yml config.yml
 
 - `llm.api_key` は **環境変数参照**（`os.environ/ENV_VAR_NAME`）の形式でのみ指定できます。
 - `llm.extra_headers` も秘密情報を含み得るため、**各ヘッダー値は環境変数参照**（`os.environ/ENV_VAR_NAME`）でのみ指定できます。
+- `llm.extra_headers` のうち予約プレフィックス `x-mcp-*` / `x-mcp-env-*` は MCP 接続に転送され、LiteLLM には送信されません。
 - OpenAI / Azure OpenAI / Anthropic のプロバイダ（`llm.provider: openai | azure | anthropic`）を使う場合、`llm.api_key` は必須です（設定ロード時に検証されます）。
 
 例（OpenAI）:
@@ -119,6 +120,10 @@ llm:
   extra_headers:
     Authorization: os.environ/OPENAI_AUTH_HEADER
     X-My-Org: os.environ/MY_ORG_ID
+    # MCP HTTP/SSE/WebSocket transport の headers に転送（キーの "x-mcp-" は除去されます）
+    x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
+    # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
+    x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
 ```
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）

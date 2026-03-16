@@ -178,8 +178,13 @@ class LLMClientUtil:
             params["base_url"] = llm_config.llm.base_url
         if llm_config.llm.api_version:
             params["api_version"] = llm_config.llm.api_version
-        if getattr(llm_config.llm, "extra_headers", None):
-            params["extra_headers"] = llm_config.llm.extra_headers
+        extra_headers = getattr(llm_config.llm, "extra_headers", None)
+        if extra_headers:
+            filtered = {
+                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
+            }
+            if filtered:
+                params["extra_headers"] = filtered
 
         # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
         kwargs.setdefault("timeout", default_timeout_seconds)

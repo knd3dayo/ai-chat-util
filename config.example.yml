@@ -39,10 +39,18 @@ llm:
 
   # Optional: extra HTTP headers for LLM requests (may contain secrets).
   # Values MUST be env references (do NOT write secrets directly in YAML).
+  #
+  # Reserved prefixes for MCP forwarding:
+  # - x-mcp-<Header-Name>: forwarded to MCP HTTP/SSE/WebSocket transports as request headers.
+  # - x-mcp-env-<ENV_NAME>: forwarded to MCP stdio transport as environment variables.
+  #   (ENV_NAME must match [A-Za-z_][A-Za-z0-9_]*.)
+  # NOTE: Reserved x-mcp-* keys are NOT sent to LiteLLM.
   # Example:
   #   extra_headers:
   #     Authorization: os.environ/OPENAI_AUTH_HEADER
   #     X-My-Org: os.environ/MY_ORG_ID
+  #     x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
+  #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
   extra_headers: null
 
 paths:

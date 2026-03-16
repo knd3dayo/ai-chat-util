@@ -23,6 +23,7 @@ except Exception:  # pragma: no cover
 from ..config.mcp_config import MCPConfigParser
 from ..config.runtime import (
     CONFIG_ENV_VAR,
+    ConfigError,
     AiChatUtilConfig,
     get_runtime_config_path,
 )
@@ -52,6 +53,73 @@ class MCPClientUtil:
             # 2. LangChain用設定の生成
             mcp_config = config_parser.to_langchain_config()
 
+            # Optional: forward reserved x-mcp-* values from llm.extra_headers into MCP transports.
+            # - x-mcp-<Header-Name>: forwarded to HTTP-like transports as headers['<Header-Name>']
+            # - x-mcp-env-<ENV_NAME>: forwarded to stdio transports as env['<ENV_NAME>']
+            # Values are already resolved (env ref) at runtime init.
+            extra = getattr(runtime_config.llm, "extra_headers", None)
+            mcp_headers: dict[str, str] = {}
+            mcp_env: dict[str, str] = {}
+            if isinstance(extra, dict) and extra:
+                for raw_key, raw_val in extra.items():
+                    if not isinstance(raw_key, str) or not isinstance(raw_val, str):
+                        continue
+                    key = raw_key.strip()
+                    if not key:
+                        continue
+
+                    lower = key.lower()
+                    if lower.startswith("x-mcp-env-"):
+                        env_name = key[len("x-mcp-env-") :].strip()
+                        if not env_name:
+                            raise ConfigError(
+                                "llm.extra_headers の x-mcp-env- プレフィックス指定が不正です（ENV名が空）"
+                            )
+                        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
+                            raise ConfigError(
+                                "llm.extra_headers の環境変数名が不正です: "
+                                f"{env_name} (key={raw_key!r})\n"
+                                "対処: x-mcp-env-ENV_NAME の ENV_NAME は [A-Za-z_][A-Za-z0-9_]* を満たしてください。"
+                            )
+                        mcp_env[env_name] = raw_val
+                        continue
+
+                    if lower.startswith("x-mcp-"):
+                        header_name = key[len("x-mcp-") :].strip()
+                        if not header_name:
+                            raise ConfigError(
+                                "llm.extra_headers の x-mcp- プレフィックス指定が不正です（ヘッダー名が空）"
+                            )
+                        mcp_headers[header_name] = raw_val
+
+            if mcp_config and (mcp_headers or mcp_env):
+                for _, conn in mcp_config.items():
+                    if not isinstance(conn, Mapping):
+                        continue
+
+                    transport = conn.get("transport")
+                    conn_dict = cast(dict[str, Any], conn)
+
+                    if transport == "stdio" and mcp_env:
+                        env = conn_dict.get("env")
+                        if env is None:
+                            env = {}
+                        if isinstance(env, Mapping):
+                            env2 = dict(env)
+                            # config.yml (runtime_config) takes precedence
+                            env2.update(mcp_env)
+                            conn_dict["env"] = env2
+
+                    if transport in {"http", "sse", "websocket"} and mcp_headers:
+                        headers = conn_dict.get("headers")
+                        if headers is None:
+                            headers = {}
+                        if isinstance(headers, Mapping):
+                            headers2 = dict(headers)
+                            # config.yml (runtime_config) takes precedence
+                            headers2.update(mcp_headers)
+                            conn_dict["headers"] = headers2
+
             # Ensure the MCP server subprocess can resolve the same config.yml as this process.
             # When stdio servers are launched with a different working directory (e.g., `uv --directory`),
             # a relative AI_CHAT_UTIL_CONFIG like "config.yml" can break. Pass an absolute path.
@@ -63,8 +131,9 @@ class MCPClientUtil:
                         env = conn_dict.get("env")
                         if env is None:
                             env = {}
-                        if isinstance(env, Mapping) and CONFIG_ENV_VAR not in env:
+                        if isinstance(env, Mapping):
                             env2 = dict(env)
+                            # Always override to an absolute path for stability.
                             env2[CONFIG_ENV_VAR] = runtime_config_path
                             conn_dict["env"] = env2
 

@@ -50,6 +50,15 @@ class LLMSection(BaseModel):
 
     def create_litellm_model_list(self) -> list[dict[str, Any]]:
         """Create a list of model names to try with LiteLLM, based on the config."""
+        litellm_extra_headers: dict[str, str] | None = None
+        if self.extra_headers:
+            # Reserve x-mcp-* for MCP forwarding (do NOT send to LiteLLM).
+            filtered = {
+                k: v for k, v in self.extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
+            }
+            if filtered:
+                litellm_extra_headers = filtered
+
         completion_litellm_dict = {}
         completion_litellm_dict["model"] = f"{self.provider}/{self.completion_model}"
         completion_litellm_dict["api_key"] = self.api_key
@@ -57,8 +66,8 @@ class LLMSection(BaseModel):
             completion_litellm_dict["api_base"] = self.base_url
         if self.api_version:
             completion_litellm_dict["api_version"] = self.api_version
-        if self.extra_headers:
-            completion_litellm_dict["extra_headers"] = self.extra_headers
+        if litellm_extra_headers:
+            completion_litellm_dict["extra_headers"] = litellm_extra_headers
 
         completion_model_dict = {
             "model_name": self.completion_model,
@@ -72,8 +81,8 @@ class LLMSection(BaseModel):
             embedding_litellm_dict["api_base"] = self.base_url
         if self.api_version:
             embedding_litellm_dict["api_version"] = self.api_version
-        if self.extra_headers:
-            embedding_litellm_dict["extra_headers"] = self.extra_headers
+        if litellm_extra_headers:
+            embedding_litellm_dict["extra_headers"] = litellm_extra_headers
         embedding_model_dict = {
             "model_name": self.embedding_model,
             "litellm_params": embedding_litellm_dict

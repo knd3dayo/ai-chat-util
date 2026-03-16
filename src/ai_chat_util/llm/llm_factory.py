@@ -1,6 +1,6 @@
 from ai_chat_util.config.runtime import get_runtime_config, AiChatUtilConfig
 from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.core.hitl_client import HITLClient
+from ai_chat_util.llm.hitl_client import HITLClient
 
 class LLMFactory:
     @classmethod
@@ -18,7 +18,7 @@ class LLMFactory:
     ) -> HITLClient:
         if runtime_config is None:
             runtime_config = get_runtime_config()
-        from ai_chat_util.core.hitl_client import HITLClient
+        from ai_chat_util.llm.hitl_client import HITLClient
         return HITLClient(llm_client, runtime_config, trace_id=trace_id)
 
 

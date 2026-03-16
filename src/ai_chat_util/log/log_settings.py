@@ -8,7 +8,7 @@ def getLogger(name: str) -> logging.Logger:
     :param name: Name of the logger.
     :return: Logger object.
     """
-    # Logging configuration is performed in ai_chat_util_interface.config.runtime.init_runtime().
+    # Logging configuration is performed in ai_chat_util_base.config.runtime.init_runtime().
     # This function intentionally avoids reading non-secret environment variables.
     root = logging.getLogger()
     if not root.handlers:

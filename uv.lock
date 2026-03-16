@@ -15,7 +15,7 @@ name = "ai-chat-util"
 version = "0.1.10"
 source = { editable = "." }
 dependencies = [
-    { name = "ai-chat-util-interface" },
+    { name = "ai-chat-util-base" },
     { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "boto3" },
@@ -42,7 +42,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ai-chat-util-interface", git = "https://github.com/knd3dayo/ai-chat-util-interface.git?rev=main" },
+    { name = "ai-chat-util-base", git = "https://github.com/knd3dayo/ai-chat-util-base.git?rev=main" },
     { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "boto3" },
@@ -68,10 +68,12 @@ requires-dist = [
 ]
 
 [[package]]
-name = "ai-chat-util-interface"
+name = "ai-chat-util-base"
 version = "0.1.0"
-source = { git = "https://github.com/knd3dayo/ai-chat-util-interface.git?rev=main#2957bb8e22ccd0816cc929f260511db640706a37" }
+source = { git = "https://github.com/knd3dayo/ai-chat-util-base.git?rev=main#a07d36a5d7299b0fe90e5a665ad6081d11408b6c" }
 dependencies = [
+    { name = "fastapi" },
+    { name = "fastmcp" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },

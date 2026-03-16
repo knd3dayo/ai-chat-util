@@ -3,8 +3,8 @@ import argparse
 from typing import Callable
 from fastmcp import FastMCP
 
-from ai_chat_util_interface.config.ai_chat_util_runtime import init_runtime
-from ai_chat_util_interface.config.ai_chat_util_runtime import apply_logging_overrides
+from ai_chat_util_base.config.ai_chat_util_runtime import init_runtime
+from ai_chat_util_base.config.ai_chat_util_runtime import apply_logging_overrides
 
 from ai_chat_util.core.resource_app import (
     use_custom_pdf_analyzer,

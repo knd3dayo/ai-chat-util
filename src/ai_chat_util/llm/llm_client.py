@@ -9,8 +9,8 @@ import requests
 import base64
 from abc import ABC, abstractmethod
 
-from ai_chat_util_interface.config.ai_chat_util_runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util_interface.model.ai_chatl_util_models import (
+from ai_chat_util_base.config.ai_chat_util_runtime import get_runtime_config, AiChatUtilConfig
+from ai_chat_util_base.model.ai_chatl_util_models import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )

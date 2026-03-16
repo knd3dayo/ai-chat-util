@@ -7,14 +7,14 @@ from itertools import count
 from pathlib import Path
 
 from pydantic import Field
-from ai_chat_util_interface.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util_base.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.llm.llm_factory import LLMFactory
 from ai_chat_util.llm.llm_client import LLMClientUtil
-from ai_chat_util_interface.config.ai_chat_util_runtime import get_runtime_config
+from ai_chat_util_base.config.ai_chat_util_runtime import get_runtime_config
 from ai_chat_util.llm.llm_batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.util.file_path_resolver import resolve_existing_file_path
-from ai_chat_util_interface.config.ai_chat_util_runtime import get_runtime_config
+from ai_chat_util_base.config.ai_chat_util_runtime import get_runtime_config
 
 import ai_chat_util.log.log_settings as log_settings
 

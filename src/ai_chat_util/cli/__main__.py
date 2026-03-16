@@ -259,7 +259,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
         # HITL対応: status='paused' の場合は質問を表示して入力待ち→同じ trace_id で再開する。
 
         trace_id: str | None = None
-        return await LLMFactory.create_hitl_client(llm_client, trace_id=trace_id).run_cli(args.prompt)
+        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
     
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)

@@ -123,7 +123,7 @@ class FeaturesSection(BaseModel):
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
     mcp_recursion_limit: int = Field(
-        default=15,
+        default=50,
         ge=1,
         description=(
             "LangGraph supervisor の再帰(ステップ)上限。\n"

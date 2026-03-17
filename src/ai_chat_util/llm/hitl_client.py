@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+import os
 from ai_chat_util.llm.llm_client import LLMClient
 from ai_chat_util_base.config.ai_chat_util_runtime import AiChatUtilConfig
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
@@ -38,12 +39,24 @@ class HITLClientBase(ABC):
         pass
 
     def _mk_user_request(self, text: str) -> ChatRequest:
+        auto_approve_raw = (os.environ.get("AI_CHAT_UTIL_AUTO_APPROVE") or "").strip().lower()
+        auto_approve = auto_approve_raw in {"1", "true", "yes", "y", "on"}
+        max_retries = None
+        max_retries_raw = (os.environ.get("AI_CHAT_UTIL_AUTO_APPROVE_MAX_RETRIES") or "").strip()
+        if max_retries_raw:
+            try:
+                max_retries = int(max_retries_raw)
+            except Exception:
+                max_retries = None
+
         msg = ChatMessage(
             role="user",
             content=[ChatContent(params={"type": "text", "text": text})],
         )
         return ChatRequest(
             trace_id=self.trace_id,
+            auto_approve=auto_approve,
+            auto_approve_max_retries=max_retries if isinstance(max_retries, int) else 2,
             chat_history=ChatHistory(messages=[msg]),
             chat_request_context=None,
         )

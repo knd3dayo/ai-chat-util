@@ -62,9 +62,9 @@ class SubprocessTaskService(AbstractTaskService):
             env.setdefault("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
 
         cmd = [
-            sys.executable,
+            SubprocessCodingAgentRunner.resolve_python_executable(),
             "-m",
-            "autonomous_agent_util._cli_.docker_main",
+            "ai_chat_util.agent.autonomous._cli_.docker_main",
             "monitor",
             task_id,
             "--interval",

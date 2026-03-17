@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "AssuranceProxy": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "http",
+      "url": "http://localhost:7102/mcp"
+    }
+  }
+}

@@ -29,6 +29,10 @@
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
 - Chat、PDF解析、画像解析などのMCPツールを提供。
 
+### 🤖 自律エージェント実行（autonomous-agent-util）
+- 自律エージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
+- 設定は `autonomous-agent-util-config.yml`、秘密情報は `.env` / 環境変数で管理。
+
 ---
 
 ## ディレクトリ構成
@@ -36,6 +40,7 @@
 ```
 src/ai_chat_util/
 ├── api/            # FastAPI APIサーバー
+├── agent/          # 自律エージェント実行（autonomous-agent-util）
 ├── cli/            # CLI（argparse + subcommand）
 ├── config/         # 設定（ai-chat-util-config.yml / MCP設定JSON）
 ├── core/           # コア処理（チャット/バッチ等）
@@ -536,3 +541,280 @@ uvicorn ai_chat_util.api.api_server:app
 - `POST /api/ai_chat_util/analyze_pdf_urls`
 - `POST /api/ai_chat_util/analyze_office_urls`
 - `POST /api/ai_chat_util/analyze_urls`
+
+---
+
+## autonomous-agent-util（自律エージェント実行ユーティリティ）
+
+本プロジェクト（ai-chat-util）には、`src/ai_chat_util/agent/autonomous/` 配下に **autonomous-agent-util（自律エージェント実行ユーティリティ）** が統合されています。
+
+ローカルまたは Docker 上で「自律エージェント実行タスク」を起動し、進捗確認（status）やキャンセル（cancel）を行うためのユーティリティです。
+
+- **HTTP API**（FastAPI）: `/execute` でタスク起動、`/status/{task_id}` でログ/結果取得
+- **MCP サーバ**（fastmcp）: `execute/status/cancel/healthz` 等のツールを提供
+- **CLI**（Typer）: タスクの起動・一覧・状態確認・キャンセル
+
+本機能では **非秘匿の設定を `autonomous-agent-util-config.yml` に集約**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
+
+---
+
+## 前提
+
+- Python: `>=3.11, <=3.13`
+- 依存管理: `uv` 推奨（`pyproject.toml`/`uv.lock`）
+- エージェント実行コマンド: デフォルトは `opencode run` を利用（`opencode` が必要）
+
+---
+
+## セットアップ
+
+```bash
+uv sync
+```
+
+`opencode` を使う場合は、コマンドが実行できることを確認してください。
+
+```bash
+opencode --version
+```
+
+---
+
+## 設定（autonomous-agent-util-config.yml）
+
+### autonomous-agent-util-config.yml の探索・指定方法
+
+設定ファイルの解決順は以下です。
+
+1. CLI/サーバ起動引数 `--config`
+2. 環境変数 `AUTONOMOUS_AGENT_UTIL_CONFIG`
+3. カレントディレクトリの `./autonomous-agent-util-config.yml`
+4. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./autonomous-agent-util-config.yml`
+
+リポジトリ直下にサンプルの `autonomous-agent-util-config.yml` を置いてあります。
+
+### 秘密情報（Secrets）の方針
+
+- **`autonomous-agent-util-config.yml` に API key などの秘密情報を直書きしないでください**
+- `.env` または環境変数で供給してください
+- どうしても YAML から参照したい場合は、次の形式のみ許可します
+
+```yml
+llm:
+  api_key: os.environ/LLM_API_KEY
+```
+
+実際の値はプロセス起動時に `.env`/環境変数から解決されます。
+
+### よく使う設定項目
+
+- `llm.provider`, `llm.model`, `llm.base_url`: LLM の非秘匿設定
+- `paths.workspace_root`: ワークスペースのデフォルト作成先
+- `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
+- `backend.task_backend`: API/MCP が使う実行バックエンド（`process/subprocess/docker/compose`）
+- `compose.*`: Docker/Compose 実行時の設定
+- `subprocess.command`: subprocess/process 実行時のコマンド（デフォルト `opencode run`）
+
+---
+
+## Secrets（.env / 環境変数）
+
+最低限、`openai` 等の provider を使う場合は API キー（例: `LLM_API_KEY`）が必要です（実行開始時にチェックされます）。
+
+`.env`（例）:
+
+```dotenv
+LLM_API_KEY=xxxxxxxx
+```
+
+---
+
+## 使い方
+
+### 1) API サーバ（HTTP）
+
+起動:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._api_.api_server --host 127.0.0.1 -p 7101
+```
+
+`--config` で明示する場合:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._api_.api_server --config ./autonomous-agent-util-config.yml --host 127.0.0.1 -p 7101
+```
+
+実行（非同期）:
+
+```bash
+curl -sS -X POST http://127.0.0.1:7101/execute \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt": "Hello. Please respond with a single word and exit.",
+    "workspace_path": "/tmp/autonomous_agent_tasks/demo",
+    "timeout": 300
+  }'
+```
+
+状態確認:
+
+```bash
+curl -sS http://127.0.0.1:7101/status/<task_id>?tail=200
+```
+
+キャンセル:
+
+```bash
+curl -sS -X DELETE http://127.0.0.1:7101/cancel/<task_id>
+```
+
+注意:
+
+- `workspace_path` は **絶対パス必須**です（存在しない場合は作成されます）
+- `paths.executor_allowed_workspace_root` を設定すると、受け付ける workspace のルートを制限できます
+
+補足（重要）:
+
+- `workspace_path` は **Executor（この API/MCP サーバと同じ実行環境）から見える絶対パス**である必要があります。
+  Supervisor と Executor が別ホスト/別コンテナの場合、Supervisor 側で「存在する」パスでも Executor からは見えないことがあります。
+- その場合の対処は次のいずれかです。
+  - Supervisor が渡す `workspace_path` を Executor 視点のパスにする（推奨）
+  - Executor 側に同じパスで workspace ルートを bind mount する
+  - `paths.workspace_path_rewrites` でパス変換を設定する（例: `/srv/ai_platform/workspaces` → `/workspaces`）
+
+### 2) MCP サーバ
+
+起動（stdio）:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --mode stdio
+```
+
+起動（HTTP）:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --mode http --host 127.0.0.1 -p 7102
+```
+
+> 注意: MCPサーバ（http/sse）の既定ポートは 7101 です。APIサーバ（既定 7101）と同時に動かす場合は、上記例のように `-p 7102` 等を指定してください。
+
+`--config` を使う場合:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --config ./autonomous-agent-util-config.yml --mode http --host 127.0.0.1 -p 7102
+```
+
+公開されるツール（代表）:
+
+- `healthz`
+- `execute`
+- `status`
+- `cancel`
+- `workspace_path`
+- `get_result`
+
+#### MCP/HTTP 契約（互換性のための固定仕様）
+
+Supervisor 等のクライアントから呼び出す際は、以下を **契約** として扱う想定です。
+
+**MCP (fastmcp / streamable-http)**
+
+- エンドポイント: `http(s)://<host>:<port>/mcp`
+- ツール名（安定）: `healthz`, `execute`, `status`, `cancel`, `workspace_path`, `get_result`
+- 引数形:
+  - `healthz`: 引数なし
+  - `execute`: 引数は **1つ** で、名前は `req`
+    - `req.prompt: str`
+    - `req.workspace_path: str`（絶対パス必須）
+    - `req.timeout: int`
+    - `req.task_id?: str`
+    - `req.trace_id?: str`
+  - `status`: `{ "task_id": "...", "tail"?: 200 | null }`
+  - `workspace_path`: `{ "task_id": "..." }`
+  - `get_result`: `{ "task_id": "...", "tail"?: 200 | null }` → `{ "stdout": "...", "stderr": "..." }`
+  - `cancel`: `{ "task_id": "..." }`
+
+**HTTP API (FastAPI)**
+
+- `GET /healthz` → `{ "status": "ok" }`
+- `POST /execute` → `{ "task_id": "..." }`（既定は非同期）
+- `GET /status/{task_id}?tail=200` → `TaskStatus`
+- `DELETE /cancel/{task_id}` → `CancelResponse`
+
+**TaskStatus（代表フィールド）**
+
+- `task_id: str`
+- `workspace_path: str`
+- `trace_id?: str`（相関ID。ヘッダ/req から伝播されます）
+- `status?: "pending" | "running" | "exited"`
+- `sub_status?: "not-started" | "starting" | "running-foreground" | "running-background" | "failed" | "timeout" | "cancelled" | "completed"`
+- `stdout?: str`, `stderr?: str`（`tail` パラメータで末尾のみ返る場合があります）
+- `artifacts?: list[str]`（バックエンドにより埋まる場合があります）
+- `metadata: object`（拡張メタ情報。互換性のため dict を維持）
+
+**ヘッダ（任意）**
+
+- `Authorization`: 下流の実行バックエンドへ環境変数として伝播されます
+- `X-Trace-Id`（互換: `trace-id`, `trace_id`）: `ExecuteRequest.trace_id` が未指定の場合に補完されます
+
+> 伝播される環境変数名（代表）: `AI_PLATFORM_AUTHORIZATION`, `AUTHORIZATION`, `AI_PLATFORM_TRACE_ID`, `TRACE_ID`
+
+### 3) CLI
+
+現状の CLI は `DockerTaskService` を利用しており、**Docker/Compose 実行を前提**にしています。
+（ローカル subprocess/process で試したい場合は API/MCP 経由の方が簡単です）
+
+ヘルプ:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --help
+```
+
+実行:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml run \
+  "Hello. Please respond with a single word and exit." \
+  --wait
+```
+
+非同期（task_id を返して終了）:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml run \
+  "Hello" \
+  --no-wait
+```
+
+状態確認:
+
+```bash
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml status <task_id>
+```
+
+---
+
+## トラブルシュート
+
+### `LLM API key が未設定` で失敗する
+
+- `.env` または環境変数で API キー（例: `LLM_API_KEY`）を設定してください
+- `autonomous-agent-util-config.yml` に `llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
+
+### `autonomous-agent-util-config.yml が見つからない`
+
+- `--config` を指定する
+- もしくは `AUTONOMOUS_AGENT_UTIL_CONFIG` を設定する
+- もしくは `./autonomous-agent-util-config.yml` をカレント/プロジェクトルートに置く
+
+### `workspace_path must be an absolute path`
+
+- API/MCP の `execute` には絶対パスを渡してください（例: `/tmp/autonomous_agent_tasks/demo`）
+
+---
+
+## 開発メモ
+
+- 設定ローダは `src/ai_chat_util_base/config/autonomous_agent_util_runtime.py` にあります
+- 設定は `autonomous-agent-util-config.yml` を優先し、環境変数は secrets（`.env` 含む）の供給にのみ使う設計です

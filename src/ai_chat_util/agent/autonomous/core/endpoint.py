@@ -212,6 +212,8 @@ class EndPoint(AutonomousEndPointBase):
         """
          タスク結果取得用エンドポイント。SVはこれを叩いてタスクの結果を取得する。
          tailはログの末尾n行を取得するためのパラメータ。
+
+         注意: task_id は必須です。execute のレスポンスで返る task_id を指定してください。
         """
         status = await TaskManager.get_status(task_id, tail=tail)
         if not status:

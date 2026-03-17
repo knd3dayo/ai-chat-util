@@ -19,7 +19,7 @@ uv run -m ai_chat_util.cli --loglevel INFO --logfile chat_timeout_5s.log chat --
 
 ver >nul
 
-uv run -m ai_chat_util.cli --loglevel INFO --logfile chat_timeout_5s.log chat --use_mcp -p "WORKSPACE_DIR=%workspace_dir% ; MCP execute の workspace_path は WORKSPACE_DIR を指定。ワークスペース内のファイル一覧を表示。execute の戻り task_id を使って get_result を呼び、ログを出力。"
+rem uv run -m ai_chat_util.cli --loglevel INFO --logfile chat_timeout_5s.log chat --use_mcp -p "WORKSPACE_DIR=%workspace_dir% ; MCP execute の workspace_path は WORKSPACE_DIR を指定。ワークスペース内のファイル一覧を表示。execute の戻り task_id を使って get_result を呼び、ログを出力。"
 
 popd
 

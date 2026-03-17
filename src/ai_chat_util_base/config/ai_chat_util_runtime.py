@@ -493,6 +493,8 @@ def _configure_python_logging(config: AiChatUtilConfig) -> None:
         "urllib3": logging.WARNING,
         # event loop chatter
         "asyncio": logging.WARNING,
+        # sse_starlette.sse
+        "sse_starlette": logging.WARNING,
     }
     for name, lvl in noisy_loggers.items():
         logging.getLogger(name).setLevel(lvl)

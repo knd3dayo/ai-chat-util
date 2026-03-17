@@ -340,6 +340,7 @@ def _configure_python_logging(config: AutonomousAgentUtilConfig) -> None:
         "aiohttp": logging.WARNING,
         "urllib3": logging.WARNING,
         "asyncio": logging.WARNING,
+        "sse_starlette": logging.WARNING,
     }
     for name, lvl in noisy_loggers.items():
         logging.getLogger(name).setLevel(lvl)

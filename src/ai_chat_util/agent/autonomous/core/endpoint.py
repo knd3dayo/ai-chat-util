@@ -155,8 +155,10 @@ class EndPoint(AutonomousEndPointBase):
     ) -> ExecuteResponse:
         """
         タスク実行用エンドポイント（同期版）。ユーザーはこれを叩いてエージェントにタスク実行を指示する。
-        executeとの違いは、タスク完了までHTTPレスポンを返さない点。小規模タスクやテスト用途向け。
+        executeとの違いは、タスク完了までHTTPレスポンスを返さない点。小規模タスクやテスト用途向け。
         """
+        logger.debug("Received execute_sync request task_id=%s with trace_id=%s", req.task_id, req.trace_id)
+        logger.debug("Received execute request: %s", req)
         return await self._execute_main_(wait_for_completion=True, req=req)
 
 
@@ -170,17 +172,19 @@ class EndPoint(AutonomousEndPointBase):
         ユーザーは/statusエンドポイントを叩いてタスクの進捗や結果を取得する。   
         キャンセルを行う場合は、/cancelエンドポイントを叩く。
         """
+        logger.debug("Received execute_async request task_id=%s with trace_id=%s", req.task_id, req.trace_id)
         logger.debug("Received execute request: %s", req)
         return await self._execute_main_(wait_for_completion=False, req=req)
 
     # タスクが使用しているワークスペースのパスを返すエンドポイント
     async def workspace_path(
         self,
-        task_id: Annotated[str, Path(description="task id")],
+        task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")],
     ) -> Dict[str, str]:
         """
         タスクのワークスペースパス取得用エンドポイント。SVはこれを叩いてタスクのワークスペースパスを取得する。
         """
+        logger.debug("Received workspace_path request for task_id=%s", task_id)
         task_status = await TaskManager.get_status(task_id)
         if not task_status:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -188,7 +192,7 @@ class EndPoint(AutonomousEndPointBase):
 
     async def status(
         self,
-        task_id: Annotated[str, Path(description="task id")],
+        task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")],
         tail: Annotated[
             Optional[int],
             Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
@@ -199,11 +203,13 @@ class EndPoint(AutonomousEndPointBase):
          tailはログの末尾n行を取得するためのパラメータ。
          既存のTaskStatus(JSONをそのまま返す。SV側は status/sub_status を見て完了判定する。
         """
+        logger.debug("Received status request for task_id=%s with tail=%s", task_id, tail)
+
         return await TaskManager.get_status(task_id, tail=tail)
 
     async def get_result(
         self,
-        task_id: Annotated[str, Path(description="task id")],
+        task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")],
         tail: Annotated[
             Optional[int],
             Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
@@ -215,15 +221,17 @@ class EndPoint(AutonomousEndPointBase):
 
          注意: task_id は必須です。execute のレスポンスで返る task_id を指定してください。
         """
+        logger.debug("Received get_result request for task_id=%s with tail=%s", task_id, tail)
         status = await TaskManager.get_status(task_id, tail=tail)
         if not status:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"stdout": status.stdout, "stderr": status.stderr}
 
-    async def cancel(self, task_id: Annotated[str, Path(description="task id")]) -> CancelResponse:
+    async def cancel(self, task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")]) -> CancelResponse:
         """
          タスクキャンセル用エンドポイント。SVはこれを叩いてタスクのキャンセルを指示する。
         """
+        logger.debug("Received cancel request for task_id=%s", task_id)
         res: Any = await TaskManager.cancel_task(task_id)
         if isinstance(res, dict):
             return CancelResponse(**res)

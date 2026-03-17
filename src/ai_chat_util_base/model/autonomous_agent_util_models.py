@@ -176,7 +176,7 @@ class ExecuteRequest(BaseModel):
     trace_id: Optional[str] = Field(default=None, description="SV実行全体の相関ID")
 
 class ExecuteResponse(BaseModel):
-    task_id: str
+    task_id: str = Field(..., description="実行されたタスクのID")
 
 
 class HealthzResponse(BaseModel):

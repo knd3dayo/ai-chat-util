@@ -19,9 +19,9 @@ llm:
   # Optional: API key reference (secret).
   # - Secrets themselves must NOT be written in config.yml.
   # - Use env reference format:
-  #     api_key: os.environ/OPENAI_API_KEY
+  #     api_key: os.environ/LLM_API_KEY
   #   (provider=azure -> AZURE_API_KEY, provider=anthropic -> ANTHROPIC_API_KEY)
-  api_key: null
+  api_key: os.environ/LLM_API_KEY
 
   # Model name (or Azure deployment name) for chat completion
   completion_model: gpt-5

@@ -33,6 +33,9 @@ class LLMSection(BaseModel):
     # non-secret api version (mainly for Azure OpenAI via LiteLLM)
     api_version: str | None = Field(default=None)
 
+    # llm_base_model is optional override for LLM用のベースモデル指定（例: gpt-4o）。次のエラーメッセージの回避用。Could not identify azure model. Set azure 'base_model' for accurate max tokens, cost tracking, etc.- https://docs.litellm.ai/docs/proxy/cost_tracking#spend-tracking-for-azure-openai-models
+    base_model: str | None = Field(default=None)
+
     # secret/non-secret mixed: extra headers for outbound LLM requests.
     # For safety, values must be provided via env reference in ai-chat-util-config.yml and are resolved at load time.
     extra_headers: dict[str, str] | None = Field(default=None)
@@ -73,6 +76,9 @@ class LLMSection(BaseModel):
             "model_name": self.completion_model,
             "litellm_params": completion_litellm_dict
         }
+        # llm_base_model is optional override for LLM用のベースモデル指定（例: gpt-4o）。次のエラーメッセージの回避用。Could not identify azure model. Set azure 'base_model' for accurate max tokens, cost tracking, etc.- https://docs.litellm.ai/docs/proxy/cost_tracking#spend-tracking-for-azure-openai-models
+        if self.base_model:
+            completion_model_dict["model_info"] = { "base_model": self.base_model }
 
         embedding_litellm_dict = {}
         embedding_litellm_dict["model"] = f"{self.provider}/{self.embedding_model}"
@@ -87,7 +93,8 @@ class LLMSection(BaseModel):
             "model_name": self.embedding_model,
             "litellm_params": embedding_litellm_dict
         }
-
+        if self.base_model:
+            embedding_model_dict["model_info"] = { "base_model": self.base_model }
         models: list[dict[str, Any]] = []
         if self.completion_model:
             models.append(completion_model_dict)

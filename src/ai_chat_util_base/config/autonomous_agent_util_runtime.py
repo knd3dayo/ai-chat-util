@@ -134,6 +134,8 @@ class LLMSection(BaseModel):
     # secret API key (must be provided as env reference or env outside YAML)
     api_key: str | None = Field(default=None)
 
+    # llm_base_model is optional override for LLM用のベースモデル指定（例: gpt-4o）。次のエラーメッセージの回避用。Could not identify azure model. Set azure 'base_model' for accurate max tokens, cost tracking, etc.- https://docs.litellm.ai/docs/proxy/cost_tracking#spend-tracking-for-azure-openai-models
+    base_model: str | None = Field(default=None)
 
 class ComposeSection(BaseModel):
     directory: str = Field(default=".")

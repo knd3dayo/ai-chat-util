@@ -15,6 +15,12 @@ llm:
   # OPTIONAL (secret): reference env var only (no literals)
   # api_key: os.environ/LLM_API_KEY
 
+  # Optional: Base model name for LiteLLM pricing lookup / cost tracking.
+  # - For Azure OpenAI deployments, `llm.model` is often your deployment name.
+  # - Set `base_model` to the underlying model key (e.g. gpt-5, azure/gpt-4-1106-preview).
+  # - This can silence LiteLLM logs like: "Could not identify azure model".
+  base_model: null
+
 compose:
   directory: .
   file: docker-compose.yml

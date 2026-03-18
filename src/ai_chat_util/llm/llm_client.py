@@ -167,24 +167,15 @@ class LLMClientUtil:
     ) -> ChatResponse:
         messages = chat_request.chat_history.messages
         message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
-        params = {}
-        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
+        # NOTE:
+        # - MCP 経由の実行は LiteLLM Router(model_list=...) を使う。
+        # - MCP なしの直接呼び出しも同じ Router 経由に寄せることで、
+        #   model_info.base_model（Azureのpricing lookup/cost tracking用）など
+        #   model_list 側の設定が確実に反映される。
+        from litellm.router import Router
+
         provider = (llm_config.llm.provider or "").lower()
-        api_key = llm_config.llm.api_key
-        params["api_key"] = api_key
-        params["model"] = f"{llm_config.llm.provider}/{llm_config.llm.completion_model}"
-        params["messages"] = message_dict_list
-        if llm_config.llm.base_url:
-            params["base_url"] = llm_config.llm.base_url
-        if llm_config.llm.api_version:
-            params["api_version"] = llm_config.llm.api_version
-        extra_headers = getattr(llm_config.llm, "extra_headers", None)
-        if extra_headers:
-            filtered = {
-                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
-            }
-            if filtered:
-                params["extra_headers"] = filtered
+        router = Router(model_list=llm_config.llm.create_litellm_model_list())
 
         # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
         kwargs.setdefault("timeout", default_timeout_seconds)
@@ -201,22 +192,23 @@ class LLMClientUtil:
         logger.debug(
             "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
             provider,
-            params.get("model"),
+            llm_config.llm.completion_model,
             len(message_dict_list),
             kwargs.get("timeout"),
         )
         try:
             response = await asyncio.wait_for(
-                litellm.acompletion(
-                    **params,
-                    **kwargs
+                router.acompletion(
+                    model=llm_config.llm.completion_model,
+                    messages=message_dict_list,
+                    **kwargs,
                 ),
                 timeout=hard_timeout,
             )
         except asyncio.TimeoutError as e:
             raise RuntimeError(
                 "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
+                f" timeout={hard_timeout}s provider={provider} model={llm_config.llm.completion_model}.\n"
                 "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
             ) from e
         logger.debug("LLM completion response type: %s", type(response))

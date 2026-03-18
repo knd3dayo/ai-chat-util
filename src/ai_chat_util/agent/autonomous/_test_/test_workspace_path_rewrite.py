@@ -5,18 +5,27 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
 from fastapi.testclient import TestClient
+import yaml
 
-from .._api_.api_server import create_app
-from ..core.endpoint import EndPoint
+from ai_chat_util.agent.autonomous._api_.api_server import create_app
+from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
 from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
-from ai_chat_util_base.config import autonomous_agent_util_runtime as runtime_mod
+from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
 
 endpoint = EndPoint() 
 
 def _reset_runtime(monkeypatch, cfg_path: Path) -> None:
     monkeypatch.setenv("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
-    runtime_mod._runtime_state = None  # type: ignore[attr-defined]
-    runtime_mod.init_runtime(None)
+    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_autonomous_runtime(None)
+
+
+def _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path: Path) -> None:
+    # Integration mode: resolve autonomous settings from ai-chat-util-config.yml.
+    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
+    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_autonomous_runtime(None)
 
 
 def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
@@ -40,6 +49,28 @@ paths:
     # Non-matching path should pass through
     raw2 = "/tmp/other"
     assert endpoint.rewrite_workspace_path(raw2) == raw2
+
+
+def test_rewrite_workspace_path_pure_from_ai_chat_util_config_embedded(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    to_prefix = (tmp_path / "executor_workspaces").as_posix()
+
+    data = {
+        "autonomous_agent_util": {
+            "paths": {
+                "workspace_path_rewrites": [
+                    {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                ]
+            }
+        }
+    }
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path)
+
+    raw = "/srv/ai_platform/workspaces/e2e_sv_ws_1"
+    rewritten = endpoint.rewrite_workspace_path(raw)
+    assert rewritten == f"{to_prefix}/e2e_sv_ws_1"
 
 
 @dataclass
@@ -110,8 +141,8 @@ paths:
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from  ..core import endpoint as endpoint_mod
-    from  ..core import task_manager as tm_mod
+    from ai_chat_util.agent.autonomous.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.autonomous.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 
@@ -141,7 +172,7 @@ paths:
     assert res.status_code == 200
 
     st = store["t1"]
-    assert st.workspace_path == f"{to_prefix}/e2e_sv_ws_1"
+    assert Path(st.workspace_path).as_posix() == f"{to_prefix}/e2e_sv_ws_1"
     assert st.metadata.get("requested_workspace_path") == "/srv/ai_platform/workspaces/e2e_sv_ws_1"
     assert st.metadata.get("rewritten_workspace_path") == f"{to_prefix}/e2e_sv_ws_1"
     assert st.metadata.get("workspace_path") == f"{to_prefix}/e2e_sv_ws_1"

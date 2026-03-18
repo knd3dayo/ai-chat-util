@@ -16,7 +16,7 @@ from ai_chat_util_base.model.autonomous_agent_util_models import (
 )
 
 from ai_chat_util_base.model.request_headers import RequestHeaders, get_current_request_headers
-from ai_chat_util_base.config.autonomous_agent_util_runtime import get_runtime_config
+from ai_chat_util_base.config.ai_chat_util_runtime import get_autonomous_runtime_config
 from ai_chat_util_base.autonomous.abstract_endpoint import AutonomousEndPointBase
 
 from ..util.logging import get_application_logger
@@ -34,7 +34,7 @@ class EndPoint(AutonomousEndPointBase):
         different absolute paths.
         """
         try:
-            rules = get_runtime_config().paths.workspace_path_rewrites
+            rules = get_autonomous_runtime_config().paths.workspace_path_rewrites
         except Exception:
             return workspace_path
 
@@ -69,7 +69,7 @@ class EndPoint(AutonomousEndPointBase):
             raise HTTPException(status_code=400, detail="workspace_path must be an absolute path")
 
         # 任意だが、パス注入対策として許可ルート配下に制限できる
-        allowed_root = get_runtime_config().paths.executor_allowed_workspace_root
+        allowed_root = get_autonomous_runtime_config().paths.executor_allowed_workspace_root
         if allowed_root:
             root = pathlib.Path(allowed_root).expanduser().resolve()
             resolved = p.resolve()

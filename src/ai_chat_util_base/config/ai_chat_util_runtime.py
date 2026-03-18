@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 CONFIG_ENV_VAR = "AI_CHAT_UTIL_CONFIG"
@@ -528,3 +528,370 @@ def _configure_litellm(config: AiChatUtilConfig) -> None:
     if config.llm.api_version:
         # LiteLLM uses api_version for some providers (e.g. Azure).
         litellm.api_version = config.llm.api_version
+
+
+# =====================
+# Autonomous Agent Util Runtime (embedded)
+# =====================
+
+AUTONOMOUS_CONFIG_ENV_VAR = "AUTONOMOUS_AGENT_UTIL_CONFIG"
+AUTONOMOUS_DEFAULT_CONFIG_FILENAME = "autonomous-agent-util-config.yml"
+AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME = DEFAULT_CONFIG_FILENAME
+
+
+class AutonomousAgentUtilLoggingSection(BaseModel):
+    level: str = Field(default="INFO")
+    file: str | None = Field(default=None)
+
+
+class AutonomousAgentUtilLLMSection(BaseModel):
+    provider: str = Field(default="openai")
+    model: str = Field(default="gpt-4o")
+
+    # non-secret base url/endpoint
+    base_url: str | None = Field(default=None)
+
+    # non-secret: override LLM_BASE_URL passed into container
+    base_url_in_container: str | None = Field(default=None)
+
+    # secret API key (must be provided as env reference: os.environ/ENV_VAR)
+    api_key: str | None = Field(default=None)
+
+    # optional override for cost tracking etc.
+    base_model: str | None = Field(default=None)
+
+
+class AutonomousComposeSection(BaseModel):
+    directory: str = Field(default=".")
+    file: str = Field(default="docker-compose.yml")
+    service_name: str = Field(default="executor-service")
+    command: str = Field(default="opencode run")
+
+
+class AutonomousBackendSection(BaseModel):
+    task_backend: Literal["docker", "compose", "subprocess", "process"] = Field(default="process")
+
+
+class AutonomousMonitorSection(BaseModel):
+    disable_detach_monitor: bool = Field(default=False)
+    detach_monitor_interval: float = Field(default=2.0, ge=0.1)
+    debug_container: bool = Field(default=False)
+
+
+class WorkspacePathRewriteRule(BaseModel):
+    """Rewrite inbound workspace_path before validation."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_prefix: str = Field(..., alias="from")
+    to_prefix: str = Field(..., alias="to")
+
+    @model_validator(mode="after")
+    def _validate_prefixes(self) -> "WorkspacePathRewriteRule":
+        if not (isinstance(self.from_prefix, str) and self.from_prefix.strip()):
+            raise ValueError("paths.workspace_path_rewrites[].from must be a non-empty string")
+        if not (isinstance(self.to_prefix, str) and self.to_prefix.strip()):
+            raise ValueError("paths.workspace_path_rewrites[].to must be a non-empty string")
+        if not os.path.isabs(self.from_prefix.strip()):
+            raise ValueError("paths.workspace_path_rewrites[].from must be an absolute path prefix")
+        if not os.path.isabs(self.to_prefix.strip()):
+            raise ValueError("paths.workspace_path_rewrites[].to must be an absolute path prefix")
+        return self
+
+
+class AutonomousPathsSection(BaseModel):
+    workspace_root: str = Field(default="/tmp/autonomous_agent_tasks")
+    host_projects_root: str = Field(default="/home/user/ai-platform/data/projects")
+    executor_allowed_workspace_root: str | None = Field(default=None)
+    workspace_path_rewrites: list[WorkspacePathRewriteRule] = Field(default_factory=list)
+
+
+class AutonomousHostSection(BaseModel):
+    uid: int | None = Field(default=None)
+    gid: int | None = Field(default=None)
+
+
+class AutonomousSubprocessSection(BaseModel):
+    command: str = Field(default="opencode run")
+
+
+class AutonomousAgentUtilConfig(BaseModel):
+    llm: AutonomousAgentUtilLLMSection = Field(default_factory=AutonomousAgentUtilLLMSection)
+    compose: AutonomousComposeSection = Field(default_factory=AutonomousComposeSection)
+    backend: AutonomousBackendSection = Field(default_factory=AutonomousBackendSection)
+    monitor: AutonomousMonitorSection = Field(default_factory=AutonomousMonitorSection)
+    paths: AutonomousPathsSection = Field(default_factory=AutonomousPathsSection)
+    host: AutonomousHostSection = Field(default_factory=AutonomousHostSection)
+    subprocess: AutonomousSubprocessSection = Field(default_factory=AutonomousSubprocessSection)
+    logging: AutonomousAgentUtilLoggingSection = Field(default_factory=AutonomousAgentUtilLoggingSection)
+
+    @model_validator(mode="after")
+    def _validate_llm_secret_policy(self) -> "AutonomousAgentUtilConfig":
+        # Allow only env references at validation time; init_autonomous_runtime resolves it later.
+        if self.llm.api_key and self.llm.api_key.startswith(_ENV_REF_PREFIX):
+            return self
+        if self.llm.api_key:
+            raise ValueError(
+                "llm.api_key は秘密情報のため autonomous-agent-util-config.yml に直書きできません。"
+                "'llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
+            )
+        return self
+
+    def get_compose_paths(self) -> list[str]:
+        raw = (self.compose.file or "").strip()
+        if not raw:
+            return [str(Path(self.compose.directory) / "docker-compose.yml")]
+
+        parts = [p.strip() for p in raw.split(os.pathsep) if p.strip()]
+        if len(parts) == 1 and "," in parts[0]:
+            parts = [p.strip() for p in parts[0].split(",") if p.strip()]
+
+        paths: list[str] = []
+        for part in parts:
+            if os.path.isabs(part):
+                paths.append(part)
+            else:
+                paths.append(str(Path(self.compose.directory) / part))
+        return paths
+
+
+class _AutonomousRuntimeState(BaseModel):
+    config_path: Path
+    config: AutonomousAgentUtilConfig
+
+
+_autonomous_runtime_state: _AutonomousRuntimeState | None = None
+
+
+def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
+    tried: list[Path] = []
+
+    if cli_config_path:
+        candidate = _abspath(cli_config_path)
+        tried.append(candidate)
+        if not candidate.is_file():
+            raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
+        os.environ[AUTONOMOUS_CONFIG_ENV_VAR] = str(candidate)
+        return candidate
+
+    env_path = os.getenv(AUTONOMOUS_CONFIG_ENV_VAR)
+    if env_path:
+        candidate = _abspath(env_path)
+        tried.append(candidate)
+        if not candidate.is_file():
+            raise ConfigError(
+                f"環境変数 {AUTONOMOUS_CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}"
+            )
+        return candidate
+
+    # Integration mode: allow resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
+    ai_cfg_env = os.getenv(CONFIG_ENV_VAR)
+    if ai_cfg_env:
+        candidate = _abspath(ai_cfg_env)
+        tried.append(candidate)
+        if not candidate.is_file():
+            raise ConfigError(f"環境変数 {CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}")
+        return candidate
+
+    cwd_candidate = (Path.cwd() / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
+    tried.append(cwd_candidate)
+    if cwd_candidate.is_file():
+        return cwd_candidate
+
+    # Integration mode: allow ai-chat-util-config.yml in CWD.
+    cwd_ai_candidate = (Path.cwd() / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
+    tried.append(cwd_ai_candidate)
+    if cwd_ai_candidate.is_file():
+        return cwd_ai_candidate
+
+    project_root = _default_project_root()
+    if project_root is not None:
+        root_candidate = (project_root / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
+        tried.append(root_candidate)
+        if root_candidate.is_file():
+            return root_candidate
+
+        root_ai_candidate = (project_root / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
+        tried.append(root_ai_candidate)
+        if root_ai_candidate.is_file():
+            return root_ai_candidate
+
+    tried_str = "\n".join(f"- {p}" for p in tried)
+    raise ConfigError(
+        "設定ファイルが見つかりません。以下を探索しました:\n"
+        + tried_str
+        + (
+            f"\n\n対処: {AUTONOMOUS_CONFIG_ENV_VAR} か {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
+            f"カレント/プロジェクトルートに {AUTONOMOUS_DEFAULT_CONFIG_FILENAME}（互換）または {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME}（統合）を配置してください。"
+        )
+    )
+
+
+def _resolve_autonomous_llm_api_key_in_place(
+    config: AutonomousAgentUtilConfig, *, config_path: Path
+) -> None:
+    api_key_value = config.llm.api_key
+    if not api_key_value:
+        return
+    if not isinstance(api_key_value, str):
+        raise ConfigError(f"llm.api_key は文字列である必要があります: {config_path} (llm.api_key)")
+    if not api_key_value.startswith(_ENV_REF_PREFIX):
+        # Should be guarded by model validation, but keep a clear error.
+        raise ConfigError(
+            "llm.api_key は秘密情報のため設定ファイルに直書きできません。"
+            "'llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
+        )
+
+    resolved = _resolve_env_ref(api_key_value, config_path=config_path, field_path="llm.api_key")
+    config.llm.api_key = resolved
+
+
+def _configure_autonomous_python_logging(config: AutonomousAgentUtilConfig) -> None:
+    import logging
+    import re
+
+    level_name = (config.logging.level or "INFO").upper()
+    level = logging.getLevelName(level_name)
+    if not isinstance(level, int):
+        level = logging.INFO
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Reset handlers to avoid duplicates across repeated init.
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
+
+    class _RedactingFormatter(logging.Formatter):
+        _replacements: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(r"(api_key\s*=\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
+            (re.compile(r"(api_key\s*:\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
+            (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s\"]+", re.IGNORECASE), r"\1***"),
+            (re.compile(r"\bsk-[A-Za-z0-9_-]{10,}\b"), "sk-***"),
+        ]
+
+        def format(self, record: logging.LogRecord) -> str:
+            s = super().format(record)
+            for pattern, repl in self._replacements:
+                s = pattern.sub(repl, s)
+            return s
+
+    formatter: logging.Formatter = _RedactingFormatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
+
+    stream = logging.StreamHandler()
+    stream.setLevel(level)
+    stream.setFormatter(formatter)
+    root.addHandler(stream)
+
+    if config.logging.file:
+        fh = logging.FileHandler(config.logging.file, encoding="utf-8")
+        fh.setLevel(level)
+        fh.setFormatter(formatter)
+        root.addHandler(fh)
+
+    noisy_loggers = {
+        "litellm": logging.WARNING,
+        "LiteLLM": logging.WARNING,
+        "openai": logging.WARNING,
+        "aiosqlite": logging.WARNING,
+        "httpx": logging.WARNING,
+        "httpcore": logging.WARNING,
+        "aiohttp": logging.WARNING,
+        "urllib3": logging.WARNING,
+        "asyncio": logging.WARNING,
+        "sse_starlette": logging.WARNING,
+    }
+    for name, lvl in noisy_loggers.items():
+        logging.getLogger(name).setLevel(lvl)
+
+
+def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
+    global _autonomous_runtime_state
+
+    load_dotenv()
+
+    resolved = resolve_autonomous_config_path(config_path)
+    raw_root = _load_yaml_config(resolved)
+
+    raw: dict[str, Any]
+    embedded = raw_root.get("autonomous_agent_util", "__missing__")
+    if embedded != "__missing__":
+        if embedded is None:
+            embedded = {}
+        if not isinstance(embedded, dict):
+            raise ConfigError(
+                f"autonomous_agent_util は mapping(dict) である必要があります: {resolved} (autonomous_agent_util)"
+            )
+
+        inherited = dict(embedded)
+        root_llm = raw_root.get("llm")
+        if isinstance(root_llm, dict):
+            inherited_llm = dict(inherited.get("llm") or {}) if isinstance(inherited.get("llm"), dict) else {}
+            for k in ("provider", "base_url", "api_key", "base_model"):
+                if k not in inherited_llm and k in root_llm:
+                    inherited_llm[k] = root_llm.get(k)
+            if inherited_llm:
+                inherited["llm"] = inherited_llm
+        raw = inherited
+    else:
+        llm = raw_root.get("llm")
+        llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
+        root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
+        path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
+        if llm_looks_ai or root_looks_ai or path_looks_ai:
+            raise ConfigError(
+                "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
+                f"対処: {resolved} に autonomous_agent_util: セクションを追加するか、互換の {AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+            )
+        raw = raw_root
+
+    for section_key in (
+        "llm",
+        "compose",
+        "backend",
+        "monitor",
+        "paths",
+        "host",
+        "subprocess",
+        "logging",
+    ):
+        if raw.get(section_key, "__missing__") is None:
+            raw[section_key] = {}
+
+    try:
+        config = AutonomousAgentUtilConfig.model_validate(raw)
+    except Exception as e:
+        raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
+
+    _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
+
+    _autonomous_runtime_state = _AutonomousRuntimeState(config_path=resolved, config=config)
+    _configure_autonomous_python_logging(config)
+    return config
+
+
+def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
+    if _autonomous_runtime_state is None:
+        return init_autonomous_runtime(None)
+    return _autonomous_runtime_state.config
+
+
+def get_autonomous_runtime_config_path() -> Path:
+    if _autonomous_runtime_state is None:
+        init_autonomous_runtime(None)
+    assert _autonomous_runtime_state is not None
+    return _autonomous_runtime_state.config_path
+
+
+def apply_autonomous_logging_overrides(level: str | None = None, file: str | None = None) -> None:
+    cfg = get_autonomous_runtime_config()
+    effective = cfg.model_copy(deep=True)
+    if level:
+        effective.logging.level = level
+    if file:
+        effective.logging.file = file
+    _configure_autonomous_python_logging(effective)

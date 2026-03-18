@@ -19,7 +19,7 @@ from ..core.process_utils import kill_process_tree, pid_is_running
 from ..core.abstract_actions import AbstractActions
 from ..core.abstract_task_service import AbstractTaskService
 
-from ai_chat_util_base.config.autonomous_agent_util_runtime import get_runtime_config
+from ai_chat_util_base.config.ai_chat_util_runtime import get_autonomous_runtime_config
 
 from ..util.logging import get_application_logger
 
@@ -28,7 +28,7 @@ logger = get_application_logger()
 
 
 def _get_host_projects_root() -> pathlib.Path:
-    cfg = get_runtime_config()
+    cfg = get_autonomous_runtime_config()
     return pathlib.Path(cfg.paths.host_projects_root)
 
 class TaskManager:

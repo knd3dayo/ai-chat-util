@@ -14,7 +14,10 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from ..process_utils import kill_process_tree, popen_new_process_group_kwargs
 from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
-from ai_chat_util_base.config.autonomous_agent_util_runtime import get_runtime_config, get_runtime_config_path
+from ai_chat_util_base.config.ai_chat_util_runtime import (
+    get_autonomous_runtime_config,
+    get_autonomous_runtime_config_path,
+)
 
 logger = get_application_logger()
 
@@ -49,7 +52,7 @@ class SubprocessTaskService(AbstractTaskService):
         return self.runner
 
     def spawn_detached_monitor(self, task_id: str, timeout: int) -> None:
-        cfg = get_runtime_config()
+        cfg = get_autonomous_runtime_config()
         if cfg.monitor.disable_detach_monitor:
             return
 
@@ -57,9 +60,11 @@ class SubprocessTaskService(AbstractTaskService):
         interval = float(cfg.monitor.detach_monitor_interval)
 
         env = os.environ.copy()
-        cfg_path = get_runtime_config_path()
+        cfg_path = get_autonomous_runtime_config_path()
         if cfg_path:
             env.setdefault("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
+            if cfg_path.name == "ai-chat-util-config.yml":
+                env.setdefault("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 
         cmd = [
             SubprocessCodingAgentRunner.resolve_python_executable(),

@@ -4,13 +4,13 @@ import logging
 
 import pytest
 
-from ai_chat_util_base.config.autonomous_agent_util_runtime import AutonomousAgentUtilConfig
-from ai_chat_util_base.config import autonomous_agent_util_runtime as runtime_mod
+from ai_chat_util_base.config.ai_chat_util_runtime import AutonomousAgentUtilConfig
+from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
 
 
 def test_logging_redacts_common_secrets(capsys: pytest.CaptureFixture[str]) -> None:
     cfg = AutonomousAgentUtilConfig.model_validate({"logging": {"level": "INFO"}})
-    runtime_mod._configure_python_logging(cfg)
+    runtime_mod._configure_autonomous_python_logging(cfg)
 
     secret_key = "sk-THIS_SHOULD_NOT_APPEAR_1234567890"
 

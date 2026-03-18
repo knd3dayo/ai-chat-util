@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from ..core.endpoint import EndPoint
 from ai_chat_util_base.model.autonomous_agent_util_models import CancelResponse, ExecuteResponse, HealthzResponse, TaskStatus
 from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers, get_current_request_headers
-from ai_chat_util_base.config.autonomous_agent_util_runtime import init_runtime
+from ai_chat_util_base.config.ai_chat_util_runtime import init_autonomous_runtime
 
 
 logger = logging.getLogger(__name__)
@@ -86,15 +86,18 @@ def _summarize_http_request(request: Request, *, body_summary: dict[str, Any] | 
     }
 
 
-def create_app(*, sync_mode: bool = False) -> FastAPI:
+def create_app(*, sync_mode: bool = False, init_config: bool = True) -> FastAPI:
     """Create FastAPI app.
 
     `sync_mode=False` (default): /execute returns immediately (async execution).
     `sync_mode=True`: /execute blocks until task completion (sync execution).
     """
 
-    # Ensure runtime config is initialized for request handling.
-    init_runtime(None)
+    # NOTE:
+    # Avoid initializing runtime at module import time. Some contexts (pytest collection,
+    # uvicorn import-style usage) import this module before env/config is set.
+    if init_config:
+        init_autonomous_runtime(None)
 
     app = FastAPI(title="Autonomous Agent Executor API", version="0.1")
 
@@ -165,7 +168,8 @@ def create_app(*, sync_mode: bool = False) -> FastAPI:
 
 
 # Default app instance for uvicorn import-style usage.
-app = create_app(sync_mode=False)
+# Runtime config is initialized on actual execution paths (CLI __main__ or explicit create_app(init_config=True)).
+app = create_app(sync_mode=False, init_config=False)
 
 if __name__ == "__main__":
     import argparse
@@ -177,8 +181,8 @@ if __name__ == "__main__":
         type=str,
         default="",
         help=(
-            "Path to autonomous-agent-util-config.yml. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
-            "or searched from CWD/project root."
+            "Path to autonomous-agent-util config YAML. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
+            "or AI_CHAT_UTIL_CONFIG (ai-chat-util-config.yml with autonomous_agent_util section), or searched from CWD/project root."
         ),
     )
     parser.add_argument("-p", "--port", type=int, default=7101)
@@ -190,6 +194,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    init_runtime(args.config or None)
+    init_autonomous_runtime(args.config or None)
 
     uvicorn.run(create_app(sync_mode=args.sync_mode), host=args.host, port=args.port)

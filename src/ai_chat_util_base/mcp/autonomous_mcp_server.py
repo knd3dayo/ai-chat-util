@@ -9,7 +9,10 @@ import inspect
 from typing import Callable
 import time
 
-from ai_chat_util_base.config.autonomous_agent_util_runtime import init_runtime, apply_logging_overrides
+from ai_chat_util_base.config.ai_chat_util_runtime import (
+	init_autonomous_runtime,
+	apply_autonomous_logging_overrides,
+)
 from fastmcp import FastMCP, Context
 
 from ..autonomous.abstract_endpoint import AutonomousEndPointBase
@@ -68,8 +71,8 @@ class AutonomousMCPServer:
 			type=str,
 			default="",
 			help=(
-				"Path to autonomous-agent-util-config.yml. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
-				"or searched from CWD/project root."
+				"Path to autonomous-agent-util config YAML. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
+				"or AI_CHAT_UTIL_CONFIG (ai-chat-util-config.yml with autonomous_agent_util section), or searched from CWD/project root."
 			),
 		)
 		parser.add_argument(
@@ -229,9 +232,9 @@ class AutonomousMCPServer:
 
 	async def main(self, endpoint: AutonomousEndPointBase) -> None:
 		args = self.parse_args()
-		init_runtime(args.config or None)
+		init_autonomous_runtime(args.config or None)
 		if args.log_level:
-			apply_logging_overrides(level=args.log_level)
+			apply_autonomous_logging_overrides(level=args.log_level)
 
 		mcp = FastMCP("autonomous_agent_executor")
 		self.prepare_mcp(endpoint, mcp, args.tools, args.sync_mode)

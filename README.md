@@ -31,7 +31,7 @@
 
 ### 🤖 自律エージェント実行（autonomous-agent-util）
 - 自律エージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
-- 設定は `autonomous-agent-util-config.yml`、秘密情報は `.env` / 環境変数で管理。
+- 設定は `ai-chat-util-config.yml`（`autonomous_agent_util:` セクションで統合）、秘密情報は `.env` / 環境変数で管理。
 
 ---
 
@@ -558,7 +558,7 @@ uvicorn ai_chat_util.api.api_server:app
 - **MCP サーバ**（fastmcp）: `execute/status/cancel/healthz` 等のツールを提供
 - **CLI**（Typer）: タスクの起動・一覧・状態確認・キャンセル
 
-本機能では **非秘匿の設定を `autonomous-agent-util-config.yml` に集約**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
+本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（`autonomous_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
 
 ---
 
@@ -584,18 +584,19 @@ opencode --version
 
 ---
 
-## 設定（autonomous-agent-util-config.yml）
+## 設定（autonomous-agent-util: を ai-chat-util-config.yml に統合）
 
-### autonomous-agent-util-config.yml の探索・指定方法
+### 設定ファイルの探索・指定方法
 
-設定ファイルの解決順は以下です。
+設定ファイルの解決順は以下です（推奨: `ai-chat-util-config.yml` に統合）。
 
 1. CLI/サーバ起動引数 `--config`
-2. 環境変数 `AUTONOMOUS_AGENT_UTIL_CONFIG`
-3. カレントディレクトリの `./autonomous-agent-util-config.yml`
-4. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./autonomous-agent-util-config.yml`
-
-リポジトリ直下にサンプルの `autonomous-agent-util-config.yml` を置いてあります。
+2. 環境変数 `AUTONOMOUS_AGENT_UTIL_CONFIG`（互換: autonomous-agent-util-config.yml）
+3. 環境変数 `AI_CHAT_UTIL_CONFIG`（ai-chat-util-config.yml。`autonomous_agent_util:` セクションを読む）
+4. カレントディレクトリの `./autonomous-agent-util-config.yml`（互換）
+5. カレントディレクトリの `./ai-chat-util-config.yml`（統合）
+6. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./autonomous-agent-util-config.yml`（互換）
+7. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./ai-chat-util-config.yml`（統合）
 
 ### 秘密情報（Secrets）の方針
 
@@ -646,7 +647,7 @@ uv run -m ai_chat_util.agent.autonomous._api_.api_server --host 127.0.0.1 -p 710
 `--config` で明示する場合:
 
 ```bash
-uv run -m ai_chat_util.agent.autonomous._api_.api_server --config ./autonomous-agent-util-config.yml --host 127.0.0.1 -p 7101
+uv run -m ai_chat_util.agent.autonomous._api_.api_server --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
 ```
 
 実行（非同期）:
@@ -706,7 +707,7 @@ uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --mode http --host 127.0.
 `--config` を使う場合:
 
 ```bash
-uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --config ./autonomous-agent-util-config.yml --mode http --host 127.0.0.1 -p 7102
+uv run -m ai_chat_util.agent.autonomous.mcp.mcp_server --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
 ```
 
 公開されるツール（代表）:
@@ -778,7 +779,7 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --help
 実行:
 
 ```bash
-uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml run \
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-util-config.yml run \
   "Hello. Please respond with a single word and exit." \
   --wait
 ```
@@ -786,7 +787,7 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-
 非同期（task_id を返して終了）:
 
 ```bash
-uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml run \
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-util-config.yml run \
   "Hello" \
   --no-wait
 ```
@@ -794,7 +795,7 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-
 状態確認:
 
 ```bash
-uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-agent-util-config.yml status <task_id>
+uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-util-config.yml status <task_id>
 ```
 
 ---
@@ -806,11 +807,11 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-
 - `.env` または環境変数で API キー（例: `LLM_API_KEY`）を設定してください
 - `autonomous-agent-util-config.yml` に `llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
 
-### `autonomous-agent-util-config.yml が見つからない`
+### 設定ファイルが見つからない
 
 - `--config` を指定する
-- もしくは `AUTONOMOUS_AGENT_UTIL_CONFIG` を設定する
-- もしくは `./autonomous-agent-util-config.yml` をカレント/プロジェクトルートに置く
+- もしくは `AI_CHAT_UTIL_CONFIG` / `AUTONOMOUS_AGENT_UTIL_CONFIG` を設定する
+- もしくは `./ai-chat-util-config.yml`（統合）または `./autonomous-agent-util-config.yml`（互換）をカレント/プロジェクトルートに置く
 
 ### `workspace_path must be an absolute path`
 
@@ -820,5 +821,5 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./autonomous-
 
 ## 開発メモ
 
-- 設定ローダは `src/ai_chat_util_base/config/autonomous_agent_util_runtime.py` にあります
-- 設定は `autonomous-agent-util-config.yml` を優先し、環境変数は secrets（`.env` 含む）の供給にのみ使う設計です
+- 設定ローダは `src/ai_chat_util_base/config/ai_chat_util_runtime.py` にあります（ai-chat-util / autonomous-agent-util を同梱）
+- 設定は `ai-chat-util-config.yml` へ統合可能で、環境変数は secrets（`.env` 含む）の供給にのみ使う設計です

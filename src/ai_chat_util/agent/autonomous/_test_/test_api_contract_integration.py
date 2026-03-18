@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from fastapi.testclient import TestClient
 
-from .._api_.api_server import create_app
+from ai_chat_util.agent.autonomous._api_.api_server import create_app
 from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
 
 
@@ -73,8 +73,8 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     fake_service = _FakeTaskService(store=store)
 
     # Patch endpoint dependencies to avoid real backends / filesystem.
-    from ..core import endpoint as endpoint_mod
-    from ..core import task_manager as tm_mod
+    from ai_chat_util.agent.autonomous.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.autonomous.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

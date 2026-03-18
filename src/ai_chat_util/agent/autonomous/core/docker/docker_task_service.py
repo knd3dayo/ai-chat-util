@@ -15,7 +15,10 @@ from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
 
 from ...util.logging import get_application_logger
 from ..process_utils import popen_new_process_group_kwargs
-from ai_chat_util_base.config.autonomous_agent_util_runtime import get_runtime_config, get_runtime_config_path
+from ai_chat_util_base.config.ai_chat_util_runtime import (
+    get_autonomous_runtime_config,
+    get_autonomous_runtime_config_path,
+)
 
 logger = get_application_logger()
 
@@ -29,7 +32,7 @@ class DockerTaskService(AbstractTaskService):
 
     def spawn_detached_monitor(self, task_id: str, timeout: int) -> None:
         """wait=False の場合でも tasks_db.json が自動更新されるよう、別プロセスで monitor を起動する。"""
-        cfg = get_runtime_config()
+        cfg = get_autonomous_runtime_config()
         if cfg.monitor.disable_detach_monitor:
             return
 
@@ -38,9 +41,11 @@ class DockerTaskService(AbstractTaskService):
         interval = float(cfg.monitor.detach_monitor_interval)
 
         env = os.environ.copy()
-        cfg_path = get_runtime_config_path()
+        cfg_path = get_autonomous_runtime_config_path()
         if cfg_path:
             env.setdefault("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
+            if cfg_path.name == "ai-chat-util-config.yml":
+                env.setdefault("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 
         cmd = [
             sys.executable,
@@ -161,7 +166,7 @@ class DockerTaskService(AbstractTaskService):
     @classmethod
     async def monitor_container(cls, container: Container, runner: AbstractAgentRunner, timeout: int) -> AsyncGenerator[TaskStatus, None]:
         # debug用: container設定/引数は秘匿情報(ENV)を含みうるため、デフォルトでは出さない。
-        if get_runtime_config().monitor.debug_container:
+        if get_autonomous_runtime_config().monitor.debug_container:
             cls.print_confg(container)
         try:
             loop = asyncio.get_running_loop()

@@ -40,9 +40,9 @@ def get_host_uid_gid(*, default_uid: int = 1000, default_gid: int = 1000) -> tup
 
     # Prefer YAML-defined overrides.
     try:
-        from ai_chat_util_base.config.autonomous_agent_util_runtime import get_runtime_config
+        from ai_chat_util_base.config.ai_chat_util_runtime import get_autonomous_runtime_config
 
-        cfg = get_runtime_config()
+        cfg = get_autonomous_runtime_config()
         if cfg.host.uid is not None:
             uid = int(cfg.host.uid)
         if cfg.host.gid is not None:

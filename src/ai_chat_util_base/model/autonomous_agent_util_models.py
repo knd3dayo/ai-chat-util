@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer
 import os
 import uuid
-from ..config.autonomous_agent_util_runtime import get_runtime_config
+from ..config.ai_chat_util_runtime import get_autonomous_runtime_config
 
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -25,7 +25,7 @@ class CodingAgentConfig(BaseModel):
 
     @classmethod
     def from_env(cls):
-        cfg = get_runtime_config()
+        cfg = get_autonomous_runtime_config()
         params = {
             "llm_provider": cfg.llm.provider,
             "llm_model": cfg.llm.model,
@@ -50,7 +50,7 @@ class ComposeConfig(BaseModel):
 
     @classmethod
     def from_env(cls):
-        cfg = get_runtime_config()
+        cfg = get_autonomous_runtime_config()
         params = {
             "compose_directory": cfg.compose.directory,
             "compose_file": cfg.compose.file,

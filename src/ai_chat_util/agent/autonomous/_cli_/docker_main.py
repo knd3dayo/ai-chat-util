@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 import time
 
-from ai_chat_util_base.config.autonomous_agent_util_runtime import init_runtime
+from ai_chat_util_base.config.ai_chat_util_runtime import init_autonomous_runtime
 
 # 内部パッケージのインポート
 from ..core.task_manager import TaskManager
@@ -24,13 +24,13 @@ def _global_options(
         None,
         "--config",
         help=(
-            "Path to autonomous-agent-util-config.yml. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
-            "or searched from CWD/project root."
+            "Path to autonomous-agent-util config YAML. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
+            "or AI_CHAT_UTIL_CONFIG (ai-chat-util-config.yml with autonomous_agent_util section), or searched from CWD/project root."
         ),
         envvar="AUTONOMOUS_AGENT_UTIL_CONFIG",
     ),
 ):
-    init_runtime(str(config) if config else None)
+    init_autonomous_runtime(str(config) if config else None)
 
 @app.command()
 def run(

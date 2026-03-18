@@ -6,7 +6,7 @@ import pytest
 from fastmcp import FastMCP
 
 from ai_chat_util_base.mcp.autonomous_mcp_server import AutonomousMCPServer
-from ..core.endpoint import EndPoint
+from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
 an_server = AutonomousMCPServer()
 endpoint = EndPoint()
 def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
@@ -26,6 +26,16 @@ def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
         assert "req" in params.get("required", [])
 
         req_schema = params["properties"]["req"]
+        # JSON Schema may either inline the object schema or use a $ref into $defs.
+        if "$ref" in req_schema:
+            ref = req_schema["$ref"]
+            assert isinstance(ref, str)
+            # e.g. "#/$defs/ExecuteRequest"
+            name = ref.split("/")[-1]
+            defs = params.get("$defs") or {}
+            assert name in defs
+            req_schema = defs[name]
+
         assert req_schema.get("type") == "object"
         # At minimum, prompt/workspace_path are required
         assert set(req_schema.get("required", [])) >= {"prompt", "workspace_path"}

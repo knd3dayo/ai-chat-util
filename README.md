@@ -110,9 +110,6 @@ llm:
 llm:
   provider: azure
   completion_model: <AZURE_DEPLOYMENT_NAME>
-  # Optional: underlying model key for LiteLLM pricing lookup / cost tracking.
-  # (Azureでは completion_model が deployment 名になることが多いため)
-  base_model: gpt-5
   base_url: https://<resource-name>.openai.azure.com/
   api_version: 2024-xx-xx
   api_key: os.environ/AZURE_API_KEY

@@ -17,8 +17,7 @@ class CodingAgentConfig(BaseModel):
     llm_model: str = Field(..., description="LLM model to use (e.g., gpt-4o)")
     llm_base_url: Optional[str] = Field(None, description="Base URL for the LLM API")
     workspace_root: str = Field(default="/tmp/autonomous_agent_tasks", description="Root directory for task workspaces")
-    llm_base_model: Optional[str] = Field(None, description="LLM用のベースモデル指定（例: gpt-4o）。次のエラーメッセージの回避用。Could not identify azure model. Set azure 'base_model' for accurate max tokens, cost tracking, etc.- https://docs.litellm.ai/docs/proxy/cost_tracking#spend-tracking-for-azure-openai-models")
-
+    
     @classmethod
     def set_env_file(cls, env_file: str):
         cls.env_file = env_file
@@ -31,7 +30,6 @@ class CodingAgentConfig(BaseModel):
             "llm_model": cfg.llm.model,
             "llm_base_url": cfg.llm.base_url,
             "workspace_root": cfg.paths.workspace_root,
-            "llm_base_model": cfg.llm.base_model,
         }
         return cls(**params)
     

@@ -101,7 +101,7 @@ llm:
   provider: openai
   completion_model: gpt-5
   timeout_seconds: 60
-  api_key: os.environ/LLM_API_KEY
+  api_key: os.environ/OPENAI_API_KEY
 ```
 
 例（Azure OpenAI）:
@@ -124,7 +124,7 @@ llm:
 llm:
   provider: openai
   completion_model: gpt-5
-  api_key: os.environ/LLM_API_KEY
+  api_key: os.environ/OPENAI_API_KEY
   extra_headers:
     Authorization: os.environ/OPENAI_AUTH_HEADER
     X-My-Org: os.environ/MY_ORG_ID
@@ -179,8 +179,7 @@ office2pdf:
 
 | 変数名 | 種別 | 説明 |
 |---|---|---|
-| `LLM_API_KEY` | 秘密 | 推奨（1本化）APIキー（OpenAI 等の provider 用。`llm.api_key: os.environ/LLM_API_KEY` で参照） |
-| `OPENAI_API_KEY` | 秘密 | OpenAI APIキー（互換: `llm.api_key` の参照先に指定する場合のみ） |
+| `OPENAI_API_KEY` | 秘密 | OpenAI APIキー |
 | `AZURE_API_KEY` | 秘密 | Azure OpenAI APIキー |
 | `ANTHROPIC_API_KEY` | 秘密 | Anthropic APIキー |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
@@ -213,7 +212,7 @@ paths:
       "command": "uv",
       "args": ["--directory", "<REPO_PATH>", "run", "-m", "ai_chat_util.mcp.mcp_server"],
       "env": {
-        "LLM_API_KEY": "sk-****",
+        "OPENAI_API_KEY": "sk-****",
         "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       },
       "allowedTools": ["analyze_pdf_files", "analyze_files"]
@@ -441,7 +440,7 @@ uv run -m ai_chat_util.cli analyze_files \
 MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
 > 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
-> そのため、事前に `.env` に `LLM_API_KEY` 等（秘密情報）を設定し、`ai-chat-util-config.yml` の `llm.api_key` で参照してください。`ai-chat-util-config.yml` は必須です。
+> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定し、`ai-chat-util-config.yml` の `llm.api_key` で参照してください。`ai-chat-util-config.yml` は必須です。
 
 ### 起動方法
 
@@ -509,7 +508,7 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
         "ai_chat_util.mcp.mcp_server"
       ],
       "env": {
-        "LLM_API_KEY": "sk-****",
+        "OPENAI_API_KEY": "sk-****",
         "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       }
     }

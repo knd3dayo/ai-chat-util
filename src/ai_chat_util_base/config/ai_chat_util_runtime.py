@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 CONFIG_ENV_VAR = "AI_CHAT_UTIL_CONFIG"
 DEFAULT_CONFIG_FILENAME = "ai-chat-util-config.yml"
 
+# New config format root key (required).
+AI_CHAT_UTIL_CONFIG_ROOT_KEY = "ai_chat_util_config"
+
 
 class ConfigError(RuntimeError):
     pass
@@ -43,7 +46,7 @@ class LLMSection(BaseModel):
         providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
         if provider in providers_requiring_key and not self.api_key:
             raise ValueError(
-                "llm.api_key が未設定です。ai-chat-util-config.yml で 'llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
+                "llm.api_key が未設定です。ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
                 "参照先の環境変数を設定してください。"
             )
         return self
@@ -304,7 +307,9 @@ def _resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:
     return resolved
 
 
-def _apply_secret_overrides_from_yaml(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
+def _apply_secret_overrides_from_yaml(
+    raw: dict[str, Any], *, config_path: Path, field_prefix: str = ""
+) -> dict[str, Any]:
     """Apply secret settings from YAML in a safe way.
 
     - Supports llm.api_key
@@ -324,10 +329,12 @@ def _apply_secret_overrides_from_yaml(raw: dict[str, Any], *, config_path: Path)
         if api_key_value is not None:
             if not isinstance(api_key_value, str):
                 raise ConfigError(
-                    f"llm.api_key は文字列である必要があります: {config_path} (llm.api_key)"
+                    f"llm.api_key は文字列である必要があります: {config_path} ({field_prefix}llm.api_key)"
                 )
             copied_llm["api_key"] = _resolve_env_ref(
-                api_key_value, config_path=config_path, field_path="llm.api_key"
+                api_key_value,
+                config_path=config_path,
+                field_path=f"{field_prefix}llm.api_key",
             )
             changed = True
 
@@ -336,7 +343,7 @@ def _apply_secret_overrides_from_yaml(raw: dict[str, Any], *, config_path: Path)
         if extra_headers_value is not None:
             if not isinstance(extra_headers_value, dict):
                 raise ConfigError(
-                    f"llm.extra_headers は mapping(dict) である必要があります: {config_path} (llm.extra_headers)"
+                    f"llm.extra_headers は mapping(dict) である必要があります: {config_path} ({field_prefix}llm.extra_headers)"
                 )
             resolved_headers: dict[str, str] = {}
             for k, v in extra_headers_value.items():
@@ -346,12 +353,12 @@ def _apply_secret_overrides_from_yaml(raw: dict[str, Any], *, config_path: Path)
                     )
                 if not isinstance(v, str):
                     raise ConfigError(
-                        f"llm.extra_headers.{k} は文字列である必要があります: {config_path} (llm.extra_headers.{k})"
+                        f"llm.extra_headers.{k} は文字列である必要があります: {config_path} ({field_prefix}llm.extra_headers.{k})"
                     )
                 resolved_headers[k] = _resolve_env_ref(
                     v,
                     config_path=config_path,
-                    field_path=f"llm.extra_headers.{k}",
+                    field_path=f"{field_prefix}llm.extra_headers.{k}",
                 )
 
             copied_llm["extra_headers"] = resolved_headers
@@ -372,10 +379,30 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
     load_dotenv()
 
     resolved = resolve_config_path(config_path)
-    raw = _load_yaml_config(resolved)
+    raw_root = _load_yaml_config(resolved)
+
+    # New format: settings must live under ai_chat_util_config.
+    raw_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY, "__missing__")
+    if raw_section == "__missing__":
+        raise ConfigError(
+            f"設定ファイルの形式が不正です: {resolved}\n"
+            f"ルートに '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
+            "旧フォーマット（ルート直下に llm/paths/features...）はサポートされません。\n"
+            "対処: 既存の llm/paths/features... を ai_chat_util_config: 配下へ 1段インデントして移動してください。"
+        )
+    if raw_section is None:
+        raw_section = {}
+    if not isinstance(raw_section, dict):
+        raise ConfigError(
+            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
+        )
 
     # Secrets may be declared in YAML only via env reference (os.environ/VAR).
-    raw = _apply_secret_overrides_from_yaml(raw, config_path=resolved)
+    raw = _apply_secret_overrides_from_yaml(
+        dict(raw_section),
+        config_path=resolved,
+        field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
+    )
 
     try:
         config = AiChatUtilConfig.model_validate(raw)
@@ -811,17 +838,32 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
     raw_root = _load_yaml_config(resolved)
 
     raw: dict[str, Any]
-    embedded = raw_root.get("autonomous_agent_util", "__missing__")
+    ai_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY) if isinstance(raw_root, dict) else None
+    if ai_section is None:
+        ai_section_dict: dict[str, Any] | None = None
+    elif not isinstance(ai_section, dict):
+        raise ConfigError(
+            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
+        )
+    else:
+        ai_section_dict = ai_section
+
+    embedded = (
+        ai_section_dict.get("autonomous_agent_util", "__missing__")
+        if ai_section_dict is not None
+        else "__missing__"
+    )
+
     if embedded != "__missing__":
         if embedded is None:
             embedded = {}
         if not isinstance(embedded, dict):
             raise ConfigError(
-                f"autonomous_agent_util は mapping(dict) である必要があります: {resolved} (autonomous_agent_util)"
+                f"ai_chat_util_config.autonomous_agent_util は mapping(dict) である必要があります: {resolved} (ai_chat_util_config.autonomous_agent_util)"
             )
 
         inherited = dict(embedded)
-        root_llm = raw_root.get("llm")
+        root_llm = ai_section_dict.get("llm") if isinstance(ai_section_dict, dict) else None
         if isinstance(root_llm, dict):
             inherited_llm = dict(inherited.get("llm") or {}) if isinstance(inherited.get("llm"), dict) else {}
             for k in ("provider", "base_url", "api_key", "base_model"):
@@ -834,11 +876,12 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
         llm = raw_root.get("llm")
         llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
         root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
+        ai_section_present = ai_section_dict is not None
         path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
-        if llm_looks_ai or root_looks_ai or path_looks_ai:
+        if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
             raise ConfigError(
                 "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
-                f"対処: {resolved} に autonomous_agent_util: セクションを追加するか、互換の {AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、互換の {AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
             )
         raw = raw_root
 

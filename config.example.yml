@@ -1,0 +1,61 @@
+# ai_chat_util config example (NON-secrets only)
+#
+# NOTE:
+# - Secrets (API keys / tokens) must NOT be written here.
+# - Provide secrets via environment variables or .env.
+# - In this YAML, secrets are referenced as: os.environ/ENV_VAR_NAME
+
+ai_chat_util_config:
+  llm:
+    # Provider name used by LiteLLM. Examples: openai, azure, anthropic
+    provider: openai
+
+    # Default timeout (seconds) for LLM requests.
+    timeout_seconds: 60
+
+    # Secret API key reference (required for openai/azure/anthropic).
+    # Example:
+    #   api_key: os.environ/OPENAI_API_KEY
+    api_key: null
+
+    # Model name (or Azure deployment name) for chat completion
+    completion_model: gpt-5
+
+    # Model name for embeddings
+    embedding_model: text-embedding-3-small
+
+    # Non-secret API base URL (optional).
+    base_url: null
+
+    # Non-secret API version (mainly for Azure OpenAI; optional)
+    api_version: null
+
+    # Optional extra HTTP headers (values must be env references).
+    extra_headers: null
+
+  paths:
+    mcp_config_path: null
+    mcp_server_config_file_path: null
+    custom_instructions_file_path: null
+    working_directory: work
+
+  features:
+    allow_outside_modifications: false
+    use_custom_pdf_analyzer: false
+    hitl_approval_tools: []
+
+  logging:
+    level: INFO
+    file: null
+
+  network:
+    requests_verify: true
+    ca_bundle: null
+
+  office2pdf:
+    libreoffice_path: null
+
+  # Optional: autonomous-agent-util settings (integrated)
+  # autonomous_agent_util:
+  #   backend:
+  #     task_backend: process

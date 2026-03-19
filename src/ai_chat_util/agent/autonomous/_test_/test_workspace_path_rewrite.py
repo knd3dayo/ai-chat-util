@@ -9,7 +9,7 @@ import yaml
 
 from ai_chat_util.agent.autonomous._api_.api_server import create_app
 from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
-from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
 
 endpoint = EndPoint() 
@@ -56,11 +56,13 @@ def test_rewrite_workspace_path_pure_from_ai_chat_util_config_embedded(tmp_path:
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
 
     data = {
-        "autonomous_agent_util": {
-            "paths": {
-                "workspace_path_rewrites": [
-                    {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
-                ]
+        "ai_chat_util_config": {
+            "autonomous_agent_util": {
+                "paths": {
+                    "workspace_path_rewrites": [
+                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                    ]
+                }
             }
         }
     }

@@ -9,7 +9,7 @@ from typing import AsyncGenerator, Optional
 
 from ...util.logging import get_application_logger
 
-from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from ..process_utils import kill_process_tree, popen_new_process_group_kwargs

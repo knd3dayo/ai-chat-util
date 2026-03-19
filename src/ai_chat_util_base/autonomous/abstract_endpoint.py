@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Annotated
 from abc import ABC, abstractmethod
 from fastapi import Body, Path, Query
 
-from ..model.autonomous_agent_util_models import (
+from ..model.agent_util_models import (
     ExecuteRequest,
     ExecuteResponse,
     HealthzResponse,

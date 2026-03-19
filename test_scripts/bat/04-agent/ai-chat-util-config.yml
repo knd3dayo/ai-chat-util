@@ -1,18 +1,19 @@
 # Non-secret test config for OpenAI
-llm:
-  provider: openai
-  completion_model: gpt-4o
-  timeout_seconds: 300
-  api_key: os.environ/LLM_API_KEY
-  base_url: "http://localhost:4000"
+ai_chat_util_config:
+  llm:
+    provider: openai
+    completion_model: gpt-4o
+    timeout_seconds: 300
+    api_key: os.environ/LLM_API_KEY
+    base_url: "http://localhost:4000"
 
-features:
-  use_custom_pdf_analyzer: true
-  mcp_tool_call_limit: 100
+  features:
+    use_custom_pdf_analyzer: true
+    mcp_tool_call_limit: 100
 
-# office2pdf:
-  # LibreOfficeのパスを指定. OfficeファイルをPDFに変換するために使用されます.
-  #libreoffice_path: "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
+  # office2pdf:
+    # LibreOfficeのパスを指定. OfficeファイルをPDFに変換するために使用されます.
+    #libreoffice_path: "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
 
-paths:
-  mcp_config_path: "mcp.json"
+  paths:
+    mcp_config_path: "mcp.json"

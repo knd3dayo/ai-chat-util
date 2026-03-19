@@ -97,38 +97,41 @@ copy config.example.yml ai-chat-util-config.yml
 例（OpenAI）:
 
 ```yml
-llm:
-  provider: openai
-  completion_model: gpt-5
-  timeout_seconds: 60
-  api_key: os.environ/OPENAI_API_KEY
+ai_chat_util_config:
+  llm:
+    provider: openai
+    completion_model: gpt-5
+    timeout_seconds: 60
+    api_key: os.environ/OPENAI_API_KEY
 ```
 
 例（Azure OpenAI）:
 
 ```yml
-llm:
-  provider: azure
-  completion_model: <AZURE_DEPLOYMENT_NAME>
-  base_url: https://<resource-name>.openai.azure.com/
-  api_version: 2024-xx-xx
-  api_key: os.environ/AZURE_API_KEY
+ai_chat_util_config:
+  llm:
+    provider: azure
+    completion_model: <AZURE_DEPLOYMENT_NAME>
+    base_url: https://<resource-name>.openai.azure.com/
+    api_version: 2024-xx-xx
+    api_key: os.environ/AZURE_API_KEY
 ```
 
 例（追加ヘッダーを付けたい場合）:
 
 ```yml
-llm:
-  provider: openai
-  completion_model: gpt-5
-  api_key: os.environ/OPENAI_API_KEY
-  extra_headers:
-    Authorization: os.environ/OPENAI_AUTH_HEADER
-    X-My-Org: os.environ/MY_ORG_ID
-    # MCP HTTP/SSE/WebSocket transport の headers に転送（キーの "x-mcp-" は除去されます）
-    x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
-    # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
-    x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
+ai_chat_util_config:
+  llm:
+    provider: openai
+    completion_model: gpt-5
+    api_key: os.environ/OPENAI_API_KEY
+    extra_headers:
+      Authorization: os.environ/OPENAI_AUTH_HEADER
+      X-My-Org: os.environ/MY_ORG_ID
+      # MCP HTTP/SSE/WebSocket transport の headers に転送（キーの "x-mcp-" は除去されます）
+      x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
+      # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
+      x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
 ```
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）
@@ -156,9 +159,10 @@ copy .env.example .env
 推奨は **社内CAをPEMにして `ai-chat-util-config.yml` の `network.ca_bundle` で指定**することです。
 
 ```yml
-network:
-  ca_bundle: "C:\\path\\to\\corp-ca.pem"
-  requests_verify: true
+ai_chat_util_config:
+  network:
+    ca_bundle: "C:\\path\\to\\corp-ca.pem"
+    requests_verify: true
 ```
 
 切り分け用途（非推奨）で SSL 検証を無効化する場合は `network.requests_verify: false` を設定してください。
@@ -168,8 +172,9 @@ network:
 Office 解析で LibreOffice を使う場合は、`ai-chat-util-config.yml` の `office2pdf.libreoffice_path` を設定します。
 
 ```yml
-office2pdf:
-  libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
+ai_chat_util_config:
+  office2pdf:
+    libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
 ```
 
 ### 環境変数（一覧）
@@ -188,8 +193,9 @@ CLIの `chat` / `batch_chat` は `--use_mcp` を指定すると、内部の MCP 
 このとき、`ai-chat-util-config.yml` の `paths.mcp_config_path`（互換キー: `paths.mcp_server_config_file_path`）に、MCPサーバー設定JSONのパスを指定してください。
 
 ```yml
-paths:
-  mcp_config_path: mcp_settings.json
+ai_chat_util_config:
+  paths:
+    mcp_config_path: mcp_settings.json
 ```
 
 > 補足: 同梱の `sample_cline_mcp_settings.json` と同じ形式です。

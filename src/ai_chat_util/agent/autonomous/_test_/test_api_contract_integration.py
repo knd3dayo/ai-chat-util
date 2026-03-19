@@ -7,7 +7,7 @@ from typing import Any, AsyncGenerator, Optional
 from fastapi.testclient import TestClient
 
 from ai_chat_util.agent.autonomous._api_.api_server import create_app
-from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 
 
 @dataclass

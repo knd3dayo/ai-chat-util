@@ -11,7 +11,7 @@ from python_on_whales import docker as whales, Container
 from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from .docker_coding_agent_runner import CodingAgentRunner
-from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 
 from ...util.logging import get_application_logger
 from ..process_utils import popen_new_process_group_kwargs

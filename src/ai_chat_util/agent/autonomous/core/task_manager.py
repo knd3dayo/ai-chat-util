@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from python_on_whales import docker as whales
 from pydantic import ValidationError
-from ai_chat_util_base.model.autonomous_agent_util_models import TaskStatus
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 
 from ..core.process_utils import kill_process_tree, pid_is_running
 

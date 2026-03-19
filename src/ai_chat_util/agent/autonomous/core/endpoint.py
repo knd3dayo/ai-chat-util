@@ -7,7 +7,7 @@ from fastapi import Body, HTTPException, Path, Query
 from .task_service_factory import select_task_service
 from .task_manager import TaskManager
 
-from ai_chat_util_base.model.autonomous_agent_util_models import (
+from ai_chat_util_base.model.agent_util_models import (
     CancelResponse,
     ExecuteRequest,
     ExecuteResponse,

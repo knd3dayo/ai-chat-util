@@ -679,6 +679,13 @@ class AutonomousAgentUtilConfig(BaseModel):
 
 
 class _AutonomousRuntimeState(BaseModel):
+    # NOTE:
+    # init_autonomous_runtime() resolves env-ref secrets (e.g., llm.api_key) into
+    # literal values after validation. When storing the already-validated config
+    # inside this state model, Pydantic may revalidate nested instances, which
+    # would re-trigger the secret-policy validator and fail.
+    model_config = ConfigDict(revalidate_instances="never")
+
     config_path: Path
     config: AutonomousAgentUtilConfig
 
@@ -932,7 +939,11 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
 
     _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
 
-    _autonomous_runtime_state = _AutonomousRuntimeState(config_path=resolved, config=config)
+    # Use model_construct() to avoid re-validating `config`.
+    # At this point, env-ref secrets (e.g., llm.api_key) may already be resolved
+    # into literal values, and re-validation would incorrectly re-trigger the
+    # secret-policy validator.
+    _autonomous_runtime_state = _AutonomousRuntimeState.model_construct(config_path=resolved, config=config)
     _configure_autonomous_python_logging(config)
     return config
 

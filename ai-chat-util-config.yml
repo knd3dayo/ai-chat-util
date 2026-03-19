@@ -21,10 +21,9 @@ ai_chat_util_config:
     # API key reference (secret).
     # - Secrets themselves must NOT be written in config.yml.
     # - Use env reference format:
-    #     api_key: os.environ/OPENAI_API_KEY
-    #   (provider=azure -> AZURE_API_KEY, provider=anthropic -> ANTHROPIC_API_KEY)
+    #     api_key: os.environ/LLM_API_KEY
     # - openai / azure / anthropic の provider を使う場合は必須です。
-    api_key: os.environ/OPENAI_API_KEY
+    api_key: os.environ/LLM_API_KEY
 
     # Model name (or Azure deployment name) for chat completion
     completion_model: gpt-5
@@ -94,25 +93,47 @@ ai_chat_util_config:
     # - Or just "soffice" if it's on PATH
     libreoffice_path: null
 
-  # --- Optional: autonomous-agent-util settings (integrated) ---
-  # autonomous-agent-util-config.yml の内容を、このファイルの `autonomous_agent_util:` 配下に
-  # そのまま移動することで、設定ファイルを 1つに統合できます。
-  #
-  # 利用方法（推奨）:
-  # - 環境変数 AI_CHAT_UTIL_CONFIG でこのファイルのパスを指定
-  # - autonomous-agent-util 側は `autonomous_agent_util:` セクションを自動で読み込みます
-  # - 互換の AUTONOMOUS_AGENT_UTIL_CONFIG / autonomous-agent-util-config.yml も引き続き利用可能です
-  #
-  # autonomous_agent_util:
-  #   llm:
-  #     provider: openai
-  #     model: gpt-4o
-  #     base_url: http://localhost:4000
-  #     # api_key: os.environ/LLM_API_KEY
-  #   backend:
-  #     task_backend: process
-  #   paths:
-  #     workspace_root: /tmp/autonomous_agent_tasks
-  #     host_projects_root: /tmp/autonomous_agent_projects
-  #   logging:
-  #     level: INFO
+  # --- autonomous-agent-util settings (integrated) ---
+  # autonomous-agent-util-config.yml の内容を、このファイルの
+  # `ai_chat_util_config.autonomous_agent_util:` 配下に統合します。
+  autonomous_agent_util:
+    llm:
+      # NOTE:
+      # - provider/base_url/api_key/base_model は未指定なら ai_chat_util_config.llm から継承されます。
+      # - `model` は継承されないため、autonomous 側で使うモデルを指定してください。
+      model: gpt-4o
+      # base_url_in_container: http://host.docker.internal:11434/v1
+
+    backend:
+      # docker | compose | subprocess | process
+      task_backend: process
+
+    monitor:
+      disable_detach_monitor: false
+      detach_monitor_interval: 2.0
+      debug_container: false
+
+    paths:
+      workspace_root: /tmp/autonomous_agent_tasks
+      host_projects_root: /tmp/autonomous_agent_projects
+      # executor_allowed_workspace_root: /tmp
+      # workspace_path_rewrites:
+      #   - from: /srv/ai_platform/workspaces
+      #     to: /workspaces
+
+    host:
+      uid: null
+      gid: null
+
+    subprocess:
+      command: opencode run
+
+    compose:
+      directory: .
+      file: docker-compose.yml
+      service_name: executor-service
+      command: opencode run
+
+    logging:
+      level: INFO
+      # file: /tmp/autonomous-agent-util.log

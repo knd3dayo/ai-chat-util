@@ -655,8 +655,8 @@ class AutonomousAgentUtilConfig(BaseModel):
             return self
         if self.llm.api_key:
             raise ValueError(
-                "llm.api_key は秘密情報のため autonomous-agent-util-config.yml に直書きできません。"
-                "'autonomous_agent_util_config.llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
+                "llm.api_key は秘密情報のため設定ファイルに直書きできません。"
+                "'llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
             )
         return self
 
@@ -694,9 +694,18 @@ def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
         tried.append(candidate)
         if not candidate.is_file():
             raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
-        os.environ[AUTONOMOUS_CONFIG_ENV_VAR] = str(candidate)
         return candidate
 
+    # Integration mode: prefer resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
+    ai_cfg_env = os.getenv(CONFIG_ENV_VAR)
+    if ai_cfg_env:
+        candidate = _abspath(ai_cfg_env)
+        tried.append(candidate)
+        if not candidate.is_file():
+            raise ConfigError(f"環境変数 {CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}")
+        return candidate
+
+    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
     env_path = os.getenv(AUTONOMOUS_CONFIG_ENV_VAR)
     if env_path:
         candidate = _abspath(env_path)
@@ -707,45 +716,37 @@ def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
             )
         return candidate
 
-    # Integration mode: allow resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
-    ai_cfg_env = os.getenv(CONFIG_ENV_VAR)
-    if ai_cfg_env:
-        candidate = _abspath(ai_cfg_env)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(f"環境変数 {CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}")
-        return candidate
-
-    cwd_candidate = (Path.cwd() / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
-    tried.append(cwd_candidate)
-    if cwd_candidate.is_file():
-        return cwd_candidate
-
     # Integration mode: allow ai-chat-util-config.yml in CWD.
     cwd_ai_candidate = (Path.cwd() / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
     tried.append(cwd_ai_candidate)
     if cwd_ai_candidate.is_file():
         return cwd_ai_candidate
 
+    # Backward-compat: standalone autonomous-agent-util-config.yml in CWD.
+    cwd_candidate = (Path.cwd() / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
+    tried.append(cwd_candidate)
+    if cwd_candidate.is_file():
+        return cwd_candidate
+
     project_root = _default_project_root()
     if project_root is not None:
-        root_candidate = (project_root / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
-        tried.append(root_candidate)
-        if root_candidate.is_file():
-            return root_candidate
-
         root_ai_candidate = (project_root / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
         tried.append(root_ai_candidate)
         if root_ai_candidate.is_file():
             return root_ai_candidate
+
+        root_candidate = (project_root / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
+        tried.append(root_candidate)
+        if root_candidate.is_file():
+            return root_candidate
 
     tried_str = "\n".join(f"- {p}" for p in tried)
     raise ConfigError(
         "設定ファイルが見つかりません。以下を探索しました:\n"
         + tried_str
         + (
-            f"\n\n対処: {AUTONOMOUS_CONFIG_ENV_VAR} か {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
-            f"カレント/プロジェクトルートに {AUTONOMOUS_DEFAULT_CONFIG_FILENAME}（互換）または {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME}（統合）を配置してください。"
+            f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
+            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
         )
     )
 

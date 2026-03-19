@@ -62,9 +62,7 @@ class SubprocessTaskService(AbstractTaskService):
         env = os.environ.copy()
         cfg_path = get_autonomous_runtime_config_path()
         if cfg_path:
-            env.setdefault("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
-            if cfg_path.name == "ai-chat-util-config.yml":
-                env.setdefault("AI_CHAT_UTIL_CONFIG", str(cfg_path))
+            env.setdefault("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 
         cmd = [
             SubprocessCodingAgentRunner.resolve_python_executable(),

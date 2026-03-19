@@ -4,7 +4,7 @@ ai_chat_util_config:
     provider: openai
     completion_model: gpt-5
     timeout_seconds: 300
-    api_key: os.environ/OPENAI_API_KEY
+    api_key: os.environ/LLM_API_KEY
 
   features:
     use_custom_pdf_analyzer: true

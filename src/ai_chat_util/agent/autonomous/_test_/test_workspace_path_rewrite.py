@@ -15,7 +15,8 @@ from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
 endpoint = EndPoint() 
 
 def _reset_runtime(monkeypatch, cfg_path: Path) -> None:
-    monkeypatch.setenv("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
+    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
     runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
     runtime_mod.init_autonomous_runtime(None)
 
@@ -29,18 +30,20 @@ def _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path: Path) -> None:
 
 
 def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
-    cfg_path = tmp_path / "autonomous-agent-util-config.yml"
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
-    cfg_path.write_text(
-        """
-autonomous_agent_util_config:
-    paths:
-        workspace_path_rewrites:
-            - from: /srv/ai_platform/workspaces
-              to: {to_prefix}
-""".format(to_prefix=to_prefix),
-        encoding="utf-8",
-    )
+    data = {
+        "ai_chat_util_config": {
+            "autonomous_agent_util": {
+                "paths": {
+                    "workspace_path_rewrites": [
+                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                    ]
+                }
+            }
+        }
+    }
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     _reset_runtime(monkeypatch, cfg_path)
 
     raw = "/srv/ai_platform/workspaces/e2e_sv_ws_1"
@@ -128,18 +131,20 @@ class _FakeTaskService:
 
 
 def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monkeypatch) -> None:
-    cfg_path = tmp_path / "autonomous-agent-util-config.yml"
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
-    cfg_path.write_text(
-        """
-autonomous_agent_util_config:
-    paths:
-        workspace_path_rewrites:
-            - from: /srv/ai_platform/workspaces
-              to: {to_prefix}
-""".format(to_prefix=to_prefix),
-        encoding="utf-8",
-    )
+    data = {
+        "ai_chat_util_config": {
+            "autonomous_agent_util": {
+                "paths": {
+                    "workspace_path_rewrites": [
+                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                    ]
+                }
+            }
+        }
+    }
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     _reset_runtime(monkeypatch, cfg_path)
 
     store: dict[str, TaskStatus] = {}

@@ -15,7 +15,7 @@ ai_chat_util_config:
 
     # Secret API key reference (required for openai/azure/anthropic).
     # Example:
-    #   api_key: os.environ/OPENAI_API_KEY
+    #   api_key: os.environ/LLM_API_KEY
     api_key: null
 
     # Model name (or Azure deployment name) for chat completion

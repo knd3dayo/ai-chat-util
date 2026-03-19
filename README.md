@@ -102,7 +102,7 @@ ai_chat_util_config:
     provider: openai
     completion_model: gpt-5
     timeout_seconds: 60
-    api_key: os.environ/OPENAI_API_KEY
+    api_key: os.environ/LLM_API_KEY
 ```
 
 例（Azure OpenAI）:
@@ -114,7 +114,7 @@ ai_chat_util_config:
     completion_model: <AZURE_DEPLOYMENT_NAME>
     base_url: https://<resource-name>.openai.azure.com/
     api_version: 2024-xx-xx
-    api_key: os.environ/AZURE_API_KEY
+    api_key: os.environ/LLM_API_KEY
 ```
 
 例（追加ヘッダーを付けたい場合）:
@@ -124,7 +124,7 @@ ai_chat_util_config:
   llm:
     provider: openai
     completion_model: gpt-5
-    api_key: os.environ/OPENAI_API_KEY
+    api_key: os.environ/LLM_API_KEY
     extra_headers:
       Authorization: os.environ/OPENAI_AUTH_HEADER
       X-My-Org: os.environ/MY_ORG_ID
@@ -181,9 +181,7 @@ ai_chat_util_config:
 
 | 変数名 | 種別 | 説明 |
 |---|---|---|
-| `OPENAI_API_KEY` | 秘密 | OpenAI APIキー |
-| `AZURE_API_KEY` | 秘密 | Azure OpenAI APIキー |
-| `ANTHROPIC_API_KEY` | 秘密 | Anthropic APIキー |
+| `LLM_API_KEY` | 秘密 | LLM の APIキー（OpenAI / Azure OpenAI / Anthropic など） |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
 | `AI_CHAT_UTIL_CONFIG` | 非秘密 | `ai-chat-util-config.yml` のパス（`--config` を渡せない起動で使用） |
 
@@ -215,7 +213,7 @@ ai_chat_util_config:
       "command": "uv",
       "args": ["--directory", "<REPO_PATH>", "run", "-m", "ai_chat_util.mcp.mcp_server"],
       "env": {
-        "OPENAI_API_KEY": "sk-****",
+        "LLM_API_KEY": "sk-****",
         "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       },
       "allowedTools": ["analyze_pdf_files", "analyze_files"]
@@ -443,7 +441,7 @@ uv run -m ai_chat_util.cli analyze_files \
 MCPクライアント（例: Cline / 独自エージェント）から接続することで、チャット・画像解析・PDF解析・Office解析などのツールを利用できます。
 
 > 補足: MCPサーバー起動時に `.env` を読み込みます（`python-dotenv` / `load_dotenv()`）。
-> そのため、事前に `.env` に `OPENAI_API_KEY` 等（秘密情報）を設定し、`ai-chat-util-config.yml` の `llm.api_key` で参照してください。`ai-chat-util-config.yml` は必須です。
+> そのため、事前に `.env` に `LLM_API_KEY`（秘密情報）を設定し、`ai-chat-util-config.yml` の `llm.api_key` で参照してください。`ai-chat-util-config.yml` は必須です。
 
 ### 起動方法
 
@@ -511,7 +509,7 @@ uv run -m ai_chat_util.mcp.mcp_server -m stdio -t "run_chat,analyze_pdf_files"
         "ai_chat_util.mcp.mcp_server"
       ],
       "env": {
-        "OPENAI_API_KEY": "sk-****",
+        "LLM_API_KEY": "sk-****",
         "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       }
     }
@@ -593,23 +591,21 @@ opencode --version
 設定ファイルの解決順は以下です（推奨: `ai-chat-util-config.yml` に統合）。
 
 1. CLI/サーバ起動引数 `--config`
-2. 環境変数 `AUTONOMOUS_AGENT_UTIL_CONFIG`（互換: autonomous-agent-util-config.yml）
-3. 環境変数 `AI_CHAT_UTIL_CONFIG`（ai-chat-util-config.yml。`ai_chat_util_config.autonomous_agent_util:` セクションを読む）
-4. カレントディレクトリの `./autonomous-agent-util-config.yml`（互換）
-5. カレントディレクトリの `./ai-chat-util-config.yml`（統合）
-6. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./autonomous-agent-util-config.yml`（互換）
-7. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./ai-chat-util-config.yml`（統合）
+2. 環境変数 `AI_CHAT_UTIL_CONFIG`（ai-chat-util-config.yml。`ai_chat_util_config.autonomous_agent_util:` セクションを読む）
+3. カレントディレクトリの `./ai-chat-util-config.yml`
+4. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./ai-chat-util-config.yml`
 
 ### 秘密情報（Secrets）の方針
 
-- **`autonomous-agent-util-config.yml` に API key などの秘密情報を直書きしないでください**
+- **`ai-chat-util-config.yml` に API key などの秘密情報を直書きしないでください**
 - `.env` または環境変数で供給してください
 - どうしても YAML から参照したい場合は、次の形式のみ許可します
 
 ```yml
-autonomous_agent_util_config:
-  llm:
-    api_key: os.environ/LLM_API_KEY
+ai_chat_util_config:
+  autonomous_agent_util:
+    llm:
+      api_key: os.environ/LLM_API_KEY
 ```
 
 実際の値はプロセス起動時に `.env`/環境変数から解決されます。
@@ -808,13 +804,13 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-uti
 ### `LLM API key が未設定` で失敗する
 
 - `.env` または環境変数で API キー（例: `LLM_API_KEY`）を設定してください
-- `autonomous-agent-util-config.yml` に `autonomous_agent_util_config.llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
+- `ai-chat-util-config.yml` に `ai_chat_util_config.llm.api_key` / `ai_chat_util_config.autonomous_agent_util.llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
 
 ### 設定ファイルが見つからない
 
 - `--config` を指定する
-- もしくは `AI_CHAT_UTIL_CONFIG` / `AUTONOMOUS_AGENT_UTIL_CONFIG` を設定する
-- もしくは `./ai-chat-util-config.yml`（統合）または `./autonomous-agent-util-config.yml`（互換）をカレント/プロジェクトルートに置く
+- もしくは `AI_CHAT_UTIL_CONFIG` を設定する
+- もしくは `./ai-chat-util-config.yml` をカレント/プロジェクトルートに置く
 
 ### `workspace_path must be an absolute path`
 

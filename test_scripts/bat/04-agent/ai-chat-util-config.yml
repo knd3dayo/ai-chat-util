@@ -17,3 +17,25 @@ ai_chat_util_config:
 
   paths:
     mcp_config_path: "mcp.json"
+
+  autonomous_agent_util:
+    llm:
+      model: gpt-4o
+
+    backend:
+      task_backend: process
+
+    monitor:
+      disable_detach_monitor: false
+      detach_monitor_interval: 2.0
+      debug_container: false
+
+    paths:
+      workspace_root: /tmp/autonomous_agent_tasks
+      host_projects_root: /tmp/autonomous_agent_projects
+
+    subprocess:
+      command: opencode run
+
+    logging:
+      level: INFO

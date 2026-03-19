@@ -181,8 +181,8 @@ if __name__ == "__main__":
         type=str,
         default="",
         help=(
-            "Path to autonomous-agent-util config YAML. If omitted, resolved by env AUTONOMOUS_AGENT_UTIL_CONFIG "
-            "or AI_CHAT_UTIL_CONFIG (ai-chat-util-config.yml with autonomous_agent_util section), or searched from CWD/project root."
+            "Path to config YAML (ai-chat-util-config.yml). If omitted, resolved by env AI_CHAT_UTIL_CONFIG "
+            "(with ai_chat_util_config.autonomous_agent_util section), or searched from CWD/project root."
         ),
     )
     parser.add_argument("-p", "--port", type=int, default=7101)

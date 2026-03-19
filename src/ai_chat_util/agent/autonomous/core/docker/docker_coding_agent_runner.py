@@ -134,7 +134,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         # LLM 設定をホスト環境から引き継ぐ。
         # compose 側で env_file が指定されていても、ここで渡す env が優先されるため
         # CLI で設定した LLM_MODEL 等を確実にコンテナへ反映できる。
-        # LLM settings: non-secrets come from autonomous-agent-util-config.yml.
+        # LLM settings: non-secrets come from ai-chat-util-config.yml (autonomous_agent_util section).
         params["envs"]["LLM_PROVIDER"] = str(runtime_cfg.llm.provider)
         params["envs"]["LLM_MODEL"] = str(runtime_cfg.llm.model)
 
@@ -149,7 +149,8 @@ class CodingAgentRunner(AbstractAgentRunner):
         if provider in providers_requiring_key and not api_key:
             raise RuntimeError(
                 "LLM API key が未設定です。.env/環境変数で LLM_API_KEY を設定するか、"
-                "autonomous-agent-util-config.yml で 'autonomous_agent_util_config.llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
+                "ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/LLM_API_KEY' または "
+                "'ai_chat_util_config.autonomous_agent_util.llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
             )
         if api_key:
             params["envs"]["LLM_API_KEY"] = str(api_key)
@@ -208,7 +209,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         """
         インスタンス生成からコンテナ起動までを一括で行うエントリーポイント
         """
-        # 1. Runnerの準備（非秘匿は autonomous-agent-util-config.yml から取得）
+        # 1. Runnerの準備（非秘匿は ai-chat-util-config.yml から取得）
         runtime_cfg = get_autonomous_runtime_config()
         compose_config = ComposeConfig(
             compose_directory=runtime_cfg.compose.directory,

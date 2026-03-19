@@ -14,458 +14,24 @@ DEFAULT_CONFIG_FILENAME = "ai-chat-util-config.yml"
 # New config format root key (required).
 AI_CHAT_UTIL_CONFIG_ROOT_KEY = "ai_chat_util_config"
 
+# =====================
+# Autonomous Agent Util Runtime (embedded)
+# =====================
 
+AUTONOMOUS_CONFIG_ENV_VAR = "AUTONOMOUS_AGENT_UTIL_CONFIG"
+AUTONOMOUS_DEFAULT_CONFIG_FILENAME = "autonomous-agent-util-config.yml"
+AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME = DEFAULT_CONFIG_FILENAME
 
-_runtime_state: _RuntimeState | None = None
-_autonomous_runtime_state: _AutonomousRuntimeState | None = None
+# New autonomous-agent-util standalone config format root key (required).
+AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY = "autonomous_agent_util_config"
 
-
-class ConfigError(RuntimeError):
-    pass
-
-
-class LLMSection(BaseModel):
-    provider: str = Field(default="openai")
-    completion_model: str = Field(default="gpt-5")
-    embedding_model: str = Field(default="text-embedding-3-small")
-
-    # non-secret default timeout (seconds) for chat completion calls
-    timeout_seconds: float = Field(default=60.0, ge=0.0)
-
-    # secret API key (must be provided via env reference; e.g. os.environ/ENV_VAR_NAME)
-    api_key: str | None = Field(default=None)
-
-    # non-secret endpoint/base url
-    base_url: str | None = Field(default=None)
-
-    # non-secret api version (mainly for Azure OpenAI via LiteLLM)
-    api_version: str | None = Field(default=None)
-
-    # secret/non-secret mixed: extra headers for outbound LLM requests.
-    # For safety, values must be provided via env reference in ai-chat-util-config.yml and are resolved at load time.
-    extra_headers: dict[str, str] | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _validate_api_key_required(self) -> "LLMSection":
-        provider = (self.provider or "").lower()
-        providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
-        if provider in providers_requiring_key and not self.api_key:
-            raise ValueError(
-                "llm.api_key が未設定です。ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
-                "参照先の環境変数を設定してください。"
-            )
-        return self
-
-    def create_litellm_model_list(self) -> list[dict[str, Any]]:
-        """Create a list of model names to try with LiteLLM, based on the config."""
-        litellm_extra_headers: dict[str, str] | None = None
-        if self.extra_headers:
-            # Reserve x-mcp-* for MCP forwarding (do NOT send to LiteLLM).
-            filtered = {
-                k: v for k, v in self.extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
-            }
-            if filtered:
-                litellm_extra_headers = filtered
-
-        completion_litellm_dict = {}
-        completion_litellm_dict["model"] = f"{self.provider}/{self.completion_model}"
-        completion_litellm_dict["api_key"] = self.api_key
-        if self.base_url:
-            completion_litellm_dict["api_base"] = self.base_url
-        if self.api_version:
-            completion_litellm_dict["api_version"] = self.api_version
-        if litellm_extra_headers:
-            completion_litellm_dict["extra_headers"] = litellm_extra_headers
-
-        completion_model_dict = {
-            "model_name": self.completion_model,
-            "litellm_params": completion_litellm_dict
-        }
-
-        embedding_litellm_dict = {}
-        embedding_litellm_dict["model"] = f"{self.provider}/{self.embedding_model}"
-        embedding_litellm_dict["api_key"] = self.api_key
-        if self.base_url:
-            embedding_litellm_dict["api_base"] = self.base_url
-        if self.api_version:
-            embedding_litellm_dict["api_version"] = self.api_version
-        if litellm_extra_headers:
-            embedding_litellm_dict["extra_headers"] = litellm_extra_headers
-        embedding_model_dict = {
-            "model_name": self.embedding_model,
-            "litellm_params": embedding_litellm_dict
-        }
-
-        models: list[dict[str, Any]] = []
-        if self.completion_model:
-            models.append(completion_model_dict)
-        if self.embedding_model:
-            models.append(embedding_model_dict)
-        return models
-
-class PathsSection(BaseModel):
-    # Preferred key name for MCP settings JSON path.
-    # Kept compatible with older key: mcp_server_config_file_path.
-    mcp_config_path: str | None = Field(default=None)
-    mcp_server_config_file_path: str | None = Field(default=None)
-    custom_instructions_file_path: str | None = Field(default=None)
-    working_directory: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _coalesce_mcp_config_path(self) -> "PathsSection":
-        a = self.mcp_config_path
-        b = self.mcp_server_config_file_path
-        if a and b and a != b:
-            raise ValueError(
-                "paths.mcp_config_path と paths.mcp_server_config_file_path の両方が設定されていますが一致しません。"
-                "どちらか一方に統一してください。"
-            )
-        if a and not b:
-            self.mcp_server_config_file_path = a
-        if b and not a:
-            self.mcp_config_path = b
-        return self
-
-
-class FeaturesSection(BaseModel):
-    allow_outside_modifications: bool = Field(default=False)
-    use_custom_pdf_analyzer: bool = Field(default=False)
-    mcp_recursion_limit: int = Field(
-        default=50,
-        ge=1,
-        description=(
-            "LangGraph supervisor の再帰(ステップ)上限。\n"
-            "ツール/エージェントの無限ループを防ぐ安全弁です。"
-        ),
-    )
-    mcp_tool_call_limit: int = Field(
-        default=2,
-        ge=1,
-        description=(
-            "1ユーザー入力(=1 trace_id)あたりのツール呼び出し回数上限。\n"
-            "同一入力でツールが繰り返し実行されるのを防ぎます。"
-        ),
-    )
-    mcp_tool_timeout_seconds: float | None = Field(
-        default=None,
-        ge=0.0,
-        description=(
-            "MCPツール呼び出しのアプリ側ハードタイムアウト(秒)。\n"
-            "未設定(None)の場合は llm.timeout_seconds を使用します。"
-        ),
-    )
-    mcp_tool_timeout_retries: int = Field(
-        default=1,
-        ge=0,
-        description=(
-            "MCPツールがタイムアウトした場合の再試行回数。\n"
-            "1なら『最大1回だけ再試行』です。"
-        ),
-    )
-    hitl_approval_tools: list[str] = Field(
-        default_factory=list,
-        description=(
-            "HITL（Human-in-the-loop）承認が必要なツール名のリスト。"
-            "このリストに含まれるツールを実行する前に、エージェントは人間へ承認を求めて pause します。"
-        ),
-    )
-
-
-class LoggingSection(BaseModel):
-    level: str = Field(default="INFO")
-    file: str | None = Field(default=None)
-
-
-class NetworkSection(BaseModel):
-    requests_verify: bool = Field(default=True)
-    ca_bundle: str | None = Field(default=None)
-
-
-class Office2PDFSection(BaseModel):
-    libreoffice_path: str | None = Field(default=None)
-
-
-class AiChatUtilConfig(BaseModel):
-    llm: LLMSection = Field(default_factory=LLMSection)
-    paths: PathsSection = Field(default_factory=PathsSection)
-    features: FeaturesSection = Field(default_factory=FeaturesSection)
-    logging: LoggingSection = Field(default_factory=LoggingSection)
-    network: NetworkSection = Field(default_factory=NetworkSection)
-    office2pdf: Office2PDFSection = Field(default_factory=Office2PDFSection)
-
-
-class _RuntimeState(BaseModel):
-    config_path: Path
-    config: AiChatUtilConfig
-
-
-def _find_project_root(start: Path) -> Path | None:
-    current = start.resolve()
-    for parent in [current, *current.parents]:
-        if (parent / "pyproject.toml").is_file():
-            return parent
-    return None
-
-
-def _default_project_root() -> Path | None:
-    # Prefer cwd walk-up.
-    cwd_root = _find_project_root(Path.cwd())
-    if cwd_root is not None:
-        return cwd_root
-
-    # Fallback to package location walk-up.
-    here = Path(__file__).resolve()
-    pkg_root = _find_project_root(here)
-    return pkg_root
-
-
-def _abspath(p: str | Path) -> Path:
-    return Path(p).expanduser().resolve()
-
-
-def _resolve_cli_config_path(
-    cli_config_path: str | None,
-    *,
-    tried: list[Path],
-    propagate_env_var: str | None = None,
-) -> Path | None:
-    if not cli_config_path:
-        return None
-
-    candidate = _abspath(cli_config_path)
-    tried.append(candidate)
-    if not candidate.is_file():
-        raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
-
-    if propagate_env_var:
-        os.environ[propagate_env_var] = str(candidate)
-
-    return candidate
-
-
-def _resolve_env_config_path(env_var: str, *, tried: list[Path]) -> Path | None:
-    env_path = os.getenv(env_var)
-    if not env_path:
-        return None
-
-    candidate = _abspath(env_path)
-    tried.append(candidate)
-    if not candidate.is_file():
-        raise ConfigError(f"環境変数 {env_var} で指定された設定ファイルが見つかりません: {candidate}")
-
-    return candidate
-
-
-def _resolve_in_cwd(filenames: list[str], *, tried: list[Path]) -> Path | None:
-    for filename in filenames:
-        candidate = (Path.cwd() / filename).resolve()
-        tried.append(candidate)
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _resolve_in_project_root(
-    filenames: list[str], *, tried: list[Path], project_root: Path | None
-) -> Path | None:
-    if project_root is None:
-        return None
-    for filename in filenames:
-        candidate = (project_root / filename).resolve()
-        tried.append(candidate)
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def resolve_config_path(cli_config_path: str | None) -> Path:
-    tried: list[Path] = []
-
-    resolved = _resolve_cli_config_path(
-        cli_config_path,
-        tried=tried,
-        # propagate to env for downstream subprocess/tool execution
-        propagate_env_var=CONFIG_ENV_VAR,
-    )
-    if resolved is not None:
-        return resolved
-
-    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
-    if resolved is not None:
-        return resolved
-
-    resolved = _resolve_in_cwd([DEFAULT_CONFIG_FILENAME], tried=tried)
-    if resolved is not None:
-        return resolved
-
-    project_root = _default_project_root()
-    resolved = _resolve_in_project_root([DEFAULT_CONFIG_FILENAME], tried=tried, project_root=project_root)
-    if resolved is not None:
-        return resolved
-
-    tried_str = "\n".join(f"- {p}" for p in tried)
-    raise ConfigError(
-        "設定ファイル ai-chat-util-config.yml が見つかりません。以下を探索しました:\n" + tried_str +
-        f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、カレント/プロジェクトルートに {DEFAULT_CONFIG_FILENAME} を配置してください。"
-    )
-
-def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
-    tried: list[Path] = []
-
-    resolved = _resolve_cli_config_path(
-        cli_config_path,
-        tried=tried,
-        # propagate to env for downstream subprocess/tool execution
-        # NOTE: autonomous MCP server passes ai-chat-util-config.yml here (integration mode).
-        propagate_env_var=CONFIG_ENV_VAR,
-    )
-    if resolved is not None:
-        return resolved
-
-    # Integration mode: prefer resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
-    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
-    if resolved is not None:
-        return resolved
-
-    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
-    resolved = _resolve_env_config_path(AUTONOMOUS_CONFIG_ENV_VAR, tried=tried)
-    if resolved is not None:
-        return resolved
-
-    # Integration mode: allow ai-chat-util-config.yml in CWD.
-    resolved = _resolve_in_cwd(
-        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
-        tried=tried,
-    )
-    if resolved is not None:
-        return resolved
-
-    project_root = _default_project_root()
-    resolved = _resolve_in_project_root(
-        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
-        tried=tried,
-        project_root=project_root,
-    )
-    if resolved is not None:
-        return resolved
-
-    tried_str = "\n".join(f"- {p}" for p in tried)
-    raise ConfigError(
-        "設定ファイルが見つかりません。以下を探索しました:\n"
-        + tried_str
-        + (
-            f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
-            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
-        )
-    )
-
-
-def _load_yaml_config(path: Path) -> dict[str, Any]:
-    try:
-        import yaml  # type: ignore
-    except Exception as e:  # pragma: no cover
-        raise ConfigError(
-            "PyYAML がインストールされていません。requirements に PyYAML を追加してください。"
-        ) from e
-
-    with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)  # type: ignore[attr-defined]
-
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ConfigError(f"ai-chat-util-config.yml のルートは mapping(dict) である必要があります: {path}")
-    return data
 
 
 _ENV_REF_PREFIX = "os.environ/"
 
 
-def _resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:
-    if not value.startswith(_ENV_REF_PREFIX):
-        raise ConfigError(
-            f"秘密情報は ai-chat-util-config.yml に直書きできません: {config_path} ({field_path})\n"
-            f"対処: '{field_path}: os.environ/ENV_VAR_NAME' の形式で環境変数参照にしてください。"
-        )
-
-    env_name = value[len(_ENV_REF_PREFIX) :].strip()
-    if not env_name:
-        raise ConfigError(
-            f"環境変数参照が不正です（変数名が空）: {config_path} ({field_path})"
-        )
-
-    resolved = os.getenv(env_name)
-    if resolved is None or resolved == "":
-        raise ConfigError(
-            f"環境変数 {env_name} が設定されていません: {config_path} ({field_path})\n"
-            "対処: .env もしくは環境変数で API キー等を設定してください。"
-        )
-    return resolved
-
-
-def _apply_secret_overrides_from_yaml(
-    raw: dict[str, Any], *, config_path: Path, field_prefix: str = ""
-) -> dict[str, Any]:
-    """Apply secret settings from YAML in a safe way.
-
-    - Supports llm.api_key
-    - Supports llm.extra_headers (values only)
-    - Secrets must be provided as env reference: os.environ/VAR
-    """
-
-    llm = raw.get("llm")
-    if not isinstance(llm, dict):
-        return raw
-
-    copied_llm = dict(llm)
-    changed = False
-
-    if "api_key" in llm:
-        api_key_value = llm.get("api_key")
-        if api_key_value is not None:
-            if not isinstance(api_key_value, str):
-                raise ConfigError(
-                    f"llm.api_key は文字列である必要があります: {config_path} ({field_prefix}llm.api_key)"
-                )
-            copied_llm["api_key"] = _resolve_env_ref(
-                api_key_value,
-                config_path=config_path,
-                field_path=f"{field_prefix}llm.api_key",
-            )
-            changed = True
-
-    if "extra_headers" in llm:
-        extra_headers_value = llm.get("extra_headers")
-        if extra_headers_value is not None:
-            if not isinstance(extra_headers_value, dict):
-                raise ConfigError(
-                    f"llm.extra_headers は mapping(dict) である必要があります: {config_path} ({field_prefix}llm.extra_headers)"
-                )
-            resolved_headers: dict[str, str] = {}
-            for k, v in extra_headers_value.items():
-                if not isinstance(k, str) or not k.strip():
-                    raise ConfigError(
-                        f"llm.extra_headers のキーは空でない文字列である必要があります: {config_path} (llm.extra_headers)"
-                    )
-                if not isinstance(v, str):
-                    raise ConfigError(
-                        f"llm.extra_headers.{k} は文字列である必要があります: {config_path} ({field_prefix}llm.extra_headers.{k})"
-                    )
-                resolved_headers[k] = _resolve_env_ref(
-                    v,
-                    config_path=config_path,
-                    field_path=f"{field_prefix}llm.extra_headers.{k}",
-                )
-
-            copied_llm["extra_headers"] = resolved_headers
-            changed = True
-
-    if not changed:
-        return raw
-
-    copied = dict(raw)
-    copied["llm"] = copied_llm
-    return copied
+_runtime_state: _RuntimeState | None = None
+_autonomous_runtime_state: _AutonomousRuntimeState | None = None
 
 
 def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
@@ -642,6 +208,11 @@ def get_runtime_config() -> AiChatUtilConfig:
         return init_runtime(None)
     return _runtime_state.config
 
+def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
+    if _autonomous_runtime_state is None:
+        return init_autonomous_runtime(None)
+    return _autonomous_runtime_state.config
+
 def get_autonomous_runtime_config_path() -> Path:
     if _autonomous_runtime_state is None:
         init_autonomous_runtime(None)
@@ -654,11 +225,6 @@ def get_runtime_config_path() -> Path:
         init_runtime(None)
     assert _runtime_state is not None
     return _runtime_state.config_path
-
-def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
-    if _autonomous_runtime_state is None:
-        return init_autonomous_runtime(None)
-    return _autonomous_runtime_state.config
 
 
 def _apply_non_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:
@@ -772,16 +338,442 @@ def _configure_litellm(config: AiChatUtilConfig) -> None:
         litellm.api_version = config.llm.api_version
 
 
-# =====================
-# Autonomous Agent Util Runtime (embedded)
-# =====================
+def _default_project_root() -> Path | None:
+    # Prefer cwd walk-up.
+    cwd_root = _find_project_root(Path.cwd())
+    if cwd_root is not None:
+        return cwd_root
 
-AUTONOMOUS_CONFIG_ENV_VAR = "AUTONOMOUS_AGENT_UTIL_CONFIG"
-AUTONOMOUS_DEFAULT_CONFIG_FILENAME = "autonomous-agent-util-config.yml"
-AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME = DEFAULT_CONFIG_FILENAME
+    # Fallback to package location walk-up.
+    here = Path(__file__).resolve()
+    pkg_root = _find_project_root(here)
+    return pkg_root
 
-# New autonomous-agent-util standalone config format root key (required).
-AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY = "autonomous_agent_util_config"
+
+def _abspath(p: str | Path) -> Path:
+    return Path(p).expanduser().resolve()
+
+
+def _resolve_cli_config_path(
+    cli_config_path: str | None,
+    *,
+    tried: list[Path],
+    propagate_env_var: str | None = None,
+) -> Path | None:
+    if not cli_config_path:
+        return None
+
+    candidate = _abspath(cli_config_path)
+    tried.append(candidate)
+    if not candidate.is_file():
+        raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
+
+    if propagate_env_var:
+        os.environ[propagate_env_var] = str(candidate)
+
+    return candidate
+
+
+def _resolve_env_config_path(env_var: str, *, tried: list[Path]) -> Path | None:
+    env_path = os.getenv(env_var)
+    if not env_path:
+        return None
+
+    candidate = _abspath(env_path)
+    tried.append(candidate)
+    if not candidate.is_file():
+        raise ConfigError(f"環境変数 {env_var} で指定された設定ファイルが見つかりません: {candidate}")
+
+    return candidate
+
+
+def _resolve_in_cwd(filenames: list[str], *, tried: list[Path]) -> Path | None:
+    for filename in filenames:
+        candidate = (Path.cwd() / filename).resolve()
+        tried.append(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_in_project_root(
+    filenames: list[str], *, tried: list[Path], project_root: Path | None
+) -> Path | None:
+    if project_root is None:
+        return None
+    for filename in filenames:
+        candidate = (project_root / filename).resolve()
+        tried.append(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_config_path(cli_config_path: str | None) -> Path:
+    tried: list[Path] = []
+
+    resolved = _resolve_cli_config_path(
+        cli_config_path,
+        tried=tried,
+        # propagate to env for downstream subprocess/tool execution
+        propagate_env_var=CONFIG_ENV_VAR,
+    )
+    if resolved is not None:
+        return resolved
+
+    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
+
+    resolved = _resolve_in_cwd([DEFAULT_CONFIG_FILENAME], tried=tried)
+    if resolved is not None:
+        return resolved
+
+    project_root = _default_project_root()
+    resolved = _resolve_in_project_root([DEFAULT_CONFIG_FILENAME], tried=tried, project_root=project_root)
+    if resolved is not None:
+        return resolved
+
+    tried_str = "\n".join(f"- {p}" for p in tried)
+    raise ConfigError(
+        "設定ファイル ai-chat-util-config.yml が見つかりません。以下を探索しました:\n" + tried_str +
+        f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、カレント/プロジェクトルートに {DEFAULT_CONFIG_FILENAME} を配置してください。"
+    )
+
+def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
+    tried: list[Path] = []
+
+    resolved = _resolve_cli_config_path(
+        cli_config_path,
+        tried=tried,
+        # propagate to env for downstream subprocess/tool execution
+        # NOTE: autonomous MCP server passes ai-chat-util-config.yml here (integration mode).
+        propagate_env_var=CONFIG_ENV_VAR,
+    )
+    if resolved is not None:
+        return resolved
+
+    # Integration mode: prefer resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
+    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
+
+    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
+    resolved = _resolve_env_config_path(AUTONOMOUS_CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
+
+    # Integration mode: allow ai-chat-util-config.yml in CWD.
+    resolved = _resolve_in_cwd(
+        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        tried=tried,
+    )
+    if resolved is not None:
+        return resolved
+
+    project_root = _default_project_root()
+    resolved = _resolve_in_project_root(
+        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        tried=tried,
+        project_root=project_root,
+    )
+    if resolved is not None:
+        return resolved
+
+    tried_str = "\n".join(f"- {p}" for p in tried)
+    raise ConfigError(
+        "設定ファイルが見つかりません。以下を探索しました:\n"
+        + tried_str
+        + (
+            f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
+            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
+        )
+    )
+
+
+def _load_yaml_config(path: Path) -> dict[str, Any]:
+    try:
+        import yaml  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ConfigError(
+            "PyYAML がインストールされていません。requirements に PyYAML を追加してください。"
+        ) from e
+
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)  # type: ignore[attr-defined]
+
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ConfigError(f"ai-chat-util-config.yml のルートは mapping(dict) である必要があります: {path}")
+    return data
+
+
+def _resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:
+    if not value.startswith(_ENV_REF_PREFIX):
+        raise ConfigError(
+            f"秘密情報は ai-chat-util-config.yml に直書きできません: {config_path} ({field_path})\n"
+            f"対処: '{field_path}: os.environ/ENV_VAR_NAME' の形式で環境変数参照にしてください。"
+        )
+
+    env_name = value[len(_ENV_REF_PREFIX) :].strip()
+    if not env_name:
+        raise ConfigError(
+            f"環境変数参照が不正です（変数名が空）: {config_path} ({field_path})"
+        )
+
+    resolved = os.getenv(env_name)
+    if resolved is None or resolved == "":
+        raise ConfigError(
+            f"環境変数 {env_name} が設定されていません: {config_path} ({field_path})\n"
+            "対処: .env もしくは環境変数で API キー等を設定してください。"
+        )
+    return resolved
+
+
+def _apply_secret_overrides_from_yaml(
+    raw: dict[str, Any], *, config_path: Path, field_prefix: str = ""
+) -> dict[str, Any]:
+    """Apply secret settings from YAML in a safe way.
+
+    - Supports llm.api_key
+    - Supports llm.extra_headers (values only)
+    - Secrets must be provided as env reference: os.environ/VAR
+    """
+
+    llm = raw.get("llm")
+    if not isinstance(llm, dict):
+        return raw
+
+    copied_llm = dict(llm)
+    changed = False
+
+    if "api_key" in llm:
+        api_key_value = llm.get("api_key")
+        if api_key_value is not None:
+            if not isinstance(api_key_value, str):
+                raise ConfigError(
+                    f"llm.api_key は文字列である必要があります: {config_path} ({field_prefix}llm.api_key)"
+                )
+            copied_llm["api_key"] = _resolve_env_ref(
+                api_key_value,
+                config_path=config_path,
+                field_path=f"{field_prefix}llm.api_key",
+            )
+            changed = True
+
+    if "extra_headers" in llm:
+        extra_headers_value = llm.get("extra_headers")
+        if extra_headers_value is not None:
+            if not isinstance(extra_headers_value, dict):
+                raise ConfigError(
+                    f"llm.extra_headers は mapping(dict) である必要があります: {config_path} ({field_prefix}llm.extra_headers)"
+                )
+            resolved_headers: dict[str, str] = {}
+            for k, v in extra_headers_value.items():
+                if not isinstance(k, str) or not k.strip():
+                    raise ConfigError(
+                        f"llm.extra_headers のキーは空でない文字列である必要があります: {config_path} (llm.extra_headers)"
+                    )
+                if not isinstance(v, str):
+                    raise ConfigError(
+                        f"llm.extra_headers.{k} は文字列である必要があります: {config_path} ({field_prefix}llm.extra_headers.{k})"
+                    )
+                resolved_headers[k] = _resolve_env_ref(
+                    v,
+                    config_path=config_path,
+                    field_path=f"{field_prefix}llm.extra_headers.{k}",
+                )
+
+            copied_llm["extra_headers"] = resolved_headers
+            changed = True
+
+    if not changed:
+        return raw
+
+    copied = dict(raw)
+    copied["llm"] = copied_llm
+    return copied
+
+
+def _find_project_root(start: Path) -> Path | None:
+    current = start.resolve()
+    for parent in [current, *current.parents]:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    return None
+
+
+
+class ConfigError(RuntimeError):
+    pass
+
+
+class LLMSection(BaseModel):
+    provider: str = Field(default="openai")
+    completion_model: str = Field(default="gpt-5")
+    embedding_model: str = Field(default="text-embedding-3-small")
+
+    # non-secret default timeout (seconds) for chat completion calls
+    timeout_seconds: float = Field(default=60.0, ge=0.0)
+
+    # secret API key (must be provided via env reference; e.g. os.environ/ENV_VAR_NAME)
+    api_key: str | None = Field(default=None)
+
+    # non-secret endpoint/base url
+    base_url: str | None = Field(default=None)
+
+    # non-secret api version (mainly for Azure OpenAI via LiteLLM)
+    api_version: str | None = Field(default=None)
+
+    # secret/non-secret mixed: extra headers for outbound LLM requests.
+    # For safety, values must be provided via env reference in ai-chat-util-config.yml and are resolved at load time.
+    extra_headers: dict[str, str] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_api_key_required(self) -> "LLMSection":
+        provider = (self.provider or "").lower()
+        providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
+        if provider in providers_requiring_key and not self.api_key:
+            raise ValueError(
+                "llm.api_key が未設定です。ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/ENV_VAR_NAME' を設定し、"
+                "参照先の環境変数を設定してください。"
+            )
+        return self
+
+    def create_litellm_model_list(self) -> list[dict[str, Any]]:
+        """Create a list of model names to try with LiteLLM, based on the config."""
+        litellm_extra_headers: dict[str, str] | None = None
+        if self.extra_headers:
+            # Reserve x-mcp-* for MCP forwarding (do NOT send to LiteLLM).
+            filtered = {
+                k: v for k, v in self.extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
+            }
+            if filtered:
+                litellm_extra_headers = filtered
+
+        completion_litellm_dict = {}
+        completion_litellm_dict["model"] = f"{self.provider}/{self.completion_model}"
+        completion_litellm_dict["api_key"] = self.api_key
+        if self.base_url:
+            completion_litellm_dict["api_base"] = self.base_url
+        if self.api_version:
+            completion_litellm_dict["api_version"] = self.api_version
+        if litellm_extra_headers:
+            completion_litellm_dict["extra_headers"] = litellm_extra_headers
+
+        completion_model_dict = {
+            "model_name": self.completion_model,
+            "litellm_params": completion_litellm_dict
+        }
+
+        embedding_litellm_dict = {}
+        embedding_litellm_dict["model"] = f"{self.provider}/{self.embedding_model}"
+        embedding_litellm_dict["api_key"] = self.api_key
+        if self.base_url:
+            embedding_litellm_dict["api_base"] = self.base_url
+        if self.api_version:
+            embedding_litellm_dict["api_version"] = self.api_version
+        if litellm_extra_headers:
+            embedding_litellm_dict["extra_headers"] = litellm_extra_headers
+        embedding_model_dict = {
+            "model_name": self.embedding_model,
+            "litellm_params": embedding_litellm_dict
+        }
+
+        models: list[dict[str, Any]] = []
+        if self.completion_model:
+            models.append(completion_model_dict)
+        if self.embedding_model:
+            models.append(embedding_model_dict)
+        return models
+
+class PathsSection(BaseModel):
+    # Preferred key name for MCP settings JSON path.
+    # Kept compatible with older key: mcp_server_config_file_path.
+    mcp_config_path: str | None = Field(default=None)
+    mcp_server_config_file_path: str | None = Field(default=None)
+    custom_instructions_file_path: str | None = Field(default=None)
+    working_directory: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _coalesce_mcp_config_path(self) -> "PathsSection":
+        a = self.mcp_config_path
+        b = self.mcp_server_config_file_path
+        if a and b and a != b:
+            raise ValueError(
+                "paths.mcp_config_path と paths.mcp_server_config_file_path の両方が設定されていますが一致しません。"
+                "どちらか一方に統一してください。"
+            )
+        if a and not b:
+            self.mcp_server_config_file_path = a
+        if b and not a:
+            self.mcp_config_path = b
+        return self
+
+
+class FeaturesSection(BaseModel):
+    allow_outside_modifications: bool = Field(default=False)
+    use_custom_pdf_analyzer: bool = Field(default=False)
+    mcp_recursion_limit: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "LangGraph supervisor の再帰(ステップ)上限。\n"
+            "ツール/エージェントの無限ループを防ぐ安全弁です。"
+        ),
+    )
+    mcp_tool_call_limit: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "1ユーザー入力(=1 trace_id)あたりのツール呼び出し回数上限。\n"
+            "同一入力でツールが繰り返し実行されるのを防ぎます。"
+        ),
+    )
+    mcp_tool_timeout_seconds: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "MCPツール呼び出しのアプリ側ハードタイムアウト(秒)。\n"
+            "未設定(None)の場合は llm.timeout_seconds を使用します。"
+        ),
+    )
+    mcp_tool_timeout_retries: int = Field(
+        default=1,
+        ge=0,
+        description=(
+            "MCPツールがタイムアウトした場合の再試行回数。\n"
+            "1なら『最大1回だけ再試行』です。"
+        ),
+    )
+    hitl_approval_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "HITL（Human-in-the-loop）承認が必要なツール名のリスト。"
+            "このリストに含まれるツールを実行する前に、エージェントは人間へ承認を求めて pause します。"
+        ),
+    )
+
+
+class LoggingSection(BaseModel):
+    level: str = Field(default="INFO")
+    file: str | None = Field(default=None)
+
+
+class NetworkSection(BaseModel):
+    requests_verify: bool = Field(default=True)
+    ca_bundle: str | None = Field(default=None)
+
+
+class Office2PDFSection(BaseModel):
+    libreoffice_path: str | None = Field(default=None)
+
+
+class _RuntimeState(BaseModel):
+    config_path: Path
+    config: AiChatUtilConfig
+
 
 
 class AutonomousAgentUtilLoggingSection(BaseModel):
@@ -858,6 +850,15 @@ class AutonomousHostSection(BaseModel):
 
 class AutonomousSubprocessSection(BaseModel):
     command: str = Field(default="opencode run")
+
+
+class AiChatUtilConfig(BaseModel):
+    llm: LLMSection = Field(default_factory=LLMSection)
+    paths: PathsSection = Field(default_factory=PathsSection)
+    features: FeaturesSection = Field(default_factory=FeaturesSection)
+    logging: LoggingSection = Field(default_factory=LoggingSection)
+    network: NetworkSection = Field(default_factory=NetworkSection)
+    office2pdf: Office2PDFSection = Field(default_factory=Office2PDFSection)
 
 
 class AutonomousAgentUtilConfig(BaseModel):

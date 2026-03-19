@@ -10,7 +10,7 @@ from langchain.agents import create_agent
 from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from ai_chat_util_base.config.ai_chat_util_runtime import (
+from ai_chat_util_base.config.runtime import (
     CONFIG_ENV_VAR,
     AiChatUtilConfig,
     get_runtime_config,

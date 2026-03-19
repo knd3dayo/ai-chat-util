@@ -11,7 +11,7 @@ import yaml
 from ai_chat_util.agent.autonomous._api_.api_server import create_app
 from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
 from ai_chat_util_base.model.agent_util_models import TaskStatus
-from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
+from ai_chat_util_base.config import runtime as runtime_mod
 
 endpoint = EndPoint() 
 

@@ -9,9 +9,9 @@ import inspect
 from typing import Callable
 import time
 
-from ai_chat_util_base.config.ai_chat_util_runtime import (
+from ai_chat_util_base.config.runtime import (
 	init_autonomous_runtime,
-	apply_autonomous_logging_overrides,
+	apply_logging_overrides,
 )
 from fastmcp import FastMCP, Context
 
@@ -234,7 +234,7 @@ class AutonomousMCPServer:
 		args = self.parse_args()
 		init_autonomous_runtime(args.config or None)
 		if args.log_level:
-			apply_autonomous_logging_overrides(level=args.log_level)
+			apply_logging_overrides(level=args.log_level)
 
 		mcp = FastMCP("autonomous_agent_executor")
 		self.prepare_mcp(endpoint, mcp, args.tools, args.sync_mode)

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer
 import os
 import uuid
-from ..config.ai_chat_util_runtime import get_autonomous_runtime_config
+from ..config.runtime import get_autonomous_runtime_config
 
 from typing import Optional
 from pydantic import BaseModel, Field

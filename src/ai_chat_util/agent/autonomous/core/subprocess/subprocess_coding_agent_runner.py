@@ -13,7 +13,7 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ai_chat_util_base.model.agent_util_models import TaskStatus, CodingAgentConfig
 from ..utils import ExecutorUtil
 from ..process_utils import popen_new_process_group_kwargs
-from ai_chat_util_base.config.ai_chat_util_runtime import get_autonomous_runtime_config
+from ai_chat_util_base.config.runtime import get_autonomous_runtime_config
 
 
 def _find_project_root(start: pathlib.Path) -> pathlib.Path | None:

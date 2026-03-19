@@ -1,5 +1,5 @@
 from fastapi import APIRouter, FastAPI
-from ai_chat_util_base.config.ai_chat_util_runtime import init_runtime
+from ai_chat_util_base.config.runtime import init_runtime
 
 from ai_chat_util.core.resource_app import (
     use_custom_pdf_analyzer,

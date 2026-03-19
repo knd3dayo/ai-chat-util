@@ -15,7 +15,7 @@ from ai_chat_util_base.model.agent_util_models import TaskStatus
 
 from ...util.logging import get_application_logger
 from ..process_utils import popen_new_process_group_kwargs
-from ai_chat_util_base.config.ai_chat_util_runtime import (
+from ai_chat_util_base.config.runtime import (
     get_autonomous_runtime_config,
     get_autonomous_runtime_config_path,
 )

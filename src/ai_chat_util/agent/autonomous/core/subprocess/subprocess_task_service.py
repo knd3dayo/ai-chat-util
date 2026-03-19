@@ -14,7 +14,7 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from ..process_utils import kill_process_tree, popen_new_process_group_kwargs
 from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
-from ai_chat_util_base.config.ai_chat_util_runtime import (
+from ai_chat_util_base.config.runtime import (
     get_autonomous_runtime_config,
     get_autonomous_runtime_config_path,
 )

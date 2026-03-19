@@ -4,9 +4,9 @@ import logging
 
 import pytest
 
-from ai_chat_util_base.config.ai_chat_util_runtime import AutonomousAgentUtilConfig
-from ai_chat_util_base.config.ai_chat_util_runtime import AiChatUtilConfig
-from ai_chat_util_base.config import ai_chat_util_runtime as runtime_mod
+from ai_chat_util_base.config.runtime import AutonomousAgentUtilConfig
+from ai_chat_util_base.config.runtime import AiChatUtilConfig
+from ai_chat_util_base.config import runtime as runtime_mod
 
 
 def test_logging_redacts_common_secrets(capsys: pytest.CaptureFixture[str]) -> None:

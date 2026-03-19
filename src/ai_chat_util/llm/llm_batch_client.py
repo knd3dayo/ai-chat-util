@@ -5,7 +5,7 @@ from tqdm.asyncio import tqdm_asyncio
 from ai_chat_util.llm.llm_factory import LLMFactory
 
 from ai_chat_util_base.model.ai_chatl_util_models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
-from ai_chat_util_base.config.ai_chat_util_runtime import AiChatUtilConfig
+from ai_chat_util_base.config.runtime import AiChatUtilConfig
 
 import pandas as pd
 

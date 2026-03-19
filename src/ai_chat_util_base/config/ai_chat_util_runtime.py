@@ -15,6 +15,11 @@ DEFAULT_CONFIG_FILENAME = "ai-chat-util-config.yml"
 AI_CHAT_UTIL_CONFIG_ROOT_KEY = "ai_chat_util_config"
 
 
+
+_runtime_state: _RuntimeState | None = None
+_autonomous_runtime_state: _AutonomousRuntimeState | None = None
+
+
 class ConfigError(RuntimeError):
     pass
 
@@ -194,9 +199,6 @@ class _RuntimeState(BaseModel):
     config: AiChatUtilConfig
 
 
-_runtime_state: _RuntimeState | None = None
-
-
 def _find_project_root(start: Path) -> Path | None:
     current = start.resolve()
     for parent in [current, *current.parents]:
@@ -221,46 +223,140 @@ def _abspath(p: str | Path) -> Path:
     return Path(p).expanduser().resolve()
 
 
+def _resolve_cli_config_path(
+    cli_config_path: str | None,
+    *,
+    tried: list[Path],
+    propagate_env_var: str | None = None,
+) -> Path | None:
+    if not cli_config_path:
+        return None
+
+    candidate = _abspath(cli_config_path)
+    tried.append(candidate)
+    if not candidate.is_file():
+        raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
+
+    if propagate_env_var:
+        os.environ[propagate_env_var] = str(candidate)
+
+    return candidate
+
+
+def _resolve_env_config_path(env_var: str, *, tried: list[Path]) -> Path | None:
+    env_path = os.getenv(env_var)
+    if not env_path:
+        return None
+
+    candidate = _abspath(env_path)
+    tried.append(candidate)
+    if not candidate.is_file():
+        raise ConfigError(f"環境変数 {env_var} で指定された設定ファイルが見つかりません: {candidate}")
+
+    return candidate
+
+
+def _resolve_in_cwd(filenames: list[str], *, tried: list[Path]) -> Path | None:
+    for filename in filenames:
+        candidate = (Path.cwd() / filename).resolve()
+        tried.append(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_in_project_root(
+    filenames: list[str], *, tried: list[Path], project_root: Path | None
+) -> Path | None:
+    if project_root is None:
+        return None
+    for filename in filenames:
+        candidate = (project_root / filename).resolve()
+        tried.append(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def resolve_config_path(cli_config_path: str | None) -> Path:
     tried: list[Path] = []
 
-    if cli_config_path:
-        candidate = _abspath(cli_config_path)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(
-                f"--config で指定された設定ファイルが見つかりません: {candidate}"
-            )
+    resolved = _resolve_cli_config_path(
+        cli_config_path,
+        tried=tried,
         # propagate to env for downstream subprocess/tool execution
-        os.environ[CONFIG_ENV_VAR] = str(candidate)
-        return candidate
+        propagate_env_var=CONFIG_ENV_VAR,
+    )
+    if resolved is not None:
+        return resolved
 
-    env_path = os.getenv(CONFIG_ENV_VAR)
-    if env_path:
-        candidate = _abspath(env_path)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(
-                f"環境変数 {CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}"
-            )
-        return candidate
+    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
 
-    cwd_candidate = (Path.cwd() / DEFAULT_CONFIG_FILENAME).resolve()
-    tried.append(cwd_candidate)
-    if cwd_candidate.is_file():
-        return cwd_candidate
+    resolved = _resolve_in_cwd([DEFAULT_CONFIG_FILENAME], tried=tried)
+    if resolved is not None:
+        return resolved
 
     project_root = _default_project_root()
-    if project_root is not None:
-        root_candidate = (project_root / DEFAULT_CONFIG_FILENAME).resolve()
-        tried.append(root_candidate)
-        if root_candidate.is_file():
-            return root_candidate
+    resolved = _resolve_in_project_root([DEFAULT_CONFIG_FILENAME], tried=tried, project_root=project_root)
+    if resolved is not None:
+        return resolved
 
     tried_str = "\n".join(f"- {p}" for p in tried)
     raise ConfigError(
         "設定ファイル ai-chat-util-config.yml が見つかりません。以下を探索しました:\n" + tried_str +
         f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、カレント/プロジェクトルートに {DEFAULT_CONFIG_FILENAME} を配置してください。"
+    )
+
+def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
+    tried: list[Path] = []
+
+    resolved = _resolve_cli_config_path(
+        cli_config_path,
+        tried=tried,
+        # propagate to env for downstream subprocess/tool execution
+        # NOTE: autonomous MCP server passes ai-chat-util-config.yml here (integration mode).
+        propagate_env_var=CONFIG_ENV_VAR,
+    )
+    if resolved is not None:
+        return resolved
+
+    # Integration mode: prefer resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
+    resolved = _resolve_env_config_path(CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
+
+    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
+    resolved = _resolve_env_config_path(AUTONOMOUS_CONFIG_ENV_VAR, tried=tried)
+    if resolved is not None:
+        return resolved
+
+    # Integration mode: allow ai-chat-util-config.yml in CWD.
+    resolved = _resolve_in_cwd(
+        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        tried=tried,
+    )
+    if resolved is not None:
+        return resolved
+
+    project_root = _default_project_root()
+    resolved = _resolve_in_project_root(
+        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        tried=tried,
+        project_root=project_root,
+    )
+    if resolved is not None:
+        return resolved
+
+    tried_str = "\n".join(f"- {p}" for p in tried)
+    raise ConfigError(
+        "設定ファイルが見つかりません。以下を探索しました:\n"
+        + tried_str
+        + (
+            f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
+            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
+        )
     )
 
 
@@ -415,6 +511,115 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
     return config
 
 
+def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
+    global _autonomous_runtime_state
+
+    load_dotenv()
+
+    resolved = resolve_autonomous_config_path(config_path)
+    raw_root = _load_yaml_config(resolved)
+
+    raw: dict[str, Any]
+    ai_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY) if isinstance(raw_root, dict) else None
+    if ai_section is None:
+        ai_section_dict: dict[str, Any] | None = None
+    elif not isinstance(ai_section, dict):
+        raise ConfigError(
+            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
+        )
+    else:
+        ai_section_dict = ai_section
+
+    embedded = (
+        ai_section_dict.get("autonomous_agent_util", "__missing__")
+        if ai_section_dict is not None
+        else "__missing__"
+    )
+
+    if embedded != "__missing__":
+        if embedded is None:
+            embedded = {}
+        if not isinstance(embedded, dict):
+            raise ConfigError(
+                f"ai_chat_util_config.autonomous_agent_util は mapping(dict) である必要があります: {resolved} (ai_chat_util_config.autonomous_agent_util)"
+            )
+
+        inherited = dict(embedded)
+        root_llm = ai_section_dict.get("llm") if isinstance(ai_section_dict, dict) else None
+        if isinstance(root_llm, dict):
+            inherited_llm = dict(inherited.get("llm") or {}) if isinstance(inherited.get("llm"), dict) else {}
+            for k in ("provider", "base_url", "api_key", "base_model"):
+                if k not in inherited_llm and k in root_llm:
+                    inherited_llm[k] = root_llm.get(k)
+            if inherited_llm:
+                inherited["llm"] = inherited_llm
+        raw = inherited
+    else:
+        # Standalone autonomous-agent-util-config.yml must use the new root key.
+        if not isinstance(raw_root, dict):
+            raise ConfigError(f"設定ファイルのルートは mapping(dict) である必要があります: {resolved}")
+
+        standalone_section = raw_root.get(AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY, "__missing__")
+        if standalone_section == "__missing__":
+            # If it looks like an ai-chat-util config (or integrated config), give a clear hint.
+            llm = raw_root.get("llm")
+            llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
+            root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
+            ai_section_present = ai_section_dict is not None
+            path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
+            if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
+                raise ConfigError(
+                    "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
+                    f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                )
+
+            # Otherwise, treat as old autonomous format and fail fast with migration instructions.
+            raise ConfigError(
+                f"設定ファイルの形式が不正です: {resolved}\n"
+                f"ルートに '{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
+                "旧フォーマット（ルート直下に llm/compose/backend...）はサポートされません。\n"
+                "対処: 既存の llm/compose/backend... を autonomous_agent_util_config: 配下へ 1段インデントして移動してください。"
+            )
+
+        if standalone_section is None:
+            standalone_section = {}
+        if not isinstance(standalone_section, dict):
+            raise ConfigError(
+                f"{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY})"
+            )
+
+        raw = dict(standalone_section)
+
+    for section_key in (
+        "llm",
+        "compose",
+        "backend",
+        "monitor",
+        "paths",
+        "host",
+        "subprocess",
+        "logging",
+    ):
+        if raw.get(section_key, "__missing__") is None:
+            raw[section_key] = {}
+
+    try:
+        config = AutonomousAgentUtilConfig.model_validate(raw)
+    except Exception as e:
+        raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
+
+    _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
+
+    # Use model_construct() to avoid re-validating `config`.
+    # At this point, env-ref secrets (e.g., llm.api_key) may already be resolved
+    # into literal values, and re-validation would incorrectly re-trigger the
+    # secret-policy validator.
+    _autonomous_runtime_state = _AutonomousRuntimeState.model_construct(config_path=resolved, config=config)
+    _configure_python_logging(config)
+    return config
+
+
+
 def apply_logging_overrides(level: str | None = None, file: str | None = None) -> None:
     """Apply process-local logging overrides.
 
@@ -437,12 +642,23 @@ def get_runtime_config() -> AiChatUtilConfig:
         return init_runtime(None)
     return _runtime_state.config
 
+def get_autonomous_runtime_config_path() -> Path:
+    if _autonomous_runtime_state is None:
+        init_autonomous_runtime(None)
+    assert _autonomous_runtime_state is not None
+    return _autonomous_runtime_state.config_path
+
 
 def get_runtime_config_path() -> Path:
     if _runtime_state is None:
         init_runtime(None)
     assert _runtime_state is not None
     return _runtime_state.config_path
+
+def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
+    if _autonomous_runtime_state is None:
+        return init_autonomous_runtime(None)
+    return _autonomous_runtime_state.config
 
 
 def _apply_non_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:
@@ -696,74 +912,6 @@ class _AutonomousRuntimeState(BaseModel):
     config: AutonomousAgentUtilConfig
 
 
-_autonomous_runtime_state: _AutonomousRuntimeState | None = None
-
-
-def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
-    tried: list[Path] = []
-
-    if cli_config_path:
-        candidate = _abspath(cli_config_path)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(f"--config で指定された設定ファイルが見つかりません: {candidate}")
-        return candidate
-
-    # Integration mode: prefer resolving from ai-chat-util-config.yml via AI_CHAT_UTIL_CONFIG.
-    ai_cfg_env = os.getenv(CONFIG_ENV_VAR)
-    if ai_cfg_env:
-        candidate = _abspath(ai_cfg_env)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(f"環境変数 {CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}")
-        return candidate
-
-    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
-    env_path = os.getenv(AUTONOMOUS_CONFIG_ENV_VAR)
-    if env_path:
-        candidate = _abspath(env_path)
-        tried.append(candidate)
-        if not candidate.is_file():
-            raise ConfigError(
-                f"環境変数 {AUTONOMOUS_CONFIG_ENV_VAR} で指定された設定ファイルが見つかりません: {candidate}"
-            )
-        return candidate
-
-    # Integration mode: allow ai-chat-util-config.yml in CWD.
-    cwd_ai_candidate = (Path.cwd() / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
-    tried.append(cwd_ai_candidate)
-    if cwd_ai_candidate.is_file():
-        return cwd_ai_candidate
-
-    # Backward-compat: standalone autonomous-agent-util-config.yml in CWD.
-    cwd_candidate = (Path.cwd() / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
-    tried.append(cwd_candidate)
-    if cwd_candidate.is_file():
-        return cwd_candidate
-
-    project_root = _default_project_root()
-    if project_root is not None:
-        root_ai_candidate = (project_root / AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME).resolve()
-        tried.append(root_ai_candidate)
-        if root_ai_candidate.is_file():
-            return root_ai_candidate
-
-        root_candidate = (project_root / AUTONOMOUS_DEFAULT_CONFIG_FILENAME).resolve()
-        tried.append(root_candidate)
-        if root_candidate.is_file():
-            return root_candidate
-
-    tried_str = "\n".join(f"- {p}" for p in tried)
-    raise ConfigError(
-        "設定ファイルが見つかりません。以下を探索しました:\n"
-        + tried_str
-        + (
-            f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
-            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
-        )
-    )
-
-
 def _resolve_autonomous_llm_api_key_in_place(
     config: AutonomousAgentUtilConfig, *, config_path: Path
 ) -> None:
@@ -782,126 +930,6 @@ def _resolve_autonomous_llm_api_key_in_place(
     resolved = _resolve_env_ref(api_key_value, config_path=config_path, field_path="llm.api_key")
     config.llm.api_key = resolved
 
-
-def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
-    global _autonomous_runtime_state
-
-    load_dotenv()
-
-    resolved = resolve_autonomous_config_path(config_path)
-    raw_root = _load_yaml_config(resolved)
-
-    raw: dict[str, Any]
-    ai_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY) if isinstance(raw_root, dict) else None
-    if ai_section is None:
-        ai_section_dict: dict[str, Any] | None = None
-    elif not isinstance(ai_section, dict):
-        raise ConfigError(
-            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
-        )
-    else:
-        ai_section_dict = ai_section
-
-    embedded = (
-        ai_section_dict.get("autonomous_agent_util", "__missing__")
-        if ai_section_dict is not None
-        else "__missing__"
-    )
-
-    if embedded != "__missing__":
-        if embedded is None:
-            embedded = {}
-        if not isinstance(embedded, dict):
-            raise ConfigError(
-                f"ai_chat_util_config.autonomous_agent_util は mapping(dict) である必要があります: {resolved} (ai_chat_util_config.autonomous_agent_util)"
-            )
-
-        inherited = dict(embedded)
-        root_llm = ai_section_dict.get("llm") if isinstance(ai_section_dict, dict) else None
-        if isinstance(root_llm, dict):
-            inherited_llm = dict(inherited.get("llm") or {}) if isinstance(inherited.get("llm"), dict) else {}
-            for k in ("provider", "base_url", "api_key", "base_model"):
-                if k not in inherited_llm and k in root_llm:
-                    inherited_llm[k] = root_llm.get(k)
-            if inherited_llm:
-                inherited["llm"] = inherited_llm
-        raw = inherited
-    else:
-        # Standalone autonomous-agent-util-config.yml must use the new root key.
-        if not isinstance(raw_root, dict):
-            raise ConfigError(f"設定ファイルのルートは mapping(dict) である必要があります: {resolved}")
-
-        standalone_section = raw_root.get(AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY, "__missing__")
-        if standalone_section == "__missing__":
-            # If it looks like an ai-chat-util config (or integrated config), give a clear hint.
-            llm = raw_root.get("llm")
-            llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
-            root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
-            ai_section_present = ai_section_dict is not None
-            path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
-            if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
-                raise ConfigError(
-                    "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
-                    f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
-                )
-
-            # Otherwise, treat as old autonomous format and fail fast with migration instructions.
-            raise ConfigError(
-                f"設定ファイルの形式が不正です: {resolved}\n"
-                f"ルートに '{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
-                "旧フォーマット（ルート直下に llm/compose/backend...）はサポートされません。\n"
-                "対処: 既存の llm/compose/backend... を autonomous_agent_util_config: 配下へ 1段インデントして移動してください。"
-            )
-
-        if standalone_section is None:
-            standalone_section = {}
-        if not isinstance(standalone_section, dict):
-            raise ConfigError(
-                f"{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY})"
-            )
-
-        raw = dict(standalone_section)
-
-    for section_key in (
-        "llm",
-        "compose",
-        "backend",
-        "monitor",
-        "paths",
-        "host",
-        "subprocess",
-        "logging",
-    ):
-        if raw.get(section_key, "__missing__") is None:
-            raw[section_key] = {}
-
-    try:
-        config = AutonomousAgentUtilConfig.model_validate(raw)
-    except Exception as e:
-        raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
-
-    _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
-
-    # Use model_construct() to avoid re-validating `config`.
-    # At this point, env-ref secrets (e.g., llm.api_key) may already be resolved
-    # into literal values, and re-validation would incorrectly re-trigger the
-    # secret-policy validator.
-    _autonomous_runtime_state = _AutonomousRuntimeState.model_construct(config_path=resolved, config=config)
-    _configure_python_logging(config)
-    return config
-
-
-def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
-    if _autonomous_runtime_state is None:
-        return init_autonomous_runtime(None)
-    return _autonomous_runtime_state.config
-
-
-def get_autonomous_runtime_config_path() -> Path:
-    if _autonomous_runtime_state is None:
-        init_autonomous_runtime(None)
-    assert _autonomous_runtime_state is not None
-    return _autonomous_runtime_state.config_path
 
 
 def apply_autonomous_logging_overrides(level: str | None = None, file: str | None = None) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
+import os
 
 from fastapi.testclient import TestClient
 import yaml
@@ -77,6 +78,19 @@ def test_rewrite_workspace_path_pure_from_ai_chat_util_config_embedded(tmp_path:
     raw = "/srv/ai_platform/workspaces/e2e_sv_ws_1"
     rewritten = endpoint.rewrite_workspace_path(raw)
     assert rewritten == f"{to_prefix}/e2e_sv_ws_1"
+
+
+def test_init_autonomous_runtime_propagates_ai_chat_util_config_env_on_cli_config(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    cfg_path.write_text("ai_chat_util_config:\n  autonomous_agent_util: {}\n", encoding="utf-8")
+
+    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.delenv("AI_CHAT_UTIL_CONFIG", raising=False)
+
+    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_autonomous_runtime(str(cfg_path))
+
+    assert os.getenv("AI_CHAT_UTIL_CONFIG") == str(cfg_path)
 
 
 @dataclass

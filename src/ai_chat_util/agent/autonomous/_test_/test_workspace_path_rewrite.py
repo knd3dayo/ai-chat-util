@@ -33,10 +33,11 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     cfg_path.write_text(
         """
-paths:
-  workspace_path_rewrites:
-    - from: /srv/ai_platform/workspaces
-      to: {to_prefix}
+autonomous_agent_util_config:
+    paths:
+        workspace_path_rewrites:
+            - from: /srv/ai_platform/workspaces
+              to: {to_prefix}
 """.format(to_prefix=to_prefix),
         encoding="utf-8",
     )
@@ -131,10 +132,11 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     cfg_path.write_text(
         """
-paths:
-  workspace_path_rewrites:
-    - from: /srv/ai_platform/workspaces
-      to: {to_prefix}
+autonomous_agent_util_config:
+    paths:
+        workspace_path_rewrites:
+            - from: /srv/ai_platform/workspaces
+              to: {to_prefix}
 """.format(to_prefix=to_prefix),
         encoding="utf-8",
     )

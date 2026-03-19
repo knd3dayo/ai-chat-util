@@ -560,7 +560,7 @@ uvicorn ai_chat_util.api.api_server:app
 - **MCP サーバ**（fastmcp）: `execute/status/cancel/healthz` 等のツールを提供
 - **CLI**（Typer）: タスクの起動・一覧・状態確認・キャンセル
 
-本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（`autonomous_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
+本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（`ai_chat_util_config.autonomous_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
 
 ---
 
@@ -594,7 +594,7 @@ opencode --version
 
 1. CLI/サーバ起動引数 `--config`
 2. 環境変数 `AUTONOMOUS_AGENT_UTIL_CONFIG`（互換: autonomous-agent-util-config.yml）
-3. 環境変数 `AI_CHAT_UTIL_CONFIG`（ai-chat-util-config.yml。`autonomous_agent_util:` セクションを読む）
+3. 環境変数 `AI_CHAT_UTIL_CONFIG`（ai-chat-util-config.yml。`ai_chat_util_config.autonomous_agent_util:` セクションを読む）
 4. カレントディレクトリの `./autonomous-agent-util-config.yml`（互換）
 5. カレントディレクトリの `./ai-chat-util-config.yml`（統合）
 6. プロジェクトルート（`pyproject.toml` があるディレクトリ）の `./autonomous-agent-util-config.yml`（互換）
@@ -607,8 +607,9 @@ opencode --version
 - どうしても YAML から参照したい場合は、次の形式のみ許可します
 
 ```yml
-llm:
-  api_key: os.environ/LLM_API_KEY
+autonomous_agent_util_config:
+  llm:
+    api_key: os.environ/LLM_API_KEY
 ```
 
 実際の値はプロセス起動時に `.env`/環境変数から解決されます。
@@ -807,7 +808,7 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-uti
 ### `LLM API key が未設定` で失敗する
 
 - `.env` または環境変数で API キー（例: `LLM_API_KEY`）を設定してください
-- `autonomous-agent-util-config.yml` に `llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
+- `autonomous-agent-util-config.yml` に `autonomous_agent_util_config.llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
 
 ### 設定ファイルが見つからない
 

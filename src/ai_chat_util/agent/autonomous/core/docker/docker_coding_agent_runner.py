@@ -149,7 +149,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         if provider in providers_requiring_key and not api_key:
             raise RuntimeError(
                 "LLM API key が未設定です。.env/環境変数で LLM_API_KEY を設定するか、"
-                "autonomous-agent-util-config.yml で 'llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
+                "autonomous-agent-util-config.yml で 'autonomous_agent_util_config.llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
             )
         if api_key:
             params["envs"]["LLM_API_KEY"] = str(api_key)

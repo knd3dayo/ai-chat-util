@@ -558,6 +558,9 @@ AUTONOMOUS_CONFIG_ENV_VAR = "AUTONOMOUS_AGENT_UTIL_CONFIG"
 AUTONOMOUS_DEFAULT_CONFIG_FILENAME = "autonomous-agent-util-config.yml"
 AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME = DEFAULT_CONFIG_FILENAME
 
+# New autonomous-agent-util standalone config format root key (required).
+AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY = "autonomous_agent_util_config"
+
 
 class AutonomousAgentUtilLoggingSection(BaseModel):
     level: str = Field(default="INFO")
@@ -653,7 +656,7 @@ class AutonomousAgentUtilConfig(BaseModel):
         if self.llm.api_key:
             raise ValueError(
                 "llm.api_key は秘密情報のため autonomous-agent-util-config.yml に直書きできません。"
-                "'llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
+                "'autonomous_agent_util_config.llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
             )
         return self
 
@@ -873,17 +876,40 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
                 inherited["llm"] = inherited_llm
         raw = inherited
     else:
-        llm = raw_root.get("llm")
-        llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
-        root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
-        ai_section_present = ai_section_dict is not None
-        path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
-        if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
+        # Standalone autonomous-agent-util-config.yml must use the new root key.
+        if not isinstance(raw_root, dict):
+            raise ConfigError(f"設定ファイルのルートは mapping(dict) である必要があります: {resolved}")
+
+        standalone_section = raw_root.get(AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY, "__missing__")
+        if standalone_section == "__missing__":
+            # If it looks like an ai-chat-util config (or integrated config), give a clear hint.
+            llm = raw_root.get("llm")
+            llm_looks_ai = isinstance(llm, dict) and any(k in llm for k in ("completion_model", "embedding_model"))
+            root_looks_ai = any(k in raw_root for k in ("features", "office2pdf", "network"))
+            ai_section_present = ai_section_dict is not None
+            path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
+            if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
+                raise ConfigError(
+                    "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
+                    f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                )
+
+            # Otherwise, treat as old autonomous format and fail fast with migration instructions.
             raise ConfigError(
-                "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
-                f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、互換の {AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                f"設定ファイルの形式が不正です: {resolved}\n"
+                f"ルートに '{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
+                "旧フォーマット（ルート直下に llm/compose/backend...）はサポートされません。\n"
+                "対処: 既存の llm/compose/backend... を autonomous_agent_util_config: 配下へ 1段インデントして移動してください。"
             )
-        raw = raw_root
+
+        if standalone_section is None:
+            standalone_section = {}
+        if not isinstance(standalone_section, dict):
+            raise ConfigError(
+                f"{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY})"
+            )
+
+        raw = dict(standalone_section)
 
     for section_key in (
         "llm",

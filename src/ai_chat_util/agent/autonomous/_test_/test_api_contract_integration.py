@@ -66,7 +66,7 @@ class _FakeTaskService:
 def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> None:
     # Provide a minimal autonomous-agent-util-config.yml so init_runtime() succeeds.
     cfg_path = tmp_path / "autonomous-agent-util-config.yml"
-    cfg_path.write_text("{}\n", encoding="utf-8")
+    cfg_path.write_text("autonomous_agent_util_config: {}\n", encoding="utf-8")
     monkeypatch.setenv("AUTONOMOUS_AGENT_UTIL_CONFIG", str(cfg_path))
 
     store: dict[str, TaskStatus] = {}

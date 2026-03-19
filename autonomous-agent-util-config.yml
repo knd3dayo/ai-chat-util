@@ -1,54 +1,54 @@
 # autonomous-agent-util runtime configuration (non-secrets live here)
-#
-# Secrets policy:
-# - Do NOT put raw secrets into this file.
-# - Provide secrets via .env / environment variables.
-# - If you want to reference a secret from YAML, use the form: os.environ/ENV_VAR_NAME
+autonomous_agent_util_config:
+  # Secrets policy:
+  # - Do NOT put raw secrets into this file.
+  # - Provide secrets via .env / environment variables.
+  # - If you want to reference a secret from YAML, use the form: os.environ/ENV_VAR_NAME
 
-llm:
-  provider: openai
-  model: gpt-4o
-  base_url: http://localhost:4000
-  # If you need a different endpoint inside container network:
-  # base_url_in_container: http://host.docker.internal:11434/v1
+  llm:
+    provider: openai
+    model: gpt-4o
+    base_url: http://localhost:4000
+    # If you need a different endpoint inside container network:
+    # base_url_in_container: http://host.docker.internal:11434/v1
 
-  # OPTIONAL (secret): reference env var only (no literals)
-  # api_key: os.environ/LLM_API_KEY
+    # OPTIONAL (secret): reference env var only (no literals)
+    # api_key: os.environ/LLM_API_KEY
 
-compose:
-  directory: .
-  file: docker-compose.yml
-  service_name: executor-service
-  command: opencode run
+  compose:
+    directory: .
+    file: docker-compose.yml
+    service_name: executor-service
+    command: opencode run
 
-backend:
-  # docker | compose | subprocess | process
-  task_backend: process
+  backend:
+    # docker | compose | subprocess | process
+    task_backend: process
 
-monitor:
-  disable_detach_monitor: false
-  detach_monitor_interval: 2.0
-  debug_container: false
+  monitor:
+    disable_detach_monitor: false
+    detach_monitor_interval: 2.0
+    debug_container: false
 
-paths:
-  workspace_root: /tmp/autonomous_agent_tasks
-  host_projects_root: /tmp/autonomous_agent_projects
-  # executor_allowed_workspace_root: /tmp
+  paths:
+    workspace_root: /tmp/autonomous_agent_tasks
+    host_projects_root: /tmp/autonomous_agent_projects
+    # executor_allowed_workspace_root: /tmp
 
-  # Optional: rewrite inbound workspace_path (supervisor->executor)
-  # Useful when supervisor and executor see the same workspace under different
-  # absolute paths (e.g., host vs container mount points).
-  # workspace_path_rewrites:
-  #   - from: /srv/ai_platform/workspaces
-  #     to: /workspaces
+    # Optional: rewrite inbound workspace_path (supervisor->executor)
+    # Useful when supervisor and executor see the same workspace under different
+    # absolute paths (e.g., host vs container mount points).
+    # workspace_path_rewrites:
+    #   - from: /srv/ai_platform/workspaces
+    #     to: /workspaces
 
-host:
-  uid: null
-  gid: null
+  host:
+    uid: null
+    gid: null
 
-subprocess:
-  command: opencode run
+  subprocess:
+    command: opencode run
 
-logging:
-  level: INFO
-  # file: /tmp/autonomous-agent-util.log
+  logging:
+    level: INFO
+    # file: /tmp/autonomous-agent-util.log

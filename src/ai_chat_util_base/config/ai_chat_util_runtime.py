@@ -450,19 +450,17 @@ def _apply_non_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:
     _configure_litellm(config)
 
 
-def _configure_python_logging(config: AiChatUtilConfig) -> None:
-    # Keep this lightweight but deterministic: CLI/test runs often reconfigure logging.
-    # We reset handlers to avoid duplicated output and to enforce UTF-8 file encoding.
+def _build_redacting_formatter(fmt: str):
     import logging
     import re
 
     class _RedactingFormatter(logging.Formatter):
         _replacements: list[tuple[re.Pattern[str], str]] = [
             # common api_key patterns
-            (re.compile(r"(api_key\s*=\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\\1\\2***\\2"),
-            (re.compile(r"(api_key\s*:\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\\1\\2***\\2"),
+            (re.compile(r"(api_key\s*=\s*)(['\"])[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
+            (re.compile(r"(api_key\s*:\s*)(['\"])[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
             # Bearer tokens
-            (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s\"]+", re.IGNORECASE), r"\\1***"),
+            (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s\"]+", re.IGNORECASE), r"\1***"),
             # OpenAI-style keys (best-effort)
             (re.compile(r"\bsk-[A-Za-z0-9_-]{10,}\b"), "sk-***"),
         ]
@@ -473,6 +471,14 @@ def _configure_python_logging(config: AiChatUtilConfig) -> None:
                 s = pattern.sub(repl, s)
             return s
 
+    return _RedactingFormatter(fmt)
+
+
+def _configure_python_logging(config: AiChatUtilConfig | AutonomousAgentUtilConfig) -> None:
+    # Keep this lightweight but deterministic: CLI/test runs often reconfigure logging.
+    # We reset handlers to avoid duplicated output and to enforce UTF-8 file encoding.
+    import logging
+
     level_name = (config.logging.level or "INFO").upper()
     level = logging.getLevelName(level_name)
     if not isinstance(level, int):
@@ -481,7 +487,7 @@ def _configure_python_logging(config: AiChatUtilConfig) -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
-    formatter: logging.Formatter = _RedactingFormatter(
+    formatter: logging.Formatter = _build_redacting_formatter(
         "%(asctime)s - %(levelname)s - %(pathname)s -  %(lineno)d - %(funcName)s - %(message)s"
     )
 
@@ -777,69 +783,6 @@ def _resolve_autonomous_llm_api_key_in_place(
     config.llm.api_key = resolved
 
 
-def _configure_autonomous_python_logging(config: AutonomousAgentUtilConfig) -> None:
-    import logging
-    import re
-
-    level_name = (config.logging.level or "INFO").upper()
-    level = logging.getLevelName(level_name)
-    if not isinstance(level, int):
-        level = logging.INFO
-
-    root = logging.getLogger()
-    root.setLevel(level)
-
-    # Reset handlers to avoid duplicates across repeated init.
-    for h in list(root.handlers):
-        root.removeHandler(h)
-        try:
-            h.close()
-        except Exception:
-            pass
-
-    class _RedactingFormatter(logging.Formatter):
-        _replacements: list[tuple[re.Pattern[str], str]] = [
-            (re.compile(r"(api_key\s*=\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
-            (re.compile(r"(api_key\s*:\s*)(['\"])\s*[^'\"]+\2", re.IGNORECASE), r"\1\2***\2"),
-            (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s\"]+", re.IGNORECASE), r"\1***"),
-            (re.compile(r"\bsk-[A-Za-z0-9_-]{10,}\b"), "sk-***"),
-        ]
-
-        def format(self, record: logging.LogRecord) -> str:
-            s = super().format(record)
-            for pattern, repl in self._replacements:
-                s = pattern.sub(repl, s)
-            return s
-
-    formatter: logging.Formatter = _RedactingFormatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
-
-    stream = logging.StreamHandler()
-    stream.setLevel(level)
-    stream.setFormatter(formatter)
-    root.addHandler(stream)
-
-    if config.logging.file:
-        fh = logging.FileHandler(config.logging.file, encoding="utf-8")
-        fh.setLevel(level)
-        fh.setFormatter(formatter)
-        root.addHandler(fh)
-
-    noisy_loggers = {
-        "litellm": logging.WARNING,
-        "LiteLLM": logging.WARNING,
-        "openai": logging.WARNING,
-        "aiosqlite": logging.WARNING,
-        "httpx": logging.WARNING,
-        "httpcore": logging.WARNING,
-        "aiohttp": logging.WARNING,
-        "urllib3": logging.WARNING,
-        "asyncio": logging.WARNING,
-        "sse_starlette": logging.WARNING,
-    }
-    for name, lvl in noisy_loggers.items():
-        logging.getLogger(name).setLevel(lvl)
-
-
 def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
     global _autonomous_runtime_state
 
@@ -944,7 +887,7 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
     # into literal values, and re-validation would incorrectly re-trigger the
     # secret-policy validator.
     _autonomous_runtime_state = _AutonomousRuntimeState.model_construct(config_path=resolved, config=config)
-    _configure_autonomous_python_logging(config)
+    _configure_python_logging(config)
     return config
 
 
@@ -968,4 +911,4 @@ def apply_autonomous_logging_overrides(level: str | None = None, file: str | Non
         effective.logging.level = level
     if file:
         effective.logging.file = file
-    _configure_autonomous_python_logging(effective)
+    _configure_python_logging(effective)

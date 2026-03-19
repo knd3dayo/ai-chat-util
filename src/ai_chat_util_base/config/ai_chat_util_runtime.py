@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional, Literal
+from typing import Any, Optional, Literal, Callable
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator, ConfigDict
@@ -34,15 +34,19 @@ _runtime_state: _RuntimeState | None = None
 _autonomous_runtime_state: _AutonomousRuntimeState | None = None
 
 
-def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
-    global _runtime_state
-
+def _load_resolved_yaml(
+    config_path: str | None,
+    *,
+    resolver: Callable[[str | None], Path],
+) -> tuple[Path, dict[str, Any]]:
     # Load secrets from .env / env. Non-secrets are not read from env.
     load_dotenv()
-
-    resolved = resolve_config_path(config_path)
+    resolved = resolver(config_path)
     raw_root = _load_yaml_config(resolved)
+    return resolved, raw_root
 
+
+def _extract_required_root_section(*, raw_root: dict[str, Any], resolved: Path) -> dict[str, Any]:
     # New format: settings must live under ai_chat_util_config.
     raw_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY, "__missing__")
     if raw_section == "__missing__":
@@ -58,6 +62,24 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
         raise ConfigError(
             f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
         )
+    return dict(raw_section)
+
+
+def _extract_optional_ai_section_dict(
+    *, raw_root: dict[str, Any], resolved: Path
+) -> dict[str, Any] | None:
+    ai_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY) if isinstance(raw_root, dict) else None
+    if ai_section is None:
+        return None
+    if not isinstance(ai_section, dict):
+        raise ConfigError(
+            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
+        )
+    return ai_section
+
+
+def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> AiChatUtilConfig:
+    raw_section = _extract_required_root_section(raw_root=raw_root, resolved=resolved)
 
     # Secrets may be declared in YAML only via env reference (os.environ/VAR).
     raw = _apply_secret_overrides_from_yaml(
@@ -67,34 +89,17 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
     )
 
     try:
-        config = AiChatUtilConfig.model_validate(raw)
+        return AiChatUtilConfig.model_validate(raw)
     except Exception as e:
         raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
 
-    _runtime_state = _RuntimeState(config_path=resolved, config=config)
-    _apply_non_secret_runtime_side_effects(config)
 
-    return config
-
-
-def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
-    global _autonomous_runtime_state
-
-    load_dotenv()
-
-    resolved = resolve_autonomous_config_path(config_path)
-    raw_root = _load_yaml_config(resolved)
-
+def _build_autonomous_agent_util_config(
+    *, raw_root: dict[str, Any], resolved: Path
+) -> AutonomousAgentUtilConfig:
     raw: dict[str, Any]
-    ai_section = raw_root.get(AI_CHAT_UTIL_CONFIG_ROOT_KEY) if isinstance(raw_root, dict) else None
-    if ai_section is None:
-        ai_section_dict: dict[str, Any] | None = None
-    elif not isinstance(ai_section, dict):
-        raise ConfigError(
-            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AI_CHAT_UTIL_CONFIG_ROOT_KEY})"
-        )
-    else:
-        ai_section_dict = ai_section
+
+    ai_section_dict = _extract_optional_ai_section_dict(raw_root=raw_root, resolved=resolved)
 
     embedded = (
         ai_section_dict.get("autonomous_agent_util", "__missing__")
@@ -175,6 +180,26 @@ def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUt
         raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
 
     _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
+    return config
+
+
+def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
+    global _runtime_state
+
+    resolved, raw_root = _load_resolved_yaml(config_path, resolver=resolve_config_path)
+    config = _build_ai_chat_util_config(raw_root=raw_root, resolved=resolved)
+
+    _runtime_state = _RuntimeState(config_path=resolved, config=config)
+    _apply_non_secret_runtime_side_effects(config)
+
+    return config
+
+
+def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
+    global _autonomous_runtime_state
+
+    resolved, raw_root = _load_resolved_yaml(config_path, resolver=resolve_autonomous_config_path)
+    config = _build_autonomous_agent_util_config(raw_root=raw_root, resolved=resolved)
 
     # Use model_construct() to avoid re-validating `config`.
     # At this point, env-ref secrets (e.g., llm.api_key) may already be resolved

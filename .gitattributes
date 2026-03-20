@@ -26,9 +26,9 @@
 # Shell scripts must be LF
 *.sh text eol=lf
 
-# Windows scripts (use LF to keep repo consistent)
-*.bat text eol=lf
-*.cmd text eol=lf
+# Windows scripts (use CRLF for Windows consistency)
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
 # YAML/JSON/TOML/MD
 *.yml text eol=lf

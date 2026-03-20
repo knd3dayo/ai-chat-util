@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 from typing import Iterable
-from ai_chat_util.base.llm.llm_factory import LLMFactory
-from ..base.llm.llm_client import LLMClientUtil
+from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ..base.llm.llm_client_util import LLMClientUtil
 from ai_chat_util_base.config.runtime import init_runtime, apply_logging_overrides
 
 

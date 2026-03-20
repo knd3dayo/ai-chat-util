@@ -2,7 +2,7 @@ import os
 import asyncio
 from tqdm.asyncio import tqdm_asyncio
 
-from ai_chat_util.base.llm.llm_factory import LLMFactory
+from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 
 from ai_chat_util_base.model.ai_chatl_util_models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 from ai_chat_util_base.config.runtime import AiChatUtilConfig

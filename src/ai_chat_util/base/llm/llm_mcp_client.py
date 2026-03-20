@@ -6,8 +6,6 @@ import contextlib
 import uuid
 
 import asyncio
-from langchain_litellm import ChatLiteLLMRouter
-from litellm.router import Router
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from ai_chat_util_base.config.runtime import (
     AiChatUtilConfig,
@@ -100,49 +98,22 @@ class MCPClient(AbstractLLMClient):
     async def chat(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
 
         # LLM + MCP ツールでエージェントを作成
-        litellm_router = Router(model_list=self.runtime_config.llm.create_litellm_model_list())
-        llm = ChatLiteLLMRouter(router=litellm_router, model_name=self.runtime_config.llm.completion_model)
-        # LLM + MCP ツールでエージェントを作成
         allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(self.mcp_config, self.config_parser)
 
         trace_id = getattr(chat_request, "trace_id", None)
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
-        # Safety valve: cap LangGraph step recursion to avoid runaway agent/tool loops.
-        # This does not affect normal flows, but prevents excessive repeated handoffs.
-        try:
-            recursion_limit_raw = int(getattr(self.runtime_config.features, "mcp_recursion_limit", 15) or 15)
-        except (TypeError, ValueError):
-            recursion_limit_raw = 15
-        recursion_limit = max(1, min(200, recursion_limit_raw))
+        
+        tool_limits = MCPClientUtil.get_tool_limits(self.runtime_config)
 
-        try:
-            tool_call_limit_raw = int(getattr(self.runtime_config.features, "mcp_tool_call_limit", 2) or 2)
-        except (TypeError, ValueError):
-            tool_call_limit_raw = 2
-        tool_call_limit = max(1, min(50, tool_call_limit_raw))
+        recursion_limit = tool_limits.tool_recursion_limit
+        tool_call_limit = tool_limits.tool_call_limit
+        tool_timeout_seconds = tool_limits.tool_timeout_seconds
+        tool_timeout_retries = tool_limits.tool_timeout_retries
+        auto_approve = tool_limits.auto_approve
+        max_retries = tool_limits.max_retries
 
-        # Default tool hard timeout to LLM timeout. (Tool calls include file processing + LLM.)
-        tool_timeout_cfg = getattr(self.runtime_config.features, "mcp_tool_timeout_seconds", None)
-        try:
-            tool_timeout_seconds = float(tool_timeout_cfg) if tool_timeout_cfg is not None else float(self.runtime_config.llm.timeout_seconds)
-        except (TypeError, ValueError):
-            tool_timeout_seconds = float(self.runtime_config.llm.timeout_seconds)
-        if tool_timeout_seconds <= 0:
-            tool_timeout_seconds = float(self.runtime_config.llm.timeout_seconds)
-
-        try:
-            tool_timeout_retries_raw = int(getattr(self.runtime_config.features, "mcp_tool_timeout_retries", 1) or 0)
-        except (TypeError, ValueError):
-            tool_timeout_retries_raw = 1
-        tool_timeout_retries = max(0, min(5, tool_timeout_retries_raw))
-        auto_approve = bool(getattr(chat_request, "auto_approve", False))
-        try:
-            max_retries_raw = int(getattr(chat_request, "auto_approve_max_retries", 0) or 0)
-        except (TypeError, ValueError):
-            max_retries_raw = 0
-        max_retries = max(0, min(10, max_retries_raw))
         async with contextlib.AsyncExitStack() as exit_stack:
             checkpointer = await MCPClientUtil._create_sqlite_checkpointer(
                 MCPClientUtil._default_checkpoint_db_path(self.runtime_config),
@@ -151,15 +122,12 @@ class MCPClient(AbstractLLMClient):
 
 
             app = await MCPClientUtil.create_workflow(
-                llm,
+                self.runtime_config,
                 prompts=self.prompts,
                 allowed_langchain_tools=allowed_langchain_tools,
                 checkpointer=checkpointer,
                 hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
-                auto_approve=auto_approve,
-                tool_call_limit=tool_call_limit,
-                tool_timeout_seconds=(tool_timeout_seconds + 5.0 if tool_timeout_seconds > 0 else 0.0),
-                tool_timeout_retries=tool_timeout_retries,
+                tool_limits=tool_limits,
             )
 
             # 実行

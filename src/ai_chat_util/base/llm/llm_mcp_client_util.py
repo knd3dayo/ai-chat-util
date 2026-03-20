@@ -5,6 +5,8 @@ from typing import Any, Mapping, Sequence, cast
 import contextlib
 import re
 from pathlib import Path
+from langchain_litellm import ChatLiteLLMRouter
+from litellm.router import Router
 
 import asyncio
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -32,6 +34,33 @@ from ai_chat_util_base.config.runtime import (
 from ..util.file_path_resolver import resolve_existing_file_path
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
+
+class ToolLimits(BaseModel):
+    tool_call_limit: int = Field(
+        default=50,
+        description="ツール呼び出し回数の上限。0またはNoneで無制限。安全弁として、マイナス値は0として扱います。",
+    )
+    tool_timeout_seconds: float = Field(
+        default=0,
+        description="ツール呼び出しのタイムアウト秒数。0またはNoneで無制限。安全弁として、マイナス値は0として扱います。",
+    )
+    tool_timeout_retries: int  = Field(
+        default=5,
+        description="タイムアウト発生時のリトライ回数。0でリトライなし。安全弁として、負の値は0として扱います。過度なリトライを防ぐため、最大5回までに制限します。",
+    )
+    max_retries: int = Field(
+        default=3,
+        description="ツール呼び出し失敗時の最大リトライ回数。0でリトライなし。安全弁として、負の値は0として扱います。過度なリトライを防ぐため、最大10回までに制限します。",
+    )
+    
+    auto_approve: bool = Field(
+        default=False,
+        description="Trueの場合、tool_call_limitやtool_timeout_secondsで定められた制限を超えるツール呼び出しに対しても、ユーザーの明示的な承認なしで自動的に許可します。安全弁として、tool_call_limitやtool_timeout_secondsの値が0（無制限）でない場合にのみ有効になります。",
+    )
+    tool_recursion_limit: int = Field(
+        default=200,
+        description="ツール呼び出しの再帰制限。安全弁として、負の値は1として扱います。過度な再帰を防ぐため、最大200回までに制限します。",
+    )
 
 
 class MCPClientUtil:
@@ -569,6 +598,49 @@ class MCPClientUtil:
             return (payload, artifact)
         return payload
 
+    @classmethod
+    def get_tool_limits(cls, config: AiChatUtilConfig) -> ToolLimits:
+        tool_call_limit = getattr(config, "tool_call_limit", None)
+        tool_timeout_seconds = getattr(config, "tool_timeout_seconds", None)
+        tool_timeout_retries = getattr(config, "tool_timeout_retries", None)
+        tool_recursion_limit = getattr(config, "tool_recursion_limit", 15) or 15
+
+        try:
+            tool_call_limit_raw = int(getattr(config.features, "mcp_tool_call_limit", 2) or 2)
+        except (TypeError, ValueError):
+            tool_call_limit_raw = 2
+        tool_call_limit = max(1, min(50, tool_call_limit_raw))
+
+        # Default tool hard timeout to LLM timeout. (Tool calls include file processing + LLM.)
+        tool_timeout_cfg = getattr(config.features, "mcp_tool_timeout_seconds", None)
+        try:
+            tool_timeout_seconds = float(tool_timeout_cfg) if tool_timeout_cfg is not None else float(config.llm.timeout_seconds)
+        except (TypeError, ValueError):
+            tool_timeout_seconds = float(config.llm.timeout_seconds)
+        if tool_timeout_seconds <= 0:
+            tool_timeout_seconds = float(config.llm.timeout_seconds)
+
+        try:
+            tool_timeout_retries_raw = int(getattr(config.features, "mcp_tool_timeout_retries", 1) or 0)
+        except (TypeError, ValueError):
+            tool_timeout_retries_raw = 1
+        tool_timeout_retries = max(0, min(5, tool_timeout_retries_raw))
+
+        auto_approve = bool(getattr(config, "auto_approve", False))
+        try:
+            max_retries_raw = int(getattr(config, "auto_approve_max_retries", 0) or 0)
+        except (TypeError, ValueError):
+            max_retries_raw = 0
+        max_retries = max(0, min(10, max_retries_raw))
+
+        return ToolLimits(
+            tool_call_limit=tool_call_limit,
+            tool_timeout_seconds=tool_timeout_seconds,
+            tool_timeout_retries=tool_timeout_retries,
+            auto_approve=auto_approve,
+            max_retries=max_retries,
+            tool_recursion_limit=tool_recursion_limit,
+        )
 
     @classmethod
     async def _run_tool_with_guards(
@@ -661,11 +733,25 @@ class MCPClientUtil:
         )
 
     @classmethod
+    def create_sub_agents(
+        cls,
+        llm: BaseChatModel,
+        prompts: PromptsBase,
+        tool_limits: ToolLimits | None,
+        hitl_approval_tools: Sequence[str] | None,
+        allowed_langchain_tools: list[Any],
+    ) -> list[Any]:
+        
+        tool_agent = cls.create_tool_agent(llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools)
+        # 他のサブエージェントも必要に応じてここで作成できます。
+        return [tool_agent]
+
+    @classmethod
     def create_tool_agent(
         cls,
         llm: BaseChatModel,
         prompts: PromptsBase,
-        auto_approve: bool,
+        tool_limits: ToolLimits | None,
         hitl_approval_tools: Sequence[str] | None,
         allowed_langchain_tools: list[Any],
     ) -> Any:
@@ -674,7 +760,7 @@ class MCPClientUtil:
         approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
         approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
 
-        if auto_approve:
+        if tool_limits is not None and tool_limits.auto_approve:
             hitl_policy_text = prompts.auto_approve_hitl_policy_text(approval_tools_text)
         else:
             hitl_policy_text = prompts.normal_hitl_policy_text(approval_tools_text)
@@ -691,23 +777,25 @@ class MCPClientUtil:
     @classmethod
     async def create_workflow(
         cls,
-        llm: BaseChatModel,
+        runtime_config: AiChatUtilConfig,
         prompts: PromptsBase,
         allowed_langchain_tools: list[Any],
         *,
         checkpointer: Any | None = None,
         hitl_approval_tools: Sequence[str] | None = None,
-        auto_approve: bool = False,
-        tool_call_limit: int | None = None,
-        tool_timeout_seconds: float | None = None,
-        tool_timeout_retries: int | None = None,
+        tool_limits: ToolLimits | None = None,
     ) -> CompiledStateGraph:
 
+        # LLM + MCP ツールでエージェントを作成
+        litellm_router = Router(model_list=runtime_config.llm.create_litellm_model_list())
+        llm = ChatLiteLLMRouter(router=litellm_router, model_name=runtime_config.llm.completion_model)
 
         # Safety valves: cap tool calls and hard-timeout tool execution.
         # This enforces termination even if prompts are ignored.
         tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = cls._prepare_timeout_limits(
-            tool_call_limit, tool_timeout_seconds, tool_timeout_retries
+            tool_limits.tool_call_limit if tool_limits else None,
+            tool_limits.tool_timeout_seconds if tool_limits else None,
+            tool_limits.tool_timeout_retries if tool_limits else None,
         )
 
         # Shared tool call counter across all tools within this workflow.
@@ -799,20 +887,20 @@ class MCPClientUtil:
         tools_description = "\n".join(f"## name: {tool.name}\n - description: {tool.description}\n - args_schema: {tool.args_schema}\n" for tool in allowed_langchain_tools)
         logger.info("Allowed tools:\n%s", tools_description)
 
-        # ツール実行用のエージェント
-        # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
-        tool_agent = cls.create_tool_agent(llm, prompts, auto_approve, hitl_approval_tools, allowed_langchain_tools, )
-
-        if auto_approve:
+        if tool_limits is not None and tool_limits.auto_approve:
             supervisor_hitl_policy_text = prompts.supervisor_hitl_policy_text(approval_tools_text)
         else:
             supervisor_hitl_policy_text = prompts.supervisor_normal_hitl_policy_text(approval_tools_text)
 
         supervisor_prompt = prompts.supervisor_system_prompt(tools_description, supervisor_hitl_policy_text)
 
+        # ツール実行用のエージェント
+        # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
+        sub_agents = cls.create_sub_agents(llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools)
+
         # Prefer tool execution agent first to reduce accidental planner-only loops.
         workflow = create_supervisor(
-            [tool_agent],
+            sub_agents,
             model=llm,
             prompt=supervisor_prompt,
         )

@@ -11,6 +11,6 @@ def select_task_service(backend: str | None = None) -> AbstractTaskService:
     b = (backend or cfg.backend.task_backend or "process").strip().lower()
     if b in ("docker", "compose"):
         return DockerTaskService()
-    if b in ("subprocess", "process"):
+    if b in ("subprocess", "process", "windows_process", "linux_process"):
         return SubprocessTaskService()
     raise ValueError(f"Unknown AI_PLATFORM_TASK_BACKEND: {b}")

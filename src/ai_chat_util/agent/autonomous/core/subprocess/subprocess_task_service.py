@@ -14,6 +14,8 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from ..process_utils import kill_process_tree, popen_new_process_group_kwargs
 from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
+from .windows_process_coding_agent_runner import WindowsProcessCodingAgentRunner
+from .linux_process_coding_agent_runner import LinuxProcessCodingAgentRunner
 from ai_chat_util_base.config.runtime import (
     get_autonomous_runtime_config,
     get_autonomous_runtime_config_path,
@@ -36,6 +38,20 @@ class SubprocessTaskService(AbstractTaskService):
         workspace_path: Optional[Path] = None,
         extra_env: Optional[dict[str, str]] = None,
     ) -> None:
+        cfg = get_autonomous_runtime_config()
+        backend = (cfg.backend.task_backend or "process").strip().lower()
+        # `process` auto-selects based on current platform.
+        if backend == "process":
+            runner_cls: type[SubprocessCodingAgentRunner]
+            runner_cls = WindowsProcessCodingAgentRunner if os.name == "nt" else LinuxProcessCodingAgentRunner
+        elif backend == "windows_process":
+            runner_cls = WindowsProcessCodingAgentRunner
+        elif backend == "linux_process":
+            runner_cls = LinuxProcessCodingAgentRunner
+        else:
+            # Should not happen since config validation normalizes/validates.
+            runner_cls = SubprocessCodingAgentRunner
+
         params: dict[str, object] = {"prompt": prompt, "task_id": task_id}
         if sources:
             params["source_paths"] = sources
@@ -44,7 +60,7 @@ class SubprocessTaskService(AbstractTaskService):
         if extra_env:
             params["extra_env"] = extra_env
 
-        self.runner = await SubprocessCodingAgentRunner.create_runner(**params)  # type: ignore[arg-type]
+        self.runner = await runner_cls.create_runner(**params)  # type: ignore[arg-type]
 
     def get_agent_runner(self) -> AbstractAgentRunner:
         if self.runner is None:

@@ -615,7 +615,7 @@ ai_chat_util_config:
 - `llm.provider`, `llm.model`, `llm.base_url`: LLM の非秘匿設定
 - `paths.workspace_root`: ワークスペースのデフォルト作成先
 - `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
-- `backend.task_backend`: API/MCP が使う実行バックエンド（`process/docker/compose`）
+- `backend.task_backend`: API/MCP が使う実行バックエンド（`process/windows_process/linux_process/docker/compose`）
 - `compose.*`: Docker/Compose 実行時の設定
 - `process.command`: process 実行時のコマンド（デフォルト `opencode run`）
 

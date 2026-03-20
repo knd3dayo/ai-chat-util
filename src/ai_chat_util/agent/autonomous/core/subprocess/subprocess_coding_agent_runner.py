@@ -24,88 +24,6 @@ def _find_project_root(start: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
-def _windows_wrap_shell_shims(argv: list[str]) -> list[str]:
-    """Make Windows command execution robust for shell shims.
-
-    On Windows, commands installed by various package managers (npm, pipx, etc.)
-    are often exposed as `*.cmd` / `*.bat` / `*.ps1` shims. When running a
-    subprocess with `shell=False`, CreateProcess cannot directly execute these
-    shims (especially `.ps1`), which can surface as WinError 2.
-
-    This function resolves the first argv entry against PATH and wraps the
-    invocation with the appropriate interpreter:
-    - `.exe` / `.com`: run directly
-    - `.cmd` / `.bat`: run via `cmd.exe /c`
-    - `.ps1`: run via `powershell.exe -File`
-    """
-
-    if os.name != "nt" or not argv:
-        return argv
-
-    head = (argv[0] or "").strip().strip('"')
-    if not head:
-        return argv
-
-    head_path = pathlib.Path(head)
-    # If an explicit path is provided, only wrap by extension.
-    if head_path.is_absolute() or any(sep in head for sep in ("\\", "/")):
-        ext = head_path.suffix.lower()
-        if ext == ".ps1":
-            return [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(head_path),
-                *argv[1:],
-            ]
-        if ext in {".cmd", ".bat"}:
-            import subprocess as _subprocess
-
-            cmdline = _subprocess.list2cmdline([str(head_path), *argv[1:]])
-            return ["cmd.exe", "/d", "/s", "/c", cmdline]
-        return argv
-
-    # Resolve via PATH by probing common Windows shim extensions.
-    path_entries = [p for p in (os.environ.get("PATH") or "").split(os.pathsep) if p]
-    exts = [".exe", ".com", ".cmd", ".bat", ".ps1"]
-    found: pathlib.Path | None = None
-
-    for ext in exts:
-        for p in path_entries:
-            cand = pathlib.Path(p) / f"{head}{ext}"
-            if cand.exists():
-                found = cand
-                break
-        if found is not None:
-            break
-
-    if found is None:
-        # Could be a built-in / alias / already resolvable by CreateProcess.
-        return argv
-
-    ext = found.suffix.lower()
-    if ext in {".exe", ".com"}:
-        return [str(found), *argv[1:]]
-    if ext in {".cmd", ".bat"}:
-        import subprocess as _subprocess
-
-        cmdline = _subprocess.list2cmdline([str(found), *argv[1:]])
-        return ["cmd.exe", "/d", "/s", "/c", cmdline]
-    if ext == ".ps1":
-        return [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(found),
-            *argv[1:],
-        ]
-    return argv
-
-
 @dataclass
 class SubprocessRunResult:
     pid: int
@@ -148,9 +66,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         subprocess_cmd = getattr(getattr(runtime_cfg, "subprocess", None), "command", None)
         self.command_base = command_base or (process_cmd or subprocess_cmd or runtime_cfg.compose.command)
         self.command: list[str] = shlex.split(self.command_base)
-        # Windows: wrap common shell shims (`*.cmd` / `*.bat` / `*.ps1`) so they
-        # work under `shell=False` detached execution.
-        self.command = _windows_wrap_shell_shims(self.command)
+        self.command = self._wrap_command_for_platform(self.command)
 
         # Per-task env (e.g., Authorization) to be inherited by the entrypoint process.
         self.extra_env: dict[str, str] = {
@@ -159,7 +75,8 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
 
         workspace_path = self.workspace.resolve().as_posix()
         self.task_status = TaskStatus.create(task_id=self.task_id, workspace_path=workspace_path)
-        self.task_status.metadata["backend"] = "subprocess"
+        backend_name = (getattr(getattr(runtime_cfg, "backend", None), "task_backend", None) or "process")
+        self.task_status.metadata["backend"] = str(backend_name)
         self.task_status.metadata["workspace_path"] = workspace_path
 
         # Log/exit-code files
@@ -170,6 +87,13 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         self.task_status.metadata["stdout_path"] = self.stdout_file.as_posix()
         self.task_status.metadata["stderr_path"] = self.stderr_file.as_posix()
         self.task_status.metadata["exit_code_path"] = self.exit_code_file.as_posix()
+
+    def _wrap_command_for_platform(self, argv: list[str]) -> list[str]:
+        """Hook to adjust argv per-platform.
+
+        Windows implementations may need to wrap shell shims (`*.cmd`/`*.ps1`).
+        """
+        return argv
 
     def prepare_workspace(
         self,

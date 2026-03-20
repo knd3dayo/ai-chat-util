@@ -541,10 +541,14 @@ class AutonomousBackendSection(BaseModel):
         b = (self.task_backend or "process").strip().lower()
         if b == "subprocess":
             b = "process"
-        if b not in {"docker", "compose", "process"}:
+        if b not in {"docker", "compose", "process", "windows_process", "linux_process"}:
             raise ValueError(
-                "backend.task_backend は 'docker' | 'compose' | 'process' のいずれかである必要があります"
+                "backend.task_backend は 'docker' | 'compose' | 'process' | 'windows_process' | 'linux_process' のいずれかである必要があります"
             )
+        if b == "windows_process" and os.name != "nt":
+            raise ValueError("backend.task_backend=windows_process は Windows 上でのみ使用できます")
+        if b == "linux_process" and os.name == "nt":
+            raise ValueError("backend.task_backend=linux_process は Linux/Unix 系 OS 上でのみ使用できます")
         self.task_backend = b
         return self
 

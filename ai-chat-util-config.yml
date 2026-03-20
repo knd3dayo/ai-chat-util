@@ -105,8 +105,11 @@ ai_chat_util_config:
       # base_url_in_container: http://host.docker.internal:11434/v1
 
     backend:
-      # docker | compose | process
-      # NOTE: `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
+      # docker | compose | process | windows_process | linux_process
+      # NOTE:
+      # - `process` は実行環境に応じて Windows/Linux を自動判定します。
+      # - `windows_process` / `linux_process` は強制指定です。
+      # - `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
       task_backend: process
 
     monitor:

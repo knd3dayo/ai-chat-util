@@ -130,13 +130,19 @@ ai_chat_util_config:
       gid: null
 
     process:
+      # Example (override as needed):
+      # - opencode:  opencode run
+      # - codex:    codex ...
+      # - claude:   claude ...
       command: opencode run
 
     compose:
       directory: .
       file: docker-compose.yml
       service_name: executor-service
-      command: opencode run
+      # Example:
+      # command: opencode run
+      command: ""
 
     logging:
       level: INFO

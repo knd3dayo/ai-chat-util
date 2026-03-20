@@ -1,0 +1,1 @@
+cmd.exe /d /s /c "C:\Users\user\AppData\Roaming\npm\opencode.cmd --print-logs --log-level DEBUG run" 『完了2』をC:\Users\user\source\repos\util\ai-chat-util\test_scripts\bat\04-agent\e2e_sv_ws_1\done.txtに書き込む。

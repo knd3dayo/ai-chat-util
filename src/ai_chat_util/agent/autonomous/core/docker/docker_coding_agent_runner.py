@@ -50,7 +50,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         # 共有workspaceを使う場合に、後段（/status や artifacts算出）で参照できるよう保存しておく
         self.task_status.workspace_path = workspace_path
         self.task_status.metadata["workspace_path"] = workspace_path
-        self.task_status.metadata["backend"] = "subprocess"
+        self.task_status.metadata["backend"] = "docker"
 
         self.command = shlex.split(self.compose_config.compose_command)
         self.detach = True  # デフォルトはバックグラウンド実行
@@ -82,20 +82,6 @@ class CodingAgentRunner(AbstractAgentRunner):
 
         if source_paths:
             ExecutorUtil.add_files(source_paths, self.workspace)
-
-        # OpenCode project/task config (no secrets on disk).
-        # We generate a per-task config and point OPENCODE_CONFIG at it so that
-        # MCP servers can receive request-scoped envs (Authorization/trace_id) via
-        # `{env:...}` placeholders.
-        try:
-            cmd0 = (self.command[0] if self.command else "")
-            if cmd0 == "opencode" or cmd0.endswith("/opencode"):
-                ExecutorUtil.ensure_opencode_task_config_for_docker(self.workspace)
-                # Path inside the container (workspace is mounted to /workspace)
-                self.extra_env.setdefault("OPENCODE_CONFIG", "/workspace/.opencode/opencode.task.json")
-        except Exception:
-            # Best-effort: failing to write config should not block execution.
-            pass
                     
     def start(self) -> Container:
         """

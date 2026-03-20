@@ -9,12 +9,72 @@ TaskManager.get_status() to determine final outcome.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..process_utils import popen_new_process_group_kwargs
+
+
+def _redact_cmd(argv: list[str]) -> list[str]:
+    """Best-effort redaction for secrets in command arguments.
+
+    This is a safety net: users should avoid putting secrets directly into
+    command-line args. We still mask common flags and obvious API key patterns.
+    """
+
+    if not argv:
+        return argv
+
+    redact_next_for = {
+        "--password",
+        "-p",
+        "--api-key",
+        "--apikey",
+        "--token",
+        "--auth",
+        "--authorization",
+        "--bearer",
+        "--secret",
+        "--key",
+    }
+    redacted: list[str] = []
+    mask_next = False
+    for a in argv:
+        if mask_next:
+            redacted.append("***")
+            mask_next = False
+            continue
+        low = (a or "").lower()
+        if low in redact_next_for:
+            redacted.append(a)
+            mask_next = True
+            continue
+
+        # Flag=value style
+        for flag in redact_next_for:
+            if low.startswith(flag + "="):
+                redacted.append(a.split("=", 1)[0] + "=***")
+                break
+        else:
+            # OpenAI-style keys (best-effort)
+            if isinstance(a, str) and a.startswith("sk-") and len(a) >= 12:
+                redacted.append("sk-***")
+            else:
+                redacted.append(a)
+    return redacted
+
+
+def _format_cmd_for_text(argv: list[str]) -> str:
+    if os.name == "nt":
+        # Windows-friendly cmdline rendering.
+        return subprocess.list2cmdline(argv)
+    # POSIX-ish rendering.
+    return shlex.join(argv)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -45,6 +105,31 @@ def main(argv: list[str] | None = None) -> int:
         cmd = cmd[1:]
     if not cmd:
         raise SystemExit("No command provided. Use: -- <command...>")
+
+    # Persist executed command for debugging.
+    try:
+        redacted = _redact_cmd(cmd)
+        (workspace / "command.resolved.txt").write_text(
+            _format_cmd_for_text(redacted) + "\n",
+            encoding="utf-8",
+        )
+        (workspace / "command.resolved.json").write_text(
+            json.dumps(
+                {
+                    "cmd": redacted,
+                    "cwd": workspace.as_posix(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "platform": sys.platform,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        # Do not fail task execution due to debug logging.
+        pass
 
     env = os.environ.copy()
     env.setdefault("WORKSPACE", workspace.as_posix())

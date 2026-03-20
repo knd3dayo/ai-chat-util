@@ -60,4 +60,6 @@ ai_chat_util_config:
   #   backend:
   #     task_backend: process
   #   process:
-  #     command: opencode run
+  #     # Example:
+  #     # command: opencode run
+  #     command: ""

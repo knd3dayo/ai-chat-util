@@ -526,7 +526,7 @@ class AutonomousComposeSection(BaseModel):
     directory: str = Field(default=".")
     file: str = Field(default="docker-compose.yml")
     service_name: str = Field(default="executor-service")
-    command: str = Field(default="opencode run")
+    command: str = Field(default="")
 
 
 class AutonomousBackendSection(BaseModel):
@@ -593,11 +593,12 @@ class AutonomousHostSection(BaseModel):
 
 
 class AutonomousSubprocessSection(BaseModel):
-    command: str = Field(default="opencode run")
+    # Deprecated alias section; keep for backward compatibility.
+    command: str = Field(default="")
 
 
 class AutonomousProcessSection(BaseModel):
-    command: str = Field(default="opencode run")
+    command: str = Field(default="")
 
 
 class AiChatUtilConfig(BaseModel):
@@ -657,6 +658,31 @@ class AutonomousAgentUtilConfig(BaseModel):
             return self
 
         # Neither explicitly set; keep defaults.
+        return self
+
+    @model_validator(mode="after")
+    def _validate_required_commands(self) -> "AutonomousAgentUtilConfig":
+        # NOTE:
+        # This project may load autonomous_agent_util config for features that do not
+        # execute tasks (e.g., workspace path rewrites). Requiring commands at load
+        # time would break those scenarios. We therefore validate required commands
+        # only when the user explicitly configures the relevant sections.
+        fields = set(getattr(self, "model_fields_set", set()) or set())
+        backend_explicit = "backend" in fields
+        process_explicit = "process" in fields or "subprocess" in fields
+        compose_explicit = "compose" in fields
+
+        backend = (self.backend.task_backend or "process").strip().lower()
+        proc_cmd = (self.process.command or "").strip() if self.process else ""
+        compose_cmd = (self.compose.command or "").strip() if self.compose else ""
+
+        if backend_explicit or process_explicit or compose_explicit:
+            if backend in {"process", "windows_process", "linux_process"}:
+                if not proc_cmd:
+                    raise ValueError("process 系バックエンドでは process.command を設定してください")
+            if backend in {"docker", "compose"}:
+                if not compose_cmd:
+                    raise ValueError("docker/compose バックエンドでは compose.command を設定してください")
         return self
 
     @model_validator(mode="after")

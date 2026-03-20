@@ -5,8 +5,10 @@ import pathlib
 import shlex
 import sys
 import uuid
+import json
 from dataclasses import dataclass
 from typing import Optional, Union
+from datetime import datetime, timezone
 
 from ..abstract_agent_runner import AbstractAgentRunner
 
@@ -64,9 +66,14 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         # Keep reading `subprocess` for backward compatibility.
         process_cmd = getattr(getattr(runtime_cfg, "process", None), "command", None)
         subprocess_cmd = getattr(getattr(runtime_cfg, "subprocess", None), "command", None)
-        self.command_base = command_base or (process_cmd or subprocess_cmd or runtime_cfg.compose.command)
-        self.command: list[str] = shlex.split(self.command_base)
-        self.command = self._wrap_command_for_platform(self.command)
+        self.command_base = command_base or (process_cmd or subprocess_cmd)
+        if not (self.command_base or "").strip():
+            raise ValueError(
+                "process.command が未設定です。ai-chat-util-config.yml の ai_chat_util_config.autonomous_agent_util.process.command を設定してください。"
+            )
+
+        self.command_requested: list[str] = shlex.split(self.command_base)
+        self.command: list[str] = self._wrap_command_for_platform(list(self.command_requested))
 
         # Per-task env (e.g., Authorization) to be inherited by the entrypoint process.
         self.extra_env: dict[str, str] = {
@@ -84,9 +91,19 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         self.stderr_file = self.workspace / "stderr.log"
         self.exit_code_file = self.workspace / ".exit_code"
 
+        # Debug artifacts
+        self.command_txt_file = self.workspace / "command.txt"
+        self.command_json_file = self.workspace / "command.json"
+        self.command_resolved_txt_file = self.workspace / "command.resolved.txt"
+        self.command_resolved_json_file = self.workspace / "command.resolved.json"
+
         self.task_status.metadata["stdout_path"] = self.stdout_file.as_posix()
         self.task_status.metadata["stderr_path"] = self.stderr_file.as_posix()
         self.task_status.metadata["exit_code_path"] = self.exit_code_file.as_posix()
+        self.task_status.metadata["command_path"] = self.command_txt_file.as_posix()
+        self.task_status.metadata["command_json_path"] = self.command_json_file.as_posix()
+        self.task_status.metadata["command_resolved_path"] = self.command_resolved_txt_file.as_posix()
+        self.task_status.metadata["command_resolved_json_path"] = self.command_resolved_json_file.as_posix()
 
     def _wrap_command_for_platform(self, argv: list[str]) -> list[str]:
         """Hook to adjust argv per-platform.
@@ -130,12 +147,80 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
             extra_env=extra_env,
         )
         if prompt:
+            runner.command_requested = [*runner.command_requested, prompt]
             runner.command = [*runner.command, prompt]
         runner.prepare_workspace(source_paths=source_paths)
         return runner
 
+    @staticmethod
+    def _redact_cmd(argv: list[str]) -> list[str]:
+        redact_next_for = {
+            "--password",
+            "-p",
+            "--api-key",
+            "--apikey",
+            "--token",
+            "--auth",
+            "--authorization",
+            "--bearer",
+            "--secret",
+            "--key",
+        }
+        redacted: list[str] = []
+        mask_next = False
+        for a in argv:
+            if mask_next:
+                redacted.append("***")
+                mask_next = False
+                continue
+            low = (a or "").lower()
+            if low in redact_next_for:
+                redacted.append(a)
+                mask_next = True
+                continue
+            for flag in redact_next_for:
+                if low.startswith(flag + "="):
+                    redacted.append(a.split("=", 1)[0] + "=***")
+                    break
+            else:
+                if isinstance(a, str) and a.startswith("sk-") and len(a) >= 12:
+                    redacted.append("sk-***")
+                else:
+                    redacted.append(a)
+        return redacted
+
+    def _persist_requested_command_debug_artifacts(self) -> None:
+        try:
+            redacted = self._redact_cmd(list(self.command_requested))
+            # Human friendly
+            try:
+                import subprocess as _subprocess
+
+                txt = _subprocess.list2cmdline(redacted) if os.name == "nt" else shlex.join(redacted)
+            except Exception:
+                txt = " ".join(redacted)
+
+            self.command_txt_file.write_text(txt + "\n", encoding="utf-8")
+            self.command_json_file.write_text(
+                json.dumps(
+                    {
+                        "cmd": redacted,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "platform": sys.platform,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
     def start(self) -> SubprocessRunResult:
         python_exe = self.resolve_python_executable()
+        # Persist user-requested command (before platform shim resolution) for debugging.
+        self._persist_requested_command_debug_artifacts()
         # Spawn entrypoint wrapper which will run the actual agent command.
         entrypoint_cmd = [
             python_exe,
@@ -158,7 +243,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         runtime_cfg = self._runtime_cfg
         env = os.environ.copy()
 
-        # Ensure tools installed into the project's virtualenv (e.g., opencode)
+        # Ensure tools installed into the project's virtualenv
         # are available to the detached entrypoint and its child process.
         try:
             root = _find_project_root(pathlib.Path(__file__))
@@ -192,9 +277,8 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         if api_key:
             env["LLM_API_KEY"] = str(api_key)
 
-        # opencode (and other external runners) typically read OpenAI-style
-        # environment variables, not this project's LLM_* variables.
-        # Map them so `opencode run -m openai/...` can use LiteLLM seamlessly.
+        # Some external runners read OpenAI-style environment variables, not this
+        # project's LLM_* variables. Map them as a best-effort compatibility layer.
         if api_key and not env.get("OPENAI_API_KEY"):
             env["OPENAI_API_KEY"] = str(api_key)
 

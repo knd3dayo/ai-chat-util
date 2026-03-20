@@ -566,7 +566,7 @@ uvicorn ai_chat_util.api.api_server:app
 
 - Python: `>=3.11, <=3.13`
 - 依存管理: `uv` 推奨（`pyproject.toml`/`uv.lock`）
-- エージェント実行コマンド: デフォルトは `opencode run` を利用（`opencode` が必要）
+- エージェント実行コマンド: `process.command` / `compose.command` で任意指定（例: opencode / codex / claude など）
 
 ---
 
@@ -576,7 +576,7 @@ uvicorn ai_chat_util.api.api_server:app
 uv sync
 ```
 
-`opencode` を使う場合は、コマンドが実行できることを確認してください。
+（例として）`opencode` を使う場合は、コマンドが実行できることを確認してください。
 
 ```bash
 opencode --version
@@ -617,7 +617,7 @@ ai_chat_util_config:
 - `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
 - `backend.task_backend`: API/MCP が使う実行バックエンド（`process/windows_process/linux_process/docker/compose`）
 - `compose.*`: Docker/Compose 実行時の設定
-- `process.command`: process 実行時のコマンド（デフォルト `opencode run`）
+- `process.command`: process 実行時のコマンド（必須）
 
 ---
 

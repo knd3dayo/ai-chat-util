@@ -72,9 +72,6 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         self._runtime_cfg = get_autonomous_runtime_config()
         runtime_cfg = self._runtime_cfg
         cfg = CodingAgentConfig(
-            llm_provider=runtime_cfg.llm.provider,
-            llm_model=runtime_cfg.llm.model,
-            llm_base_url=runtime_cfg.llm.base_url,
             workspace_root=runtime_cfg.paths.workspace_root,
         )
 

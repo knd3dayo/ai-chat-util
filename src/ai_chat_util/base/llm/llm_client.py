@@ -25,17 +25,6 @@ logger = log_settings.getLogger(__name__)
 
 class LLMClientUtil:
 
-    @classmethod
-    def is_text_content(cls, content: ChatContent) -> bool:
-        return content.params.get("type") == "text"
-
-    @classmethod
-    def is_image_content(cls, content: ChatContent) -> bool:
-        return content.params.get("type") == "image_url"
-    
-    @classmethod
-    def is_file_content(cls, content: ChatContent) -> bool:
-        return content.params.get("type") == "file"
 
     @classmethod
     def download_files(cls, urls: list[WebRequestModel], download_dir: str) -> list[str]:
@@ -271,9 +260,16 @@ class LLMClientUtil:
             )
         raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-class LLMClientBase(ABC):
+class LLMMessageContentFactoryBase(ABC):
+    def is_text_content(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "text"
 
+    def is_image_content(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "image_url"
     
+    def is_file_content(self, content: ChatContent) -> bool:
+        return content.params.get("type") == "file"
+
     def get_user_role_name(self) -> str:
         return "user"
 
@@ -300,25 +296,6 @@ class LLMClientBase(ABC):
             role=self.get_system_role_name(),
             content=chat_content_list
         )
-
-    @abstractmethod
-    def create(
-        self, llm_config: AiChatUtilConfig | None = None
-        ) -> "LLMClientBase":
-        pass
-
-    @abstractmethod
-    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        pass
-
-    @abstractmethod
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        pass
-
-    @abstractmethod
-    def get_config(self) -> AiChatUtilConfig | None:
-        pass
-
     def create_text_content(self, text: str) -> "ChatContent":
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
@@ -506,6 +483,201 @@ class LLMClientBase(ABC):
             file_paths[0], detail=detail
         )
 
+    # 最後のsystem, assistant以降のユーザーメッセージリストを取得するユーティリティ関数
+    # 最後のユーザーメッセージリストとそれ以前のメッセージリストのタプルを返す
+    def __get_last_user_messages__(
+        self, chat_history: ChatHistory
+    ) -> tuple[list[ChatMessage], list[ChatMessage]]:
+        last_user_messages: list[ChatMessage] = []
+        previous_messages: list[ChatMessage] = []
+        for message in reversed(chat_history.messages):
+            if message.role == self.get_user_role_name():
+                last_user_messages.insert(0, message)
+            else:
+                previous_messages.insert(0, message)
+                if message.role in [self.get_system_role_name(), self.get_assistant_role_name()]:
+                    break
+        return last_user_messages, previous_messages
+    
+    def __preprocess_text_message__(
+            self, 
+            chat_message_list: list[ChatMessage],
+            request_context: ChatRequestContext
+        ) -> list[ChatMessage]:
+        '''
+        request_contextの内容に従い、メッセージの前処理を実施する
+        * ChatMessageのcontentのうち、typeがtextの要素を抽出し、
+            * split_modeがnone以外の場合、split_message_lengthで指定された文字数を超える場合は分割する
+            * split_modeがnone以外の場合、prompt_template_textを各分割メッセージの前に付与する.
+              prompt_template_textが空文字列の場合は例外をスローする
+        Args:
+            chat_message_list (list[ChatMessage]): 前処理対象のChatMessageのリスト
+            request_context (ChatRequestContext): 前処理の設定情報
+        Returns:
+            list[ChatMessage]: 前処理後のChatMessageのリスト
+
+        '''
+        def __insert_prompt_template__(
+            chat_message_list: list[ChatMessage],
+            request_context: ChatRequestContext
+        ) -> list[ChatMessage]:
+            result_chat_message_list: list[ChatMessage] = []
+            for chat_message in chat_message_list:
+                if request_context.prompt_template_text:
+                    prompt_template_content = self.create_text_content(request_context.prompt_template_text)
+                    chat_message.content.insert(0, prompt_template_content)
+                result_chat_message_list.append(chat_message)
+            return result_chat_message_list
+
+        if request_context.split_mode == ChatRequestContext.split_mode_name_none:
+            return __insert_prompt_template__(chat_message_list, request_context)
+
+        if not request_context.prompt_template_text:
+            raise ValueError("prompt_template_text must be set when split_mode is not 'None'")
+
+        split_message_length = request_context.split_message_length
+        if split_message_length <= 0:
+            # 分割しない設定の場合はそのまま返す
+            return __insert_prompt_template__(chat_message_list, request_context)
+
+
+        # textタイプのcontentを抽出する
+        text_type_contents = [ 
+            content for chat_message in chat_message_list for content in chat_message.content if self.is_text_content(content)
+            ]
+        if len(text_type_contents) == 0:
+            return __insert_prompt_template__(chat_message_list, request_context)
+
+        # text以外のcontentを抽出する
+        non_text_contents = [
+            content for chat_message in chat_message_list for content in chat_message.content if not self.is_text_content(content)
+        ]
+
+        text_result_chat_message_list: list[ChatMessage] = []        
+        # textを結合
+        combined_text = "\n".join([text_content.params.get("text", "") for text_content in text_type_contents] )
+        # 文字数で分割する
+        for i in range(0, len(combined_text), split_message_length):
+            split_text = combined_text[i:i + split_message_length]
+            split_contents = [self.create_text_content(f"{request_context.prompt_template_text}\n{split_text}")]
+            for split_content in split_contents:
+                chat_message = ChatMessage(
+                    role=self.get_user_role_name(),
+                    content=[split_content]
+                )
+                # textタイプ以外のcontentを追加する
+                for non_text_content in non_text_contents:
+                    chat_message.content.append(non_text_content)
+
+                text_result_chat_message_list.append(chat_message)
+
+        return text_result_chat_message_list        
+
+    def __preprocess_image_urls__(
+        self,
+        chat_message_list: list[ChatMessage],
+        request_context: ChatRequestContext
+    ) -> list[ChatMessage]:
+        '''
+        request_contextの内容に従い、画像URLの前処理を実施する
+        * split_modeがnone以外の場合、
+          ChatMessageのcontentのうち、typeがimage_urlの要素を抽出し、
+          max_images_per_requestで指定された画像数を超える場合は分割する
+        Args:
+            chat_message_list (list[ChatMessage]): 前処理対象のChatMessageのリスト
+            request_context (ChatRequestContext): 前処理の設定情報
+        Returns:
+            list[ChatMessage]: 前処理後のChatMessageのリスト
+        '''
+        if request_context.split_mode == ChatRequestContext.split_mode_name_none:
+            return chat_message_list
+
+        max_images = request_context.max_images_per_request
+        if max_images <= 0:
+            # 分割しない設定の場合はそのまま返す
+            return chat_message_list
+
+        result_chat_message_list: list[ChatMessage] = []
+
+        for chat_message in chat_message_list:
+            image_url_contents = [
+                content for content in chat_message.content if self.is_image_content(content)
+            ]
+
+            # 画像が無い、または分割不要ならそのまま
+            if len(image_url_contents) == 0 or len(image_url_contents) <= max_images:
+                result_chat_message_list.append(chat_message)
+                continue
+
+            # 分割時は、テキスト＋その他（画像以外）を各分割メッセージに維持する
+            text_contents = [
+                content for content in chat_message.content if self.is_text_content(content)
+            ]
+            other_contents = [
+                content
+                for content in chat_message.content
+                if (not self.is_text_content(content)) and (not self.is_image_content(content))
+            ]
+            base_contents = text_contents + other_contents
+
+            for i in range(0, len(image_url_contents), max_images):
+                split_image_url_contents: list[ChatContent] = image_url_contents[i : i + max_images]
+                split_contents = base_contents + split_image_url_contents
+
+                split_chat_message = ChatMessage(role=chat_message.role, content=split_contents)
+                result_chat_message_list.append(split_chat_message)
+
+        return result_chat_message_list
+
+    @abstractmethod
+    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        pass
+
+    @abstractmethod
+    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        pass
+
+    @abstractmethod
+    def get_config(self) -> AiChatUtilConfig | None:
+        pass
+
+class LLMMessageContentFactory(LLMMessageContentFactoryBase):
+
+    def __init__(self, config: Optional[AiChatUtilConfig] = None):
+        self.config = config
+
+    def get_config(self) -> AiChatUtilConfig | None:
+        return self.config
+    
+    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(document_type.data).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
+        return [ChatContent(params=params)]
+    
+    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(document_type.data).decode('utf-8')
+        file_url = f"data:application/pdf;base64,{base64_file}"    
+        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
+        return [ChatContent(params=params)]
+
+
+
+class LLMClientBase(ABC):
+
+    @abstractmethod
+    def get_config(self) -> AiChatUtilConfig | None:
+        pass
+
+    @abstractmethod
+    def get_message_factory(self) -> LLMMessageContentFactoryBase:
+        pass
+
+    @abstractmethod
+    def create(
+        self, llm_config: AiChatUtilConfig | None = None
+        ) -> "LLMClientBase":
+        pass
 
     async def analyze_image_files(self, file_list: list[str], prompt: str, detail: str) -> ChatResponse:
         '''
@@ -518,7 +690,7 @@ class LLMClientBase(ABC):
             detail,
             len((prompt or "").strip()),
         )
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
         image_content_list: list[ChatContent] = []
         encode_started = time.perf_counter()
         total_bytes = 0
@@ -528,7 +700,7 @@ class LLMClientBase(ABC):
                 total_bytes += len(doc.data or b"")
             except Exception:
                 pass
-            image_contents = self.create_image_content(doc, detail)
+            image_contents = self.get_message_factory()._create_image_content_(doc, detail)
             image_content_list.extend(image_contents)
         logger.info(
             "IMAGE_ENCODE_END images=%d total_bytes=%d elapsed_ms=%d",
@@ -554,10 +726,10 @@ class LLMClientBase(ABC):
         '''
         複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
         image_content_list: list[ChatContent] = []
         for image_url in image_url_list:
-            image_contents = await self.create_image_content_from_url_async(image_url, detail)
+            image_contents = await self.get_message_factory().create_image_content_from_url_async(image_url, detail)
             image_content_list.extend(image_contents)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
@@ -574,7 +746,7 @@ class LLMClientBase(ABC):
         '''
         複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
         '''
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
         pdf_content_list = []
         config = self.get_config()
         if not config:
@@ -583,10 +755,10 @@ class LLMClientBase(ABC):
         for file_path in file_list:
             if config.features.use_custom_pdf_analyzer:
                 logger.info(f"Using custom PDF analyzer for file: {file_path}")
-                pdf_content = self._create_custom_pdf_content_from_file(file_path, detail)
+                pdf_content = self.get_message_factory()._create_custom_pdf_content_from_file(file_path, detail)
             else:
                 logger.info(f"Using standard PDF analyzer for file: {file_path}")
-                pdf_content = self.create_pdf_content_from_file(file_path)
+                pdf_content = self.get_message_factory().create_pdf_content_from_file(file_path)
             pdf_content_list.extend(pdf_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
@@ -606,12 +778,12 @@ class LLMClientBase(ABC):
         office_contents: list[ChatContent] = []
         for file_path in file_path_list:
             # Officeドキュメントを一時的にPDFに変換する
-            pdf_content = self.create_office_content_from_file(
+            pdf_content = self.get_message_factory().create_office_content_from_file(
                 file_path, detail=detail)
 
             office_contents.extend(pdf_content)
 
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
         chat_request: ChatRequest = ChatRequest(
@@ -628,17 +800,16 @@ class LLMClientBase(ABC):
         '''
         content_list = []
         for document_type in document_type_list:
-            contents = self.create_multi_format_content(
+            contents = self.get_message_factory().create_multi_format_content(
                 document_type, detail=detail)
             content_list.extend(contents)
 
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
         chat_response: ChatResponse = await self.chat(chat_request)
         return chat_response
-
 
     async def analyze_files(
             self, file_path_list: list[str], prompt: str, detail: str = "auto"
@@ -649,11 +820,11 @@ class LLMClientBase(ABC):
         '''
         content_list = []
         for file_path in file_path_list:
-            contents = self.create_multi_format_contents_from_file(
+            contents = self.get_message_factory().create_multi_format_contents_from_file(
                 file_path, detail=detail)
             content_list.extend(contents)
 
-        prompt_content = self.create_text_content(text=prompt)
+        prompt_content = self.get_message_factory().create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
             chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
@@ -672,8 +843,8 @@ class LLMClientBase(ABC):
             CompletionResponse: LLMからの応答
         '''
         chat_message = ChatMessage(
-            role=self.get_user_role_name(),
-            content=[self.create_text_content(prompt)]
+            role=self.get_message_factory().get_user_role_name(),
+            content=[self.get_message_factory().create_text_content(prompt)]
         )
         chat_history = ChatHistory(messages=[chat_message])
         
@@ -738,151 +909,6 @@ class LLMClientBase(ABC):
     ) -> ChatResponse:
         pass
 
-    # 最後のsystem, assistant以降のユーザーメッセージリストを取得するユーティリティ関数
-    # 最後のユーザーメッセージリストとそれ以前のメッセージリストのタプルを返す
-    def __get_last_user_messages__(
-        self, chat_history: ChatHistory
-    ) -> tuple[list[ChatMessage], list[ChatMessage]]:
-        last_user_messages: list[ChatMessage] = []
-        previous_messages: list[ChatMessage] = []
-        for message in reversed(chat_history.messages):
-            if message.role == self.get_user_role_name():
-                last_user_messages.insert(0, message)
-            else:
-                previous_messages.insert(0, message)
-                if message.role in [self.get_system_role_name(), self.get_assistant_role_name()]:
-                    break
-        return last_user_messages, previous_messages
-    
-    def __preprocess_text_message__(
-            self, 
-            chat_message_list: list[ChatMessage],
-            request_context: ChatRequestContext
-        ) -> list[ChatMessage]:
-        '''
-        request_contextの内容に従い、メッセージの前処理を実施する
-        * ChatMessageのcontentのうち、typeがtextの要素を抽出し、
-            * split_modeがnone以外の場合、split_message_lengthで指定された文字数を超える場合は分割する
-            * split_modeがnone以外の場合、prompt_template_textを各分割メッセージの前に付与する.
-              prompt_template_textが空文字列の場合は例外をスローする
-        Args:
-            chat_message_list (list[ChatMessage]): 前処理対象のChatMessageのリスト
-            request_context (ChatRequestContext): 前処理の設定情報
-        Returns:
-            list[ChatMessage]: 前処理後のChatMessageのリスト
-
-        '''
-        def __insert_prompt_template__(
-            chat_message_list: list[ChatMessage],
-            request_context: ChatRequestContext
-        ) -> list[ChatMessage]:
-            result_chat_message_list: list[ChatMessage] = []
-            for chat_message in chat_message_list:
-                if request_context.prompt_template_text:
-                    prompt_template_content = self.create_text_content(request_context.prompt_template_text)
-                    chat_message.content.insert(0, prompt_template_content)
-                result_chat_message_list.append(chat_message)
-            return result_chat_message_list
-
-        if request_context.split_mode == ChatRequestContext.split_mode_name_none:
-            return __insert_prompt_template__(chat_message_list, request_context)
-
-        if not request_context.prompt_template_text:
-            raise ValueError("prompt_template_text must be set when split_mode is not 'None'")
-
-        split_message_length = request_context.split_message_length
-        if split_message_length <= 0:
-            # 分割しない設定の場合はそのまま返す
-            return __insert_prompt_template__(chat_message_list, request_context)
-
-
-        # textタイプのcontentを抽出する
-        text_type_contents = [ 
-            content for chat_message in chat_message_list for content in chat_message.content if LLMClientUtil.is_text_content(content)
-            ]
-        if len(text_type_contents) == 0:
-            return __insert_prompt_template__(chat_message_list, request_context)
-
-        # text以外のcontentを抽出する
-        non_text_contents = [
-            content for chat_message in chat_message_list for content in chat_message.content if not LLMClientUtil.is_text_content(content)
-        ]
-
-        text_result_chat_message_list: list[ChatMessage] = []        
-        # textを結合
-        combined_text = "\n".join([text_content.params.get("text", "") for text_content in text_type_contents] )
-        # 文字数で分割する
-        for i in range(0, len(combined_text), split_message_length):
-            split_text = combined_text[i:i + split_message_length]
-            split_contents = [self.create_text_content(f"{request_context.prompt_template_text}\n{split_text}")]
-            for split_content in split_contents:
-                chat_message = ChatMessage(
-                    role=self.get_user_role_name(),
-                    content=[split_content]
-                )
-                # textタイプ以外のcontentを追加する
-                for non_text_content in non_text_contents:
-                    chat_message.content.append(non_text_content)
-
-                text_result_chat_message_list.append(chat_message)
-
-        return text_result_chat_message_list        
-
-    def __preprocess_image_urls__(
-        self,
-        chat_message_list: list[ChatMessage],
-        request_context: ChatRequestContext
-    ) -> list[ChatMessage]:
-        '''
-        request_contextの内容に従い、画像URLの前処理を実施する
-        * split_modeがnone以外の場合、
-          ChatMessageのcontentのうち、typeがimage_urlの要素を抽出し、
-          max_images_per_requestで指定された画像数を超える場合は分割する
-        Args:
-            chat_message_list (list[ChatMessage]): 前処理対象のChatMessageのリスト
-            request_context (ChatRequestContext): 前処理の設定情報
-        Returns:
-            list[ChatMessage]: 前処理後のChatMessageのリスト
-        '''
-        if request_context.split_mode == ChatRequestContext.split_mode_name_none:
-            return chat_message_list
-
-        max_images = request_context.max_images_per_request
-        if max_images <= 0:
-            # 分割しない設定の場合はそのまま返す
-            return chat_message_list
-
-        result_chat_message_list: list[ChatMessage] = []
-
-        for chat_message in chat_message_list:
-            image_url_contents = [
-                content for content in chat_message.content if LLMClientUtil.is_image_content(content)
-            ]
-
-            # 画像が無い、または分割不要ならそのまま
-            if len(image_url_contents) == 0 or len(image_url_contents) <= max_images:
-                result_chat_message_list.append(chat_message)
-                continue
-
-            # 分割時は、テキスト＋その他（画像以外）を各分割メッセージに維持する
-            text_contents = [
-                content for content in chat_message.content if LLMClientUtil.is_text_content(content)
-            ]
-            other_contents = [
-                content
-                for content in chat_message.content
-                if (not LLMClientUtil.is_text_content(content)) and (not LLMClientUtil.is_image_content(content))
-            ]
-            base_contents = text_contents + other_contents
-
-            for i in range(0, len(image_url_contents), max_images):
-                split_image_url_contents: list[ChatContent] = image_url_contents[i : i + max_images]
-                split_contents = base_contents + split_image_url_contents
-
-                split_chat_message = ChatMessage(role=chat_message.role, content=split_contents)
-                result_chat_message_list.append(split_chat_message)
-
-        return result_chat_message_list
 
     async def __postprocess_messages__(
         self,
@@ -935,9 +961,9 @@ class LLMClientBase(ABC):
                 messages=[]
                 ), chat_request_context=request_context)
         client = self.create(self.get_config())
-        text_content = client.create_text_content(summmarize_request_text)
+        text_content = client.get_message_factory().create_text_content(summmarize_request_text)
         message = ChatMessage(
-            role=self.get_user_role_name(),
+            role=client.get_message_factory().get_user_role_name(),
             content=[text_content]
         )
         chat_request: ChatRequest = ChatRequest(
@@ -957,6 +983,7 @@ class LLMClient(LLMClientBase):
 
         self.llm_config = llm_config
         self.use_mcp = use_mcp
+        self.message_factory = LLMMessageContentFactory()
 
         # ai-chat-util-config.yml の non-secret 設定を既定値として採用
         try:
@@ -969,25 +996,15 @@ class LLMClient(LLMClientBase):
     def get_config(self) -> AiChatUtilConfig:
         return self.llm_config
 
+    def get_message_factory(self) -> LLMMessageContentFactoryBase:
+        return self.message_factory
+
     def create(
         self, llm_config: AiChatUtilConfig | None = None, use_mcp: bool = False
         ) -> "LLMClient":
         if llm_config is None:
             llm_config = get_runtime_config()
         return LLMClient(llm_config, use_mcp=use_mcp)
-
-    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_image = base64.b64encode(document_type.data).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
-        return [ChatContent(params=params)]
-    
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_file = base64.b64encode(document_type.data).decode('utf-8')
-        file_url = f"data:application/pdf;base64,{base64_file}"    
-        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
-        return [ChatContent(params=params)]
-
 
     async def _chat_completion_(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
         if self.use_mcp:
@@ -1022,9 +1039,9 @@ class LLMClient(LLMClientBase):
         # そのリストを反復しつつ add_message() で同じリストに追記すると、リストが伸び続けて無限ループする。
         # ここでは「既存履歴をそのまま使う」か「渡されたリストのコピーを履歴として採用」し、重複追加はしない。
         chat_response =  await self._chat_completion_(chat_request, **kwargs)
-        text_content = self.create_text_content(chat_response.output)
+        text_content = self.get_message_factory().create_text_content(chat_response.output)
         chat_request.chat_history.add_message(ChatMessage(
-            role=self.get_assistant_role_name(),
+            role=self.get_message_factory().get_assistant_role_name(),
             content=[text_content]
         ))
         return chat_response
@@ -1045,9 +1062,9 @@ class LLMClient(LLMClientBase):
             raise ValueError("chat_request must be provided")
 
         # 前処理を実行
-        last_user_messages, previous_messages = self.__get_last_user_messages__(chat_request.chat_history)
-        preprocessed_messages = self.__preprocess_text_message__(last_user_messages, request_context)
-        preprocessed_messages = self.__preprocess_image_urls__(preprocessed_messages, request_context)
+        last_user_messages, previous_messages = self.get_message_factory().__get_last_user_messages__(chat_request.chat_history)
+        preprocessed_messages = self.get_message_factory().__preprocess_text_message__(last_user_messages, request_context)
+        preprocessed_messages = self.get_message_factory().__preprocess_image_urls__(preprocessed_messages, request_context)
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message__(message_num: int, message: ChatMessage, previous_messages: list[ChatMessage]) -> tuple[int, ChatResponse]:
@@ -1082,9 +1099,9 @@ class LLMClient(LLMClientBase):
             
             chat_request.chat_history.add_message(preprocessed_message)
 
-        text_content = self.create_text_content(postprocessed_response.output)
+        text_content = self.get_message_factory().create_text_content(postprocessed_response.output)
         response_message = ChatMessage(
-            role=self.get_assistant_role_name(),
+            role=self.get_message_factory().get_assistant_role_name(),
             content=[text_content]
         )
         chat_request.chat_history.add_message(response_message)

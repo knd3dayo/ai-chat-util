@@ -185,9 +185,6 @@ class CodingAgentRunner(AbstractAgentRunner):
             compose_command=runtime_cfg.compose.command,
         )
         coding_agent_config = CodingAgentConfig(
-            llm_provider=runtime_cfg.llm.provider,
-            llm_model=runtime_cfg.llm.model,
-            llm_base_url=runtime_cfg.llm.base_url,
             workspace_root=runtime_cfg.paths.workspace_root,
         )
         runner = cls(

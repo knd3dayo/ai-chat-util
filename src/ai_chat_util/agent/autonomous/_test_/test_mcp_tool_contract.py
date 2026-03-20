@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from fastmcp import FastMCP
 
-from ai_chat_util.agent.autonomous.mcp.autonomous_mcp_server import AutonomousMCPServer
+from ai_chat_util.agent.autonomous.mcp.mcp_server import AutonomousMCPServer
 from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
 an_server = AutonomousMCPServer()
 endpoint = EndPoint()

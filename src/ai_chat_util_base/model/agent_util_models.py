@@ -13,26 +13,12 @@ class CodingAgentConfig(BaseModel):
 
     env_file: ClassVar[str] = ".env"  # デフォルトの環境変数ファイルパス
 
-    llm_provider: str = Field(..., description="LLMプロバイダーの名前（例: openai, azure, anthropic）")
-    llm_model: str = Field(..., description="LLM model to use (e.g., gpt-4o)")
-    llm_base_url: Optional[str] = Field(None, description="Base URL for the LLM API")
     workspace_root: str = Field(default="/tmp/autonomous_agent_tasks", description="Root directory for task workspaces")
     
     @classmethod
     def set_env_file(cls, env_file: str):
         cls.env_file = env_file
-
-    @classmethod
-    def from_env(cls):
-        cfg = get_autonomous_runtime_config()
-        params = {
-            "llm_provider": cfg.llm.provider,
-            "llm_model": cfg.llm.model,
-            "llm_base_url": cfg.llm.base_url,
-            "workspace_root": cfg.paths.workspace_root,
-        }
-        return cls(**params)
-    
+ 
 class ComposeConfig(BaseModel):
 
     env_file: ClassVar[str] = ".env"  # デフォルトの環境変数ファイルパス

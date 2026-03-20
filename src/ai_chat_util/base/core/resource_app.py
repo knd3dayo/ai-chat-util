@@ -43,7 +43,7 @@ def create_user_message(
     This function creates a ChatHistory object from a list of user messages.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_user_message(chat_content_list)
+    return llm_client.get_message_factory().create_user_message(chat_content_list)
 
 def create_assistant_message(
         chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the assistant messages")]
@@ -52,7 +52,7 @@ def create_assistant_message(
     This function creates a ChatHistory object from a list of assistant messages.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_assistant_message(chat_content_list)
+    return llm_client.get_message_factory().create_assistant_message(chat_content_list)
 
 def create_system_message(
         chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the system messages")]
@@ -61,7 +61,7 @@ def create_system_message(
     This function creates a ChatHistory object from a list of system messages.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_system_message(chat_content_list)
+    return llm_client.get_message_factory().create_system_message(chat_content_list)
 
 def create_text_content(
         text: Annotated[str, Field(description="Text content for the chat message")]
@@ -70,7 +70,7 @@ def create_text_content(
     This function creates a ChatContent object from text.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_text_content(text)
+    return llm_client.get_message_factory().create_text_content(text)
 
 def create_image_content(
         image_bytes: Annotated[bytes, Field(description="Image bytes for the chat message content")],
@@ -82,7 +82,7 @@ def create_image_content(
     llm_client = LLMFactory.create_llm_client()
     identifier = "画像データのコンテンツ"
     document_type = FileUtilDocument(data=image_bytes, identifier=identifier)
-    return llm_client.create_image_content(document_type, detail)
+    return llm_client.get_message_factory().create_image_content(document_type, detail)
 
 def create_image_content_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -92,7 +92,7 @@ def create_image_content_from_file(
     This function creates a ChatContent object from an image file.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_image_content_from_file(file_path, detail)
+    return llm_client.get_message_factory().create_image_content_from_file(file_path, detail)
 
 def create_pdf_content(
         document_type: Annotated[FileUtilDocument, Field(description="PDF file data for the chat message content")], 
@@ -102,7 +102,7 @@ def create_pdf_content(
     This function creates a ChatContent object from PDF file data.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_pdf_content(document_type, detail)
+    return llm_client.get_message_factory().create_pdf_content(document_type, detail)
 
 def create_pdf_content_from_file(
     file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -112,7 +112,7 @@ def create_pdf_content_from_file(
     This function creates a ChatContent object from a file.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_pdf_content_from_file(file_path, detail)
+    return llm_client.get_message_factory().create_pdf_content_from_file(file_path, detail)
 
 def create_office_content(
         document_type: Annotated[FileUtilDocument, Field(description="Office document file data for the chat message content")],
@@ -122,7 +122,7 @@ def create_office_content(
     This function creates a ChatContent object from Office document file data.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_office_content(document_type, detail)
+    return llm_client.get_message_factory().create_office_content(document_type, detail)
 
 def create_office_content_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -132,7 +132,7 @@ def create_office_content_from_file(
     This function creates a ChatContent object from an Office document file.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_office_content_from_file(file_path, detail)
+    return llm_client.get_message_factory().create_office_content_from_file(file_path, detail)
 
 def create_multi_format_contents_from_file(
         file_path: Annotated[str, Field(description="File path for the chat message content")],
@@ -142,5 +142,5 @@ def create_multi_format_contents_from_file(
     This function creates a ChatContent object from a multi-format file.
     """
     llm_client = LLMFactory.create_llm_client()
-    return llm_client.create_multi_format_contents_from_file(file_path, detail)
+    return llm_client.get_message_factory().create_multi_format_contents_from_file(file_path, detail)
 

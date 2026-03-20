@@ -2,6 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import os
 from ai_chat_util.base.llm.llm_client import LLMClient
+from .abstract_llm_client import AbstractLLMClient
 from ai_chat_util_base.config.runtime import AiChatUtilConfig
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 import sys
@@ -29,7 +30,7 @@ class StdIOManager(IOManagerBase):
         print(output)
 
 class HITLClientBase(ABC):
-    def __init__(self, llm_client: LLMClient, runtime_config: AiChatUtilConfig, trace_id: str | None = None):
+    def __init__(self, llm_client: AbstractLLMClient, runtime_config: AiChatUtilConfig, trace_id: str | None = None):
         self.llm_client = llm_client
         self.trace_id = trace_id
         self.runtime_config = runtime_config

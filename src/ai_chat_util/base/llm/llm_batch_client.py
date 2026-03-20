@@ -85,7 +85,7 @@ class LLMBatchClient:
         '''
         chat_requests: list[ChatRequest] = []
         for msg in messages:
-            chat_content = self.llm_client.create_text_content(text=f"{prompt}\n{msg}")
+            chat_content = self.llm_client.get_message_factory().create_text_content(text=f"{prompt}\n{msg}")
             chat_message = ChatMessage(role="user", content=[chat_content])
             chat_history = ChatHistory(messages=[chat_message])
             chat_requests.append(ChatRequest(chat_history=chat_history))
@@ -137,11 +137,11 @@ class LLMBatchClient:
             if not input_message and not file_path:
                 chat_requests.append(ChatRequest(chat_history=ChatHistory(messages=[])))
                 continue
-            contents.append(self.llm_client.create_text_content(text=f"{prompt}\n{input_message}"))
+            contents.append(self.llm_client.get_message_factory().create_text_content(text=f"{prompt}\n{input_message}"))
             # ファイルが存在しない場合はfile_pathを無視
             if os.path.isfile(file_path):
                 logger.info(f"Processing file: {file_path}")
-                file_content = self.llm_client.create_multi_format_contents_from_file(
+                file_content = self.llm_client.get_message_factory().create_multi_format_contents_from_file(
                     file_path=file_path, 
                     detail=detail
                 )

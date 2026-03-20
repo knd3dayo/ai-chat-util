@@ -6,6 +6,7 @@ from typing import Any, AsyncGenerator, Optional
 import os
 
 from fastapi.testclient import TestClient
+import pytest
 import yaml
 
 from ai_chat_util.agent.autonomous._api_.api_server import create_app
@@ -34,15 +35,14 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     data = {
-        "ai_chat_util_config": {
-            "autonomous_agent_util": {
-                "paths": {
-                    "workspace_path_rewrites": [
-                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
-                    ]
-                }
+        "ai_chat_util_config": {},
+        "autonomous_agent_util": {
+            "paths": {
+                "workspace_path_rewrites": [
+                    {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                ]
             }
-        }
+        },
     }
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     _reset_runtime(monkeypatch, cfg_path)
@@ -56,33 +56,33 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     assert endpoint.rewrite_workspace_path(raw2) == raw2
 
 
-def test_rewrite_workspace_path_pure_from_ai_chat_util_config_embedded(tmp_path: Path, monkeypatch) -> None:
+def test_init_autonomous_runtime_rejects_nested_autonomous_agent_util(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
-    to_prefix = (tmp_path / "executor_workspaces").as_posix()
-
     data = {
         "ai_chat_util_config": {
             "autonomous_agent_util": {
                 "paths": {
                     "workspace_path_rewrites": [
-                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                        {"from": "/srv/ai_platform/workspaces", "to": "/tmp/x"}
                     ]
                 }
             }
         }
     }
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
+    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
 
-    _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path)
+    from ai_chat_util_base.config.config_util import ConfigError
 
-    raw = "/srv/ai_platform/workspaces/e2e_sv_ws_1"
-    rewritten = endpoint.rewrite_workspace_path(raw)
-    assert rewritten == f"{to_prefix}/e2e_sv_ws_1"
+    with pytest.raises(ConfigError):
+        runtime_mod.init_autonomous_runtime(None)
 
 
 def test_init_autonomous_runtime_propagates_ai_chat_util_config_env_on_cli_config(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
-    cfg_path.write_text("ai_chat_util_config:\n  autonomous_agent_util: {}\n", encoding="utf-8")
+    cfg_path.write_text("ai_chat_util_config: {}\nautonomous_agent_util: {}\n", encoding="utf-8")
 
     monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.delenv("AI_CHAT_UTIL_CONFIG", raising=False)
@@ -148,15 +148,14 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     data = {
-        "ai_chat_util_config": {
-            "autonomous_agent_util": {
-                "paths": {
-                    "workspace_path_rewrites": [
-                        {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
-                    ]
-                }
+        "ai_chat_util_config": {},
+        "autonomous_agent_util": {
+            "paths": {
+                "workspace_path_rewrites": [
+                    {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
+                ]
             }
-        }
+        },
     }
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     _reset_runtime(monkeypatch, cfg_path)

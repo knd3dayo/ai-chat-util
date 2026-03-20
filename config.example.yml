@@ -55,11 +55,12 @@ ai_chat_util_config:
   office2pdf:
     libreoffice_path: null
 
-  # Optional: autonomous-agent-util settings (integrated)
-  # autonomous_agent_util:
-  #   backend:
-  #     task_backend: process
-  #   process:
-  #     # Example:
-  #     # command: opencode run
-  #     command: ""
+# Optional: autonomous-agent-util settings (integrated)
+# NOTE: In the integrated format, this section lives at the YAML root.
+# autonomous_agent_util:
+#   backend:
+#     task_backend: process
+#   process:
+#     # Example:
+#     # command: opencode run
+#     command: ""

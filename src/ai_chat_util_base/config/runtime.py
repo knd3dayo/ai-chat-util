@@ -232,21 +232,35 @@ def _build_autonomous_agent_util_config(
 
     ai_section_dict = extract_optional_ai_section_dict(raw_root=raw_root, resolved=resolved)
 
-    embedded = (
+    # New integrated format:
+    # - ai-chat-util-config.yml root contains ONLY:
+    #     - ai_chat_util_config: ...
+    #     - autonomous_agent_util: ...
+    # - Backward compatibility for nested ai_chat_util_config.autonomous_agent_util is intentionally NOT supported.
+    nested_embedded = (
         ai_section_dict.get("autonomous_agent_util", "__missing__")
         if ai_section_dict is not None
         else "__missing__"
     )
+    if nested_embedded != "__missing__":
+        raise ConfigError(
+            "設定ファイルの形式が不正です: "
+            f"{resolved}\n"
+            "統合設定の autonomous-agent-util は 'ai_chat_util_config.autonomous_agent_util' ではなく、"
+            "ルート直下の 'autonomous_agent_util:' に記述してください。"
+        )
 
-    if embedded != "__missing__":
-        if embedded is None:
-            embedded = {}
-        if not isinstance(embedded, dict):
+    root_embedded = raw_root.get("autonomous_agent_util", "__missing__") if isinstance(raw_root, dict) else "__missing__"
+    if root_embedded != "__missing__":
+        if root_embedded is None:
+            root_embedded = {}
+        if not isinstance(root_embedded, dict):
             raise ConfigError(
-                f"ai_chat_util_config.autonomous_agent_util は mapping(dict) である必要があります: {resolved} (ai_chat_util_config.autonomous_agent_util)"
+                f"autonomous_agent_util は mapping(dict) である必要があります: {resolved} (autonomous_agent_util)"
             )
 
-        inherited = dict(embedded)
+        inherited = dict(root_embedded)
+        # Inherit selected LLM settings from ai_chat_util_config.llm when not specified.
         root_llm = ai_section_dict.get("llm") if isinstance(ai_section_dict, dict) else None
         if isinstance(root_llm, dict):
             inherited_llm = dict(inherited.get("llm") or {}) if isinstance(inherited.get("llm"), dict) else {}
@@ -272,7 +286,7 @@ def _build_autonomous_agent_util_config(
             if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
                 raise ConfigError(
                     "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
-                    f"対処: {resolved} の '{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.autonomous_agent_util' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                    f"対処: {resolved} の ルート直下に 'autonomous_agent_util:' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
                 )
 
             # Otherwise, treat as old autonomous format and fail fast with migration instructions.

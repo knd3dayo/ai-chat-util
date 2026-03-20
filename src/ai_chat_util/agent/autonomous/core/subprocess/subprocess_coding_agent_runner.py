@@ -88,7 +88,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         self.command_base = command_base or (process_cmd or subprocess_cmd)
         if not (self.command_base or "").strip():
             raise ValueError(
-                "process.command が未設定です。ai-chat-util-config.yml の ai_chat_util_config.autonomous_agent_util.process.command を設定してください。"
+                "process.command が未設定です。ai-chat-util-config.yml の autonomous_agent_util.process.command を設定してください。"
             )
 
         self.command_requested = _split_command_base(self.command_base) #type: ignore[assignment]

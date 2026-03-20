@@ -25,7 +25,7 @@ def _global_options(
         "--config",
         help=(
             "Path to config YAML (ai-chat-util-config.yml). If omitted, resolved by env AI_CHAT_UTIL_CONFIG "
-            "(with ai_chat_util_config.autonomous_agent_util section), or searched from CWD/project root."
+            "(with root-level autonomous_agent_util section), or searched from CWD/project root."
         ),
         envvar="AI_CHAT_UTIL_CONFIG",
     ),

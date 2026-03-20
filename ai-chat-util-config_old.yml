@@ -93,57 +93,57 @@ ai_chat_util_config:
     # - Or just "soffice" if it's on PATH
     libreoffice_path: null
 
-# --- autonomous-agent-util settings (integrated) ---
-# autonomous-agent-util-config.yml の内容を、このファイルの
-# ルート直下の `autonomous_agent_util:` 配下に統合します。
-autonomous_agent_util:
-  llm:
-    # NOTE:
-    # - provider/base_url/api_key/base_model は未指定なら ai_chat_util_config.llm から継承されます。
-    # - `model` は継承されないため、autonomous 側で使うモデルを指定してください。
-    model: gpt-4o
-    # base_url_in_container: http://host.docker.internal:11434/v1
+  # --- autonomous-agent-util settings (integrated) ---
+  # autonomous-agent-util-config.yml の内容を、このファイルの
+  # `ai_chat_util_config.autonomous_agent_util:` 配下に統合します。
+  autonomous_agent_util:
+    llm:
+      # NOTE:
+      # - provider/base_url/api_key/base_model は未指定なら ai_chat_util_config.llm から継承されます。
+      # - `model` は継承されないため、autonomous 側で使うモデルを指定してください。
+      model: gpt-4o
+      # base_url_in_container: http://host.docker.internal:11434/v1
 
-  backend:
-    # docker | compose | process | windows_process | linux_process
-    # NOTE:
-    # - `process` は実行環境に応じて Windows/Linux を自動判定します。
-    # - `windows_process` / `linux_process` は強制指定です。
-    # - `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
-    task_backend: process
+    backend:
+      # docker | compose | process | windows_process | linux_process
+      # NOTE:
+      # - `process` は実行環境に応じて Windows/Linux を自動判定します。
+      # - `windows_process` / `linux_process` は強制指定です。
+      # - `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
+      task_backend: process
 
-  monitor:
-    disable_detach_monitor: false
-    detach_monitor_interval: 2.0
-    debug_container: false
+    monitor:
+      disable_detach_monitor: false
+      detach_monitor_interval: 2.0
+      debug_container: false
 
-  paths:
-    workspace_root: /tmp/autonomous_agent_tasks
-    host_projects_root: /tmp/autonomous_agent_projects
-    # executor_allowed_workspace_root: /tmp
-    # workspace_path_rewrites:
-    #   - from: /srv/ai_platform/workspaces
-    #     to: /workspaces
+    paths:
+      workspace_root: /tmp/autonomous_agent_tasks
+      host_projects_root: /tmp/autonomous_agent_projects
+      # executor_allowed_workspace_root: /tmp
+      # workspace_path_rewrites:
+      #   - from: /srv/ai_platform/workspaces
+      #     to: /workspaces
 
-  host:
-    uid: null
-    gid: null
+    host:
+      uid: null
+      gid: null
 
-  process:
-    # Example (override as needed):
-    # - opencode:  opencode run
-    # - codex:    codex ...
-    # - claude:   claude ...
-    command: opencode run
+    process:
+      # Example (override as needed):
+      # - opencode:  opencode run
+      # - codex:    codex ...
+      # - claude:   claude ...
+      command: opencode run
 
-  compose:
-    directory: .
-    file: docker-compose.yml
-    service_name: executor-service
-    # Example:
-    # command: opencode run
-    command: ""
+    compose:
+      directory: .
+      file: docker-compose.yml
+      service_name: executor-service
+      # Example:
+      # command: opencode run
+      command: ""
 
-  logging:
-    level: INFO
-    # file: /tmp/autonomous-agent-util.log
+    logging:
+      level: INFO
+      # file: /tmp/autonomous-agent-util.log

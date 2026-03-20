@@ -64,9 +64,9 @@ class _FakeTaskService:
 
 
 def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> None:
-    # Provide a minimal ai-chat-util-config.yml so init_runtime() succeeds.
+    # Provide a minimal ai-chat-util-config.yml so config resolution succeeds.
     cfg_path = tmp_path / "ai-chat-util-config.yml"
-    cfg_path.write_text("ai_chat_util_config:\n  autonomous_agent_util: {}\n", encoding="utf-8")
+    cfg_path.write_text("ai_chat_util_config: {}\nautonomous_agent_util: {}\n", encoding="utf-8")
     monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 

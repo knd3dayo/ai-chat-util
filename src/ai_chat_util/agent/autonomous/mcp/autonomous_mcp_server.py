@@ -15,9 +15,9 @@ from ai_chat_util_base.config.runtime import (
 )
 from fastmcp import FastMCP, Context
 
-from ..autonomous.abstract_endpoint import AutonomousEndPointBase
+from ..core.abstract_endpoint import AutonomousEndPointBase
 from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers
-from ..config.plugin_loader import load_plugins
+from .....ai_chat_util_base.config.plugin_loader import load_plugins
 
 default_port = 7101
 

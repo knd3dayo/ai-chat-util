@@ -374,7 +374,7 @@ class LLMClientBase(ABC):
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-        import ai_chat_util.util.pdf_util as pdf_util
+        import ai_chat_util.base.util.pdf_util as pdf_util
 
         page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.identifier} の内容を以下に示します。")
         pdf_contents = [page_info_content]

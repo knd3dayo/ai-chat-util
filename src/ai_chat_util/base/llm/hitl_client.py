@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 import os
-from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.base.llm.llm_client import LLMClient
 from ai_chat_util_base.config.runtime import AiChatUtilConfig
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 import sys

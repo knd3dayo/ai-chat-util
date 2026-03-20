@@ -1,4 +1,4 @@
-from ai_chat_util.llm.llm_factory import LLMFactory
+from ai_chat_util.base.llm.llm_factory import LLMFactory
 
 async def main(files):
     client = LLMFactory.create_llm_client()

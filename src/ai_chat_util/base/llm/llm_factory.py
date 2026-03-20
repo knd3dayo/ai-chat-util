@@ -1,6 +1,6 @@
 from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.llm.llm_client import LLMClient
-from ai_chat_util.llm.hitl_client import StdIOHITLClient, HITLClientBase
+from ai_chat_util.base.llm.llm_client import LLMClient
+from ai_chat_util.base.llm.hitl_client import StdIOHITLClient, HITLClientBase
  
 class LLMFactory:
     @classmethod

@@ -231,23 +231,16 @@ class TaskManager:
             running = isinstance(pid, int) and pid > 1 and _pid_running(pid)
 
             # If exit code is present, treat as exited and persist final status.
-            rc: int | None = None
             if exit_code_path and pathlib.Path(exit_code_path).exists():
                 try:
                     rc = int(pathlib.Path(exit_code_path).read_text(encoding="utf-8").strip())
                 except Exception:
                     rc = 1
 
-            if rc is not None or (not running and task.status == "running"):
-                if rc is None:
-                    # monitor が動いていない等で exit_code が得られない場合
-                    task.failed()
-                    task.stderr = (task.stderr or "") + "\nProcess exited but exit code is unavailable."
+                if rc == 0:
+                    task.completed()
                 else:
-                    if rc == 0:
-                        task.completed()
-                    else:
-                        task.failed()
+                    task.failed()
 
                 task.stdout = _tail_text(stdout_path, None)
                 task.stderr = _tail_text(stderr_path, None)
@@ -269,11 +262,27 @@ class TaskManager:
                 TaskManager.upsert_task(task)
                 return task
 
-            # running の場合は増分ログを返す（保存はしない）
+            # While process is still running, return incremental logs (do not persist).
+            if running:
+                stdout = _tail_text(stdout_path, tail)
+                stderr = _tail_text(stderr_path, tail)
+                return TaskStatus(
+                    **task.model_dump(exclude={"stdout", "stderr"}),
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+
+            # Race condition: process may have exited but `.exit_code` isn't written yet.
+            # Do NOT mark the task as failed/exited here; keep it running so callers continue polling.
             stdout = _tail_text(stdout_path, tail)
             stderr = _tail_text(stderr_path, tail)
+            wait_msg = "Process exited but exit code file is not yet available. Waiting..."
+            if wait_msg not in (stderr or ""):
+                stderr = (stderr + "\n" if stderr else "") + wait_msg
             return TaskStatus(
-                **task.model_dump(exclude={"stdout", "stderr"}),
+                **task.model_dump(exclude={"stdout", "stderr", "status", "sub_status"}),
+                status="running",
+                sub_status="starting",
                 stdout=stdout,
                 stderr=stderr,
             )

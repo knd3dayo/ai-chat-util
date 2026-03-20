@@ -1,6 +1,6 @@
 import asyncio
 from ..core.endpoint import EndPoint
-from ai_chat_util_base.mcp.autonomous_mcp_server import AutonomousMCPServer
+from ai_chat_util.agent.autonomous.mcp.autonomous_mcp_server import AutonomousMCPServer
 
 if __name__ == "__main__":
 

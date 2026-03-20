@@ -1,1 +1,0 @@
-opencode --print-logs --log-level DEBUG run "テキストファイル done.txt の内容を確認して、『完了2』に書き換える。ファイル一覧を表示。"

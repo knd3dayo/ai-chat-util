@@ -605,19 +605,16 @@ opencode --version
 ai_chat_util_config:
   llm:
     api_key: os.environ/LLM_API_KEY
-
-autonomous_agent_util:
-  llm:
-    api_key: os.environ/LLM_API_KEY
 ```
 
 実際の値はプロセス起動時に `.env`/環境変数から解決されます。
 
 ### よく使う設定項目
 
-- `llm.provider`, `llm.model`, `llm.base_url`: LLM の非秘匿設定
+- `ai_chat_util_config.llm.provider`, `ai_chat_util_config.llm.completion_model`, `ai_chat_util_config.llm.base_url`: LLM の非秘匿設定
 - `paths.workspace_root`: ワークスペースのデフォルト作成先
 - `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
+- `endpoint.mcp_server_name`: `mcp.json` の `mcpServers.<name>` の `<name>`（将来の coding-agent 特別扱い用。現時点では未使用）
 - `backend.task_backend`: API/MCP が使う実行バックエンド（`process/windows_process/linux_process/docker/compose`）
 - `compose.*`: Docker/Compose 実行時の設定
 - `process.command`: process 実行時のコマンド（必須）
@@ -807,7 +804,7 @@ uv run -m ai_chat_util.agent.autonomous._cli_.docker_main --config ./ai-chat-uti
 ### `LLM API key が未設定` で失敗する
 
 - `.env` または環境変数で API キー（例: `LLM_API_KEY`）を設定してください
-- `ai-chat-util-config.yml` に `ai_chat_util_config.llm.api_key` / `autonomous_agent_util.llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
+- `ai-chat-util-config.yml` に `ai_chat_util_config.llm.api_key` を書く場合は、必ず `os.environ/LLM_API_KEY` 形式で参照してください
 
 ### 設定ファイルが見つからない
 

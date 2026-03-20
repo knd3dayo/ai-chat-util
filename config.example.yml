@@ -58,6 +58,10 @@ ai_chat_util_config:
 # Optional: autonomous-agent-util settings (integrated)
 # NOTE: In the integrated format, this section lives at the YAML root.
 # autonomous_agent_util:
+#   endpoint:
+#     # MCP 設定JSON(mcp.json)の mcpServers.<name> の <name>。
+#     # 将来、coding-agent 用設定があれば特別扱いするための識別子（現時点では未使用）。
+#     mcp_server_name: coding-agent
 #   backend:
 #     task_backend: process
 #   process:

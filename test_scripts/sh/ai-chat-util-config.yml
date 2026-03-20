@@ -19,9 +19,6 @@ ai_chat_util_config:
     mcp_config_path: "mcp.json"
 
 autonomous_agent_util:
-  llm:
-    model: gpt-4o
-
   backend:
     task_backend: process
 

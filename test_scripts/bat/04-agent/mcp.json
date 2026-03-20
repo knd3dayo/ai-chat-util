@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "AssuranceProxy": {
+    "coding-agent": {
       "disabled": false,
       "timeout": 60,
       "type": "http",

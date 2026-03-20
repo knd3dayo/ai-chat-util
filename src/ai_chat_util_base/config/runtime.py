@@ -307,6 +307,7 @@ def _build_autonomous_agent_util_config(
         raw = dict(standalone_section)
 
     for section_key in (
+        "endpoint",
         "llm",
         "compose",
         "backend",
@@ -606,6 +607,25 @@ class AutonomousHostSection(BaseModel):
     gid: int | None = Field(default=None)
 
 
+class AutonomousEndpointSection(BaseModel):
+    """Endpoint-related settings for future MCP-aware routing.
+
+    NOTE: Currently not used by the executor runtime. This section exists to
+    reserve a stable config surface so future versions can apply custom
+    behavior when `mcp.json` contains a specific server definition.
+    """
+
+    mcp_server_name: str = Field(default="coding-agent")
+
+    @model_validator(mode="after")
+    def _validate_mcp_server_name(self) -> "AutonomousEndpointSection":
+        name = self.mcp_server_name
+        if not (isinstance(name, str) and name.strip()):
+            raise ValueError("endpoint.mcp_server_name must be a non-empty string")
+        self.mcp_server_name = name.strip()
+        return self
+
+
 class AutonomousSubprocessSection(BaseModel):
     # Deprecated alias section; keep for backward compatibility.
     command: str = Field(default="")
@@ -625,6 +645,7 @@ class AiChatUtilConfig(BaseModel):
 
 
 class AutonomousAgentUtilConfig(BaseModel):
+    endpoint: AutonomousEndpointSection = Field(default_factory=AutonomousEndpointSection)
     llm: AutonomousAgentUtilLLMSection = Field(default_factory=AutonomousAgentUtilLLMSection)
     compose: AutonomousComposeSection = Field(default_factory=AutonomousComposeSection)
     backend: AutonomousBackendSection = Field(default_factory=AutonomousBackendSection)

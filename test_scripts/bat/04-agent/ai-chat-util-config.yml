@@ -34,8 +34,8 @@ ai_chat_util_config:
       workspace_root: /tmp/autonomous_agent_tasks
       host_projects_root: /tmp/autonomous_agent_projects
 
-    subprocess:
-      command: opencode run
+    process:
+      command: opencode --print-logs --log-level DEBUG run
 
     logging:
       level: INFO

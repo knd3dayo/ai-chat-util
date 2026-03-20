@@ -105,7 +105,8 @@ ai_chat_util_config:
       # base_url_in_container: http://host.docker.internal:11434/v1
 
     backend:
-      # docker | compose | subprocess | process
+      # docker | compose | process
+      # NOTE: `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
       task_backend: process
 
     monitor:
@@ -125,7 +126,7 @@ ai_chat_util_config:
       uid: null
       gid: null
 
-    subprocess:
+    process:
       command: opencode run
 
     compose:

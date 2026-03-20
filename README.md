@@ -615,9 +615,9 @@ ai_chat_util_config:
 - `llm.provider`, `llm.model`, `llm.base_url`: LLM の非秘匿設定
 - `paths.workspace_root`: ワークスペースのデフォルト作成先
 - `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
-- `backend.task_backend`: API/MCP が使う実行バックエンド（`process/subprocess/docker/compose`）
+- `backend.task_backend`: API/MCP が使う実行バックエンド（`process/docker/compose`）
 - `compose.*`: Docker/Compose 実行時の設定
-- `subprocess.command`: subprocess/process 実行時のコマンド（デフォルト `opencode run`）
+- `process.command`: process 実行時のコマンド（デフォルト `opencode run`）
 
 ---
 
@@ -767,7 +767,7 @@ Supervisor 等のクライアントから呼び出す際は、以下を **契約
 ### 3) CLI
 
 現状の CLI は `DockerTaskService` を利用しており、**Docker/Compose 実行を前提**にしています。
-（ローカル subprocess/process で試したい場合は API/MCP 経由の方が簡単です）
+（ローカル process で試したい場合は API/MCP 経由の方が簡単です）
 
 ヘルプ:
 

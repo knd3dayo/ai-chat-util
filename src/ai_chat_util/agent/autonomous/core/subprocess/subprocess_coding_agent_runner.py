@@ -142,7 +142,11 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
             self.workspace = pathlib.Path(cfg.workspace_root) / self.task_id
         self.workspace.mkdir(parents=True, exist_ok=True)
 
-        self.command_base = command_base or (runtime_cfg.subprocess.command or runtime_cfg.compose.command)
+        # `process` is the preferred config section name.
+        # Keep reading `subprocess` for backward compatibility.
+        process_cmd = getattr(getattr(runtime_cfg, "process", None), "command", None)
+        subprocess_cmd = getattr(getattr(runtime_cfg, "subprocess", None), "command", None)
+        self.command_base = command_base or (process_cmd or subprocess_cmd or runtime_cfg.compose.command)
         self.command: list[str] = shlex.split(self.command_base)
         # Windows: wrap common shell shims (`*.cmd` / `*.bat` / `*.ps1`) so they
         # work under `shell=False` detached execution.

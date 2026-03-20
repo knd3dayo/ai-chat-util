@@ -7,6 +7,7 @@ from typing import Any, Optional, Literal, Callable
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from .config_util import (
+    CONFIG_ENV_VAR,
     ConfigError, load_resolved_yaml, resolve_config_path, resolve_autonomous_config_path, 
     resolve_env_ref,extract_required_root_section, extract_optional_ai_section_dict, 
     apply_secret_overrides_from_yaml,
@@ -298,6 +299,7 @@ def _build_autonomous_agent_util_config(
         "monitor",
         "paths",
         "host",
+        "process",
         "subprocess",
         "logging",
     ):
@@ -528,7 +530,23 @@ class AutonomousComposeSection(BaseModel):
 
 
 class AutonomousBackendSection(BaseModel):
-    task_backend: Literal["docker", "compose", "subprocess", "process"] = Field(default="process")
+    # NOTE:
+    # - `process` is the only local execution backend name.
+    # - `subprocess` is deprecated but accepted for backward compatibility and
+    #   normalized to `process`.
+    task_backend: str = Field(default="process")
+
+    @model_validator(mode="after")
+    def _normalize_task_backend(self) -> "AutonomousBackendSection":
+        b = (self.task_backend or "process").strip().lower()
+        if b == "subprocess":
+            b = "process"
+        if b not in {"docker", "compose", "process"}:
+            raise ValueError(
+                "backend.task_backend は 'docker' | 'compose' | 'process' のいずれかである必要があります"
+            )
+        self.task_backend = b
+        return self
 
 
 class AutonomousMonitorSection(BaseModel):
@@ -574,6 +592,10 @@ class AutonomousSubprocessSection(BaseModel):
     command: str = Field(default="opencode run")
 
 
+class AutonomousProcessSection(BaseModel):
+    command: str = Field(default="opencode run")
+
+
 class AiChatUtilConfig(BaseModel):
     llm: LLMSection = Field(default_factory=LLMSection)
     paths: PathsSection = Field(default_factory=PathsSection)
@@ -590,8 +612,48 @@ class AutonomousAgentUtilConfig(BaseModel):
     monitor: AutonomousMonitorSection = Field(default_factory=AutonomousMonitorSection)
     paths: AutonomousPathsSection = Field(default_factory=AutonomousPathsSection)
     host: AutonomousHostSection = Field(default_factory=AutonomousHostSection)
+    # Preferred config section name.
+    process: AutonomousProcessSection = Field(default_factory=AutonomousProcessSection)
+    # Backward compatible alias (deprecated): `subprocess.command`.
     subprocess: AutonomousSubprocessSection = Field(default_factory=AutonomousSubprocessSection)
     logging: AutonomousAgentUtilLoggingSection = Field(default_factory=AutonomousAgentUtilLoggingSection)
+
+    @model_validator(mode="after")
+    def _coalesce_process_subprocess(self) -> "AutonomousAgentUtilConfig":
+        fields = set(getattr(self, "model_fields_set", set()) or set())
+        has_process = "process" in fields
+        has_subprocess = "subprocess" in fields
+
+        p_cmd = (self.process.command or "").strip() if self.process else ""
+        s_cmd = (self.subprocess.command or "").strip() if self.subprocess else ""
+
+        if has_process and has_subprocess:
+            # If both sections are explicitly configured, they must agree.
+            if p_cmd and s_cmd and p_cmd != s_cmd:
+                raise ValueError(
+                    "process.command と subprocess.command の両方が設定されていますが一致しません。process.command に統一してください。"
+                )
+            # Prefer process if present; keep alias in sync.
+            effective = p_cmd or s_cmd
+            if effective:
+                self.process.command = effective
+                self.subprocess.command = effective
+            return self
+
+        if has_subprocess and not has_process:
+            # Old config: migrate in-memory.
+            if s_cmd:
+                self.process.command = s_cmd
+            return self
+
+        if has_process and not has_subprocess:
+            # Keep deprecated alias in sync for internal callers.
+            if p_cmd:
+                self.subprocess.command = p_cmd
+            return self
+
+        # Neither explicitly set; keep defaults.
+        return self
 
     @model_validator(mode="after")
     def _validate_llm_secret_policy(self) -> "AutonomousAgentUtilConfig":

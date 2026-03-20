@@ -1,8 +1,38 @@
+from abc import ABC, abstractmethod
 
-class Prompts:
+class PromptsBase(ABC):
 
-    @staticmethod
-    def auto_approve_hitl_policy_text(approval_tools_text):
+    @abstractmethod
+    def auto_approve_hitl_policy_text(self, approval_tools_text) -> str:
+        pass
+
+    @abstractmethod
+    def normal_hitl_policy_text(self, approval_tools_text) -> str:
+        pass
+
+    @abstractmethod
+    def tool_agent_system_prompt(self, hitl_policy_text) -> str:
+        pass
+
+    @abstractmethod
+    def tool_agent_user_prompt(self, tools_description, hitl_policy_text) -> str:
+        pass
+
+    @abstractmethod
+    def supervisor_hitl_policy_text(self, approval_tools_text) -> str:
+        pass
+
+    @abstractmethod
+    def supervisor_normal_hitl_policy_text(self, approval_tools_text) -> str:
+        pass
+
+    @abstractmethod
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text) -> str:
+        pass
+
+class CodingAgentPrompts(PromptsBase):
+
+    def auto_approve_hitl_policy_text(self, approval_tools_text) -> str:
         return f"""
 \n\n[AUTO_APPROVE]\n
 - auto_approve が有効です。ユーザーに追加の質問（HITL）をせず、可能な限り自己完結してください。
@@ -12,8 +42,7 @@ class Prompts:
 - auto_approve の場合、上記ツールも自動承認されたものとして扱い、必要なら実行して構いません。
 """
     
-    @staticmethod
-    def normal_hitl_policy_text(approval_tools_text):
+    def normal_hitl_policy_text(self, approval_tools_text) -> str:
         return f"""
 \n\n[HITL承認ポリシー]\n
 - 次のツールは人間の承認があるまで絶対に実行してはいけません: {approval_tools_text}
@@ -25,8 +54,7 @@ class Prompts:
 - 直前のユーザー入力に 'APPROVE TOOL_NAME' があれば実行して構いません。
 - ユーザーがローカルファイルパスやURLを提示した場合、アクセス不能と決めつけず、まずは該当ツールで実行を試みてください。
 """
-    @staticmethod
-    def tool_agent_system_prompt(hitl_policy_text):
+    def tool_agent_system_prompt(self, hitl_policy_text) -> str:
         return f"""
 あなたはツール実行エージェント（tool_agent）です。スーパーバイザーの指示を達成するために、必要に応じてツールを使用してください。
 利用可能なツールのみを使用してください。
@@ -64,8 +92,7 @@ class Prompts:
 - question: スーパーバイザーへの質問。スーパーバイザーに確認が必要な場合は、TEXTに質問内容を入れてこのタイプで返してください。
 - reject: 指示拒否。実行できない指示があった場合は、このタイプで返してください。TEXTは任意ですが、拒否理由などがあれば入れてください。
 """
-    @staticmethod
-    def tool_agent_user_prompt(tools_description, hitl_policy_text):
+    def tool_agent_user_prompt(self, tools_description, hitl_policy_text) -> str:
         return f"""
         planner_agent_system_prompt = (
             "あなたはプランナー（計画立案）エージェントです。"
@@ -86,8 +113,7 @@ class Prompts:
             - reject: 指示拒否。実行できない指示があった場合は、このタイプで返してください。TEXTは任意ですが、拒否理由などがあれば入れてください。
             """
     
-    @staticmethod
-    def supervisor_hitl_policy_text(approval_tools_text):
+    def supervisor_hitl_policy_text(self, approval_tools_text) -> str:
         return (
                 "[AUTO_APPROVE]\n"
                 "- auto_approve が有効です。ユーザーに追加確認できない前提で、可能な限り自己完結してください。\n"
@@ -98,8 +124,7 @@ class Prompts:
                 "- auto_approve の場合、上記ツールも自動承認されたものとして扱い、必要なら実行して構いません。\n"
             )
     
-    @staticmethod
-    def supervisor_normal_hitl_policy_text(approval_tools_text):
+    def supervisor_normal_hitl_policy_text(self, approval_tools_text) -> str:
         return (
                 "[HITL承認ポリシー]\n"
                 f"- 次のツールは人間の承認があるまで実行してはいけません: {approval_tools_text}\n"
@@ -107,8 +132,7 @@ class Prompts:
                 "- 承認が必要なら、<RESPONSE_TYPE>question</RESPONSE_TYPE> と <HITL_KIND>approval</HITL_KIND> と <HITL_TOOL>TOOL_NAME</HITL_TOOL> を含めて止めてください。\n"
             )
     
-    @staticmethod
-    def supervisor_system_prompt(tools_description,supervisor_hitl_policy_text):
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text) -> str:
         return f"""
 あなたはチームのスーパーバイザーです。tool_agent（ツール実行）と planner_agent（計画）の各エージェントを管理し、
 スーパーバイザーの目的を達成してください。

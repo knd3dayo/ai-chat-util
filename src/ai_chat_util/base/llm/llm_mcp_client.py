@@ -17,6 +17,7 @@ from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatRespon
 from .abstract_llm_client import AbstractLLMClient
 from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from .prompts import CodingAgentPrompts, PromptsBase
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -32,6 +33,7 @@ class MCPClient(AbstractLLMClient):
         )
         self.mcp_config, self.config_parser = MCPClientUtil.create_mcp_config(runtime_config, mcp_config_path)
         self.message_factory = LLMMessageContentFactory()
+        self.prompts = CodingAgentPrompts()
 
 
     @staticmethod
@@ -100,6 +102,8 @@ class MCPClient(AbstractLLMClient):
         # LLM + MCP ツールでエージェントを作成
         litellm_router = Router(model_list=self.runtime_config.llm.create_litellm_model_list())
         llm = ChatLiteLLMRouter(router=litellm_router, model_name=self.runtime_config.llm.completion_model)
+        # LLM + MCP ツールでエージェントを作成
+        allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(self.mcp_config, self.config_parser)
 
         trace_id = getattr(chat_request, "trace_id", None)
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
@@ -145,10 +149,11 @@ class MCPClient(AbstractLLMClient):
                 exit_stack=exit_stack,
             )
 
+
             app = await MCPClientUtil.create_workflow(
-                self.mcp_config,
-                self.config_parser,
                 llm,
+                prompts=self.prompts,
+                allowed_langchain_tools=allowed_langchain_tools,
                 checkpointer=checkpointer,
                 hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
                 auto_approve=auto_approve,

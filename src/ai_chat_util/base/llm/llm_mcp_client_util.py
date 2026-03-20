@@ -15,7 +15,7 @@ from langchain_core.tools.structured import StructuredTool
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
-from .prompts import Prompts
+from .prompts import CodingAgentPrompts, PromptsBase
 try:
     # Async checkpointer for LangGraph when using app.ainvoke()/astream()
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -664,6 +664,7 @@ class MCPClientUtil:
     def create_tool_agent(
         cls,
         llm: BaseChatModel,
+        prompts: PromptsBase,
         auto_approve: bool,
         hitl_approval_tools: Sequence[str] | None,
         allowed_langchain_tools: list[Any],
@@ -674,11 +675,11 @@ class MCPClientUtil:
         approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
 
         if auto_approve:
-            hitl_policy_text = Prompts.auto_approve_hitl_policy_text(approval_tools_text)
+            hitl_policy_text = prompts.auto_approve_hitl_policy_text(approval_tools_text)
         else:
-            hitl_policy_text = Prompts.normal_hitl_policy_text(approval_tools_text)
+            hitl_policy_text = prompts.normal_hitl_policy_text(approval_tools_text)
 
-        tool_agent_system_prompt = Prompts.tool_agent_system_prompt(hitl_policy_text)
+        tool_agent_system_prompt = prompts.tool_agent_system_prompt(hitl_policy_text)
         tool_agent = create_agent(
             llm,
             allowed_langchain_tools,
@@ -690,9 +691,9 @@ class MCPClientUtil:
     @classmethod
     async def create_workflow(
         cls,
-        mcp_config: dict[str, Any] | None,
-        config_parser: MCPConfigParser | None,
         llm: BaseChatModel,
+        prompts: PromptsBase,
+        allowed_langchain_tools: list[Any],
         *,
         checkpointer: Any | None = None,
         hitl_approval_tools: Sequence[str] | None = None,
@@ -702,8 +703,6 @@ class MCPClientUtil:
         tool_timeout_retries: int | None = None,
     ) -> CompiledStateGraph:
 
-        # LLM + MCP ツールでエージェントを作成
-        allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(mcp_config, config_parser)
 
         # Safety valves: cap tool calls and hard-timeout tool execution.
         # This enforces termination even if prompts are ignored.
@@ -714,8 +713,6 @@ class MCPClientUtil:
         # Shared tool call counter across all tools within this workflow.
         # Using a mutable container avoids invalid `nonlocal` usage across methods.
         tool_call_state: dict[str, int] = {"used": 0}
-
-
 
         if allowed_langchain_tools and (tool_call_limit_int or (tool_timeout_seconds_f and tool_timeout_seconds_f > 0) or tool_timeout_retries_int):
             for tool in allowed_langchain_tools:
@@ -802,17 +799,16 @@ class MCPClientUtil:
         tools_description = "\n".join(f"## name: {tool.name}\n - description: {tool.description}\n - args_schema: {tool.args_schema}\n" for tool in allowed_langchain_tools)
         logger.info("Allowed tools:\n%s", tools_description)
 
-
         # ツール実行用のエージェント
         # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
-        tool_agent = cls.create_tool_agent(llm, auto_approve, hitl_approval_tools, allowed_langchain_tools)
+        tool_agent = cls.create_tool_agent(llm, prompts, auto_approve, hitl_approval_tools, allowed_langchain_tools, )
 
         if auto_approve:
-            supervisor_hitl_policy_text = Prompts.supervisor_hitl_policy_text(approval_tools_text)
+            supervisor_hitl_policy_text = prompts.supervisor_hitl_policy_text(approval_tools_text)
         else:
-            supervisor_hitl_policy_text = Prompts.supervisor_normal_hitl_policy_text(approval_tools_text)
+            supervisor_hitl_policy_text = prompts.supervisor_normal_hitl_policy_text(approval_tools_text)
 
-        supervisor_prompt = Prompts.supervisor_system_prompt(tools_description, supervisor_hitl_policy_text)
+        supervisor_prompt = prompts.supervisor_system_prompt(tools_description, supervisor_hitl_policy_text)
 
         # Prefer tool execution agent first to reduce accidental planner-only loops.
         workflow = create_supervisor(

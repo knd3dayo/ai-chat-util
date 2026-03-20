@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional, Any, cast
 import os
 import uuid
@@ -5,9 +7,9 @@ import asyncio
 import time
 import tempfile
 import atexit
-import requests
 import base64
 from abc import ABC, abstractmethod
+from .abstract_llm_client import AbstractLLMClient
 
 from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig
 from ai_chat_util_base.model.ai_chatl_util_models import (
@@ -15,6 +17,8 @@ from ai_chat_util_base.model.ai_chatl_util_models import (
     ChatContent, WebRequestModel, ChatRequest
 )
 from ..util.office2pdf import Office2PDFUtil
+from ..util.downloader import DownLoader
+
 from file_util.model import FileUtilDocument
 from .llm_mcp_client import MCPClient
 
@@ -27,240 +31,161 @@ class LLMClientUtil:
 
 
     @classmethod
-    def download_files(cls, urls: list[WebRequestModel], download_dir: str) -> list[str]:
-        """
-        Download files from the given URLs to the specified directory.
-        Returns a list of file paths where the files are saved.
-        """
-        cfg = get_runtime_config()
-
-        verify_enabled = cfg.network.requests_verify
-        ca_bundle = cfg.network.ca_bundle
-        # requestsのverifyには bool | str(=CA bundle path) を渡せる
-        verify: bool | str
-        if ca_bundle:
-            verify = ca_bundle
-        else:
-            verify = verify_enabled
-
-        def get_file_name_from_url(url: str) -> str:
-            """
-            URLからファイル名を抽出する。
-            例: https://example.com/path/to/file.txt -> file.txt
-            """
-            from urllib.parse import urlparse
-            import os
-            parsed_url = urlparse(url)
-            return os.path.basename(parsed_url.path)
-        
-        file_paths = []
-        for item in urls:
-            # タイムアウト無しだと接続/読み取りで無限待ちになり得る
-            res = requests.get(url=item.url, headers=item.headers, verify=verify, timeout=(10, 60))
-            res.raise_for_status()
-            
-            file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
-            with open(file_path, "wb") as f:
-                f.write(res.content)
-            file_paths.append(file_path)
-        return file_paths
-
-    @classmethod
-    async def download_files_async(cls, urls: list[WebRequestModel], download_dir: str) -> list[str]:
-        """Download files asynchronously (for use inside async flows).
-
-        This avoids blocking the event loop (sync requests.get) and ensures
-        HTTP resources are closed via `async with`.
-        """
-        cfg = get_runtime_config()
-
-        verify_enabled = cfg.network.requests_verify
-        ca_bundle = cfg.network.ca_bundle
-        verify: bool | str
-        if ca_bundle:
-            verify = ca_bundle
-        else:
-            verify = verify_enabled
-
-        def get_file_name_from_url(url: str) -> str:
-            from urllib.parse import urlparse
-            parsed_url = urlparse(url)
-            return os.path.basename(parsed_url.path)
-
-        try:
-            import httpx
-        except Exception as e:
-            raise RuntimeError("httpx が見つかりません。依存関係を確認してください。") from e
-
-        timeout = httpx.Timeout(60.0, connect=10.0)
-
-        file_paths: list[str] = []
-        async with httpx.AsyncClient(verify=verify, timeout=timeout, follow_redirects=True) as client:
-            for item in urls:
-                resp = await client.get(item.url, headers=item.headers)
-                resp.raise_for_status()
-
-                file_path = os.path.join(download_dir, get_file_name_from_url(item.url))
-                with open(file_path, "wb") as f:
-                    f.write(resp.content)
-                file_paths.append(file_path)
-
-        return file_paths
-
-    @classmethod
-    async def run_mcp_chat_completion(
-        cls, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
-    ) -> ChatResponse:
-        messages = chat_request.chat_history.messages
-        mcp_client = MCPClient(llm_config)
-        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
-        kwargs.setdefault("timeout", default_timeout_seconds)
-
-        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
-        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
-        hard_timeout: float = default_timeout_seconds
-        timeout_kw = kwargs.get("timeout")
-        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
-            hard_timeout = float(timeout_kw)
-
-        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
-        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
-        logger.debug(
-            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
-            llm_config.llm.provider,
-            llm_config.llm.completion_model,
-            len(messages),
-            kwargs.get("timeout"),
+    async def analyze_image_files(cls, llm_client: AbstractLLMClient, file_list: list[str], prompt: str, detail: str) -> ChatResponse:
+        '''
+        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
+        '''
+        started = time.perf_counter()
+        logger.info(
+            "IMAGE_ANALYZE_START images=%d detail=%s prompt_len=%d",
+            len(file_list or []),
+            detail,
+            len((prompt or "").strip()),
         )
-        try:
-            response = await asyncio.wait_for(
-                mcp_client.chat(chat_request),
-                timeout=hard_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(
-                "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
-                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
-            ) from e
-        logger.debug("LLM completion response type: %s", type(response))
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        image_content_list: list[ChatContent] = []
+        encode_started = time.perf_counter()
+        total_bytes = 0
+        for image_path in file_list:
+            doc = FileUtilDocument.from_file(document_path=image_path)
+            try:
+                total_bytes += len(doc.data or b"")
+            except Exception:
+                pass
+            image_contents = llm_client.get_message_factory()._create_image_content_(doc, detail)
+            image_content_list.extend(image_contents)
+        logger.info(
+            "IMAGE_ENCODE_END images=%d total_bytes=%d elapsed_ms=%d",
+            len(file_list or []),
+            total_bytes,
+            int((time.perf_counter() - encode_started) * 1000),
+        )
 
-        if isinstance(response, ChatResponse):
-            return response
+        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_started = time.perf_counter()
+        logger.info("IMAGE_CHAT_START")
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        logger.info(
+            "IMAGE_CHAT_END elapsed_ms=%d total_elapsed_ms=%d",
+            int((time.perf_counter() - chat_started) * 1000),
+            int((time.perf_counter() - started) * 1000),
+        )
+        return chat_response
+    
+    @classmethod
+    async def analyze_image_urls(cls, llm_client: AbstractLLMClient, image_url_list: list[WebRequestModel], prompt: str, detail: str) -> ChatResponse:
+        '''
+        複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        image_content_list: list[ChatContent] = []
+        for image_url in image_url_list:
+            image_contents = await llm_client.get_message_factory().create_image_content_from_url_async(image_url, detail)
+            image_content_list.extend(image_contents)
 
-        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
+        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
 
     @classmethod
-    async def run_litellm_chat_completion(
-        cls, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
-    ) -> ChatResponse:
-        messages = chat_request.chat_history.messages
-        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
-        params = {}
-        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
-        provider = (llm_config.llm.provider or "").lower()
-        api_key = llm_config.llm.api_key
-        params["api_key"] = api_key
-        params["model"] = f"{llm_config.llm.provider}/{llm_config.llm.completion_model}"
-        params["messages"] = message_dict_list
-        if llm_config.llm.base_url:
-            params["base_url"] = llm_config.llm.base_url
-        if llm_config.llm.api_version:
-            params["api_version"] = llm_config.llm.api_version
-        extra_headers = getattr(llm_config.llm, "extra_headers", None)
-        if extra_headers:
-            filtered = {
-                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
-            }
-            if filtered:
-                params["extra_headers"] = filtered
+    async def analyze_pdf_files(cls, llm_client: AbstractLLMClient, file_list: list[str], prompt: str, detail: str = "auto"
+            ) -> ChatResponse:
+        '''
+        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
+        '''
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        pdf_content_list = []
+        config = llm_client.get_config()
+        if not config:
+            raise ValueError("LLMClientの設定が取得できませんでした。")
 
-        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
-        kwargs.setdefault("timeout", default_timeout_seconds)
+        for file_path in file_list:
+            if config.features.use_custom_pdf_analyzer:
+                logger.info(f"Using custom PDF analyzer for file: {file_path}")
+                pdf_content = llm_client.get_message_factory()._create_custom_pdf_content_from_file(file_path, detail)
+            else:
+                logger.info(f"Using standard PDF analyzer for file: {file_path}")
+                pdf_content = llm_client.get_message_factory().create_pdf_content_from_file(file_path)
+            pdf_content_list.extend(pdf_content)
 
-        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
-        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
-        hard_timeout: float = default_timeout_seconds
-        timeout_kw = kwargs.get("timeout")
-        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
-            hard_timeout = float(timeout_kw)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(
+                messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
 
-        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
-        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
-        logger.debug(
-            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
-            provider,
-            params.get("model"),
-            len(message_dict_list),
-            kwargs.get("timeout"),
-        )
-        try:
-            response = await asyncio.wait_for(
-                litellm.acompletion(
-                    **params,
-                    **kwargs
-                ),
-                timeout=hard_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(
-                "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
-                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
-            ) from e
-        logger.debug("LLM completion response type: %s", type(response))
+    @classmethod
+    async def analyze_office_files(cls, llm_client: AbstractLLMClient, file_path_list: list[str], prompt: str, detail: str = "auto"
+            ) -> ChatResponse:
+        '''
+        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。
+        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        office_contents: list[ChatContent] = []
+        for file_path in file_path_list:
+            # Officeドキュメントを一時的にPDFに変換する
+            pdf_content = llm_client.get_message_factory().create_office_content_from_file(
+                file_path, detail=detail)
 
-        if isinstance(response, litellm.ModelResponse):
-            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
-            # 属性として見えないことがあるため dict-style access を使う。
-            usage = response.get("usage") or {}
-            output_tokens = int(usage.get("completion_tokens", 0) or 0)
-            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+            office_contents.extend(pdf_content)
 
-            choices = cast(list[Any], response.get("choices") or [])
-            output = ""
-            if choices:
-                first_choice = cast(Any, choices[0])
-                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
-                if isinstance(first_choice, dict):
-                    message = first_choice.get("message")
-                else:
-                    message = getattr(first_choice, "message", None)
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
 
-                if isinstance(message, dict):
-                    output = message.get("content") or ""
-                else:
-                    output = getattr(message, "content", "") or ""
+        chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        response: ChatResponse = await llm_client.chat(chat_request)
+        return response
 
-            # choicesが空 or contentが空の場合は、明示的に失敗させて原因をユーザーに見せる。
-            # （"何も出力されない" 体験を避ける）
-            if not choices:
-                err = response.get("error")
-                if err:
-                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
-                response_dict = cast(dict[str, Any], response)
-                raise RuntimeError(
-                    "LLM応答の choices が空でした。"
-                    f" response_keys={list(response_dict.keys())}"
-                )
-            if not str(output).strip():
-                err = response.get("error")
-                if err:
-                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
-                response_dict = cast(dict[str, Any], response)
-                raise RuntimeError(
-                    "LLM応答の content が空でした。"
-                    f" response_keys={list(response_dict.keys())}"
-                )
+    @classmethod
+    async def analyze_documents_data(cls, llm_client: AbstractLLMClient, document_type_list: list[FileUtilDocument], prompt: str, detail: str = "auto"
+            ) -> ChatResponse:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
+        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        content_list = []
+        for document_type in document_type_list:
+            contents = llm_client.get_message_factory().create_multi_format_content(
+                document_type, detail=detail)
+            content_list.extend(contents)
 
-            return ChatResponse(
-                messages=[ChatMessage(role="assistant", content=[ChatContent(params={"type": "text", "text": output})])],
-                input_tokens=input_tokens,
-                output_tokens=output_tokens
-            )
-        raise TypeError(f"Unexpected response type: {type(response)!r}")
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
+    @classmethod
+    async def analyze_files(cls, llm_client: AbstractLLMClient, file_path_list: list[str], prompt: str, detail: str = "auto"
+            ) -> ChatResponse:
+        '''
+        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
+        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
+        '''
+        content_list = []
+        for file_path in file_path_list:
+            contents = llm_client.get_message_factory().create_multi_format_contents_from_file(
+                file_path, detail=detail)
+            content_list.extend(contents)
+
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
 
 class LLMMessageContentFactoryBase(ABC):
+
     def is_text_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "text"
 
@@ -310,12 +235,12 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = LLMClientUtil.download_files([file_url], tmpdir.name)
+        file_paths = DownLoader.download_files([file_url], tmpdir.name)
         return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
 
     async def create_image_content_from_url_async(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            file_paths = await LLMClientUtil.download_files_async([file_url], tmp_dir)
+            file_paths = await DownLoader.download_files_async([file_url], tmp_dir)
             return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
     
     def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
@@ -336,7 +261,7 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = LLMClientUtil.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
         return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
     def _create_custom_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
@@ -411,7 +336,7 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = LLMClientUtil.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
 
         office_contents = []
         for file_path in file_paths:
@@ -477,7 +402,7 @@ class LLMMessageContentFactoryBase(ABC):
         '''
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
-        file_paths = LLMClientUtil.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
 
         return self.create_multi_format_contents_from_file(
             file_paths[0], detail=detail
@@ -661,9 +586,7 @@ class LLMMessageContentFactory(LLMMessageContentFactoryBase):
         params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
         return [ChatContent(params=params)]
 
-
-
-class LLMClientBase(ABC):
+class LLMClientBase(AbstractLLMClient, ABC):
 
     @abstractmethod
     def get_config(self) -> AiChatUtilConfig | None:
@@ -679,157 +602,157 @@ class LLMClientBase(ABC):
         ) -> "LLMClientBase":
         pass
 
-    async def analyze_image_files(self, file_list: list[str], prompt: str, detail: str) -> ChatResponse:
-        '''
-        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
-        started = time.perf_counter()
-        logger.info(
-            "IMAGE_ANALYZE_START images=%d detail=%s prompt_len=%d",
-            len(file_list or []),
-            detail,
-            len((prompt or "").strip()),
+
+    async def run_mcp_chat_completion(
+        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
+    ) -> ChatResponse:
+        messages = chat_request.chat_history.messages
+        mcp_client = MCPClient(llm_config)
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            llm_config.llm.provider,
+            llm_config.llm.completion_model,
+            len(messages),
+            kwargs.get("timeout"),
         )
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-        image_content_list: list[ChatContent] = []
-        encode_started = time.perf_counter()
-        total_bytes = 0
-        for image_path in file_list:
-            doc = FileUtilDocument.from_file(document_path=image_path)
-            try:
-                total_bytes += len(doc.data or b"")
-            except Exception:
-                pass
-            image_contents = self.get_message_factory()._create_image_content_(doc, detail)
-            image_content_list.extend(image_contents)
-        logger.info(
-            "IMAGE_ENCODE_END images=%d total_bytes=%d elapsed_ms=%d",
-            len(file_list or []),
-            total_bytes,
-            int((time.perf_counter() - encode_started) * 1000),
+        try:
+            response = await asyncio.wait_for(
+                mcp_client.chat(chat_request),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
+
+        if isinstance(response, ChatResponse):
+            return response
+
+        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
+
+    async def run_litellm_chat_completion(
+        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
+    ) -> ChatResponse:
+        messages = chat_request.chat_history.messages
+        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
+        params = {}
+        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
+        provider = (llm_config.llm.provider or "").lower()
+        api_key = llm_config.llm.api_key
+        params["api_key"] = api_key
+        params["model"] = f"{llm_config.llm.provider}/{llm_config.llm.completion_model}"
+        params["messages"] = message_dict_list
+        if llm_config.llm.base_url:
+            params["base_url"] = llm_config.llm.base_url
+        if llm_config.llm.api_version:
+            params["api_version"] = llm_config.llm.api_version
+        extra_headers = getattr(llm_config.llm, "extra_headers", None)
+        if extra_headers:
+            filtered = {
+                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
+            }
+            if filtered:
+                params["extra_headers"] = filtered
+
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            provider,
+            params.get("model"),
+            len(message_dict_list),
+            kwargs.get("timeout"),
         )
+        try:
+            response = await asyncio.wait_for(
+                litellm.acompletion(
+                    **params,
+                    **kwargs
+                ),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
 
-        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
-        chat_started = time.perf_counter()
-        logger.info("IMAGE_CHAT_START")
-        chat_response: ChatResponse = await self.chat(chat_request)
-        logger.info(
-            "IMAGE_CHAT_END elapsed_ms=%d total_elapsed_ms=%d",
-            int((time.perf_counter() - chat_started) * 1000),
-            int((time.perf_counter() - started) * 1000),
-        )
-        return chat_response
-    
-    async def analyze_image_urls(self, image_url_list: list[WebRequestModel], prompt: str, detail: str) -> ChatResponse:
-        '''
-        複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-        image_content_list: list[ChatContent] = []
-        for image_url in image_url_list:
-            image_contents = await self.get_message_factory().create_image_content_from_url_async(image_url, detail)
-            image_content_list.extend(image_contents)
+        if isinstance(response, litellm.ModelResponse):
+            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
+            # 属性として見えないことがあるため dict-style access を使う。
+            usage = response.get("usage") or {}
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
+            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
 
-        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                messages=[chat_message]), chat_request_context=None)
-        chat_response: ChatResponse = await self.chat(chat_request)
-        return chat_response
-    
+            choices = cast(list[Any], response.get("choices") or [])
+            output = ""
+            if choices:
+                first_choice = cast(Any, choices[0])
+                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                else:
+                    message = getattr(first_choice, "message", None)
 
-    async def analyze_pdf_files(
-            self, file_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-        pdf_content_list = []
-        config = self.get_config()
-        if not config:
-            raise ValueError("LLMClientの設定が取得できませんでした。")
+                if isinstance(message, dict):
+                    output = message.get("content") or ""
+                else:
+                    output = getattr(message, "content", "") or ""
 
-        for file_path in file_list:
-            if config.features.use_custom_pdf_analyzer:
-                logger.info(f"Using custom PDF analyzer for file: {file_path}")
-                pdf_content = self.get_message_factory()._create_custom_pdf_content_from_file(file_path, detail)
-            else:
-                logger.info(f"Using standard PDF analyzer for file: {file_path}")
-                pdf_content = self.get_message_factory().create_pdf_content_from_file(file_path)
-            pdf_content_list.extend(pdf_content)
+            # choicesが空 or contentが空の場合は、明示的に失敗させて原因をユーザーに見せる。
+            # （"何も出力されない" 体験を避ける）
+            if not choices:
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の choices が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
+            if not str(output).strip():
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の content が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
 
-        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                messages=[chat_message]), chat_request_context=None)
-        chat_response: ChatResponse = await self.chat(chat_request)
-        return chat_response
-
-    async def analyze_office_files(
-            self, file_path_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        office_contents: list[ChatContent] = []
-        for file_path in file_path_list:
-            # Officeドキュメントを一時的にPDFに変換する
-            pdf_content = self.get_message_factory().create_office_content_from_file(
-                file_path, detail=detail)
-
-            office_contents.extend(pdf_content)
-
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-
-        chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
-        response: ChatResponse = await self.chat(chat_request)
-        return response
-
-    async def analyze_documents_data(
-            self, document_type_list: list[FileUtilDocument], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        content_list = []
-        for document_type in document_type_list:
-            contents = self.get_message_factory().create_multi_format_content(
-                document_type, detail=detail)
-            content_list.extend(contents)
-
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
-        chat_response: ChatResponse = await self.chat(chat_request)
-        return chat_response
-
-    async def analyze_files(
-            self, file_path_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        content_list = []
-        for file_path in file_path_list:
-            contents = self.get_message_factory().create_multi_format_contents_from_file(
-                file_path, detail=detail)
-            content_list.extend(contents)
-
-        prompt_content = self.get_message_factory().create_text_content(text=prompt)
-        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
-        chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
-        chat_response: ChatResponse = await self.chat(chat_request)
-        return chat_response
+            return ChatResponse(
+                messages=[ChatMessage(role="assistant", content=[ChatContent(params={"type": "text", "text": output})])],
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
+            )
+        raise TypeError(f"Unexpected response type: {type(response)!r}")
 
 
     async def simple_chat(self, prompt: str,) -> str:
@@ -1008,14 +931,14 @@ class LLMClient(LLMClientBase):
 
     async def _chat_completion_(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
         if self.use_mcp:
-            return await LLMClientUtil.run_mcp_chat_completion(
+            return await self.run_mcp_chat_completion(
                 self.llm_config, 
                 chat_request, 
                 self.default_timeout_seconds, 
                 **kwargs
             )
         else:
-            return await LLMClientUtil.run_litellm_chat_completion(
+            return await self.run_litellm_chat_completion(
                     self.llm_config, 
                     chat_request, 
                     self.default_timeout_seconds, 

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from typing import Iterable
 from ai_chat_util.base.llm.llm_factory import LLMFactory
+from ..base.llm.llm_client import LLMClientUtil
 from ai_chat_util_base.config.runtime import init_runtime, apply_logging_overrides
 
 
@@ -282,28 +283,28 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await llm_client.analyze_image_files(args.image_path_list, args.prompt, args.detail)
+        response = await LLMClientUtil.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await llm_client.analyze_pdf_files(args.pdf_path_list, args.prompt, args.detail)
+        response = await LLMClientUtil.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await llm_client.analyze_office_files(args.office_path_list, args.prompt, args.detail)
+        response = await LLMClientUtil.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await llm_client.analyze_files(args.file_path_list, args.prompt, args.detail)
+        response = await LLMClientUtil.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
         print(response.output)
         return
 

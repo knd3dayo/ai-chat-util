@@ -7,14 +7,14 @@ from itertools import count
 from pathlib import Path
 
 from pydantic import Field
-from ai_chat_util_base.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util_base.model.ai_chatl_util_models import  WebRequestModel
 from ai_chat_util.base.llm.llm_factory import LLMFactory
 from ai_chat_util.base.llm.llm_client import LLMClientUtil
 from ai_chat_util_base.config.runtime import get_runtime_config
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
 from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util_base.config.runtime import get_runtime_config
+from ai_chat_util.base.util.downloader import DownLoader
 
 import ai_chat_util.log.log_settings as log_settings
 
@@ -67,7 +67,7 @@ async def analyze_image_urls(
     )
     llm_client = LLMFactory.create_llm_client()
     try:
-        response = await llm_client.analyze_image_urls(image_path_urls, prompt, detail)
+        response = await LLMClientUtil.analyze_image_urls(llm_client, image_path_urls, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_image_urls call_id=%s", call_id)
@@ -126,7 +126,7 @@ async def analyze_image_files(
         for attempt in range(1, retries + 2):
             try:
                 response = await asyncio.wait_for(
-                    llm_client.analyze_image_files(resolved_paths, prompt, detail),
+                    LLMClientUtil.analyze_image_files(llm_client, resolved_paths, prompt, detail),
                     timeout=tool_timeout,
                 )
                 return response.output
@@ -198,8 +198,8 @@ async def analyze_pdf_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = LLMClientUtil.download_files(pdf_path_urls, tmpdir.name)
-        response = await llm_client.analyze_pdf_files(path_list, prompt, detail)
+        path_list = DownLoader.download_files(pdf_path_urls, tmpdir.name)
+        response = await LLMClientUtil.analyze_pdf_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_pdf_urls call_id=%s", call_id)
@@ -241,7 +241,7 @@ async def analyze_pdf_files(
     llm_client = LLMFactory.create_llm_client()
     try:
         resolved_paths = _resolve_existing_file_paths(pdf_path_list)
-        response = await llm_client.analyze_pdf_files(resolved_paths, prompt, detail)
+        response = await LLMClientUtil.analyze_pdf_files(llm_client, resolved_paths, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_pdf_files call_id=%s", call_id)
@@ -284,8 +284,8 @@ async def analyze_office_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = LLMClientUtil.download_files(office_path_urls, tmpdir.name)
-        response = await llm_client.analyze_office_files(path_list, prompt, detail)
+        path_list = DownLoader.download_files(office_path_urls, tmpdir.name)
+        response = await LLMClientUtil.analyze_office_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_office_urls call_id=%s", call_id)
@@ -326,7 +326,7 @@ async def analyze_office_files(
     llm_client = LLMFactory.create_llm_client()
     try:
         resolved_paths = _resolve_existing_file_paths(office_path_list)
-        response = await llm_client.analyze_office_files(resolved_paths, prompt, detail=detail)
+        response = await LLMClientUtil.analyze_office_files(llm_client, resolved_paths, prompt, detail=detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_office_files call_id=%s", call_id)
@@ -368,8 +368,8 @@ async def analyze_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = LLMClientUtil.download_files(file_path_urls, tmpdir.name)
-        response = await llm_client.analyze_files(path_list, prompt, detail)
+        path_list = DownLoader.download_files(file_path_urls, tmpdir.name)
+        response = await LLMClientUtil.analyze_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_urls call_id=%s", call_id)
@@ -410,7 +410,7 @@ async def analyze_files(
     llm_client = LLMFactory.create_llm_client()
     try:
         resolved_paths = _resolve_existing_file_paths(file_path_list)
-        response = await llm_client.analyze_files(resolved_paths, prompt, detail=detail)
+        response = await LLMClientUtil.analyze_files(llm_client, resolved_paths, prompt, detail=detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_files call_id=%s", call_id)
@@ -450,7 +450,7 @@ async def analyze_documents_data(
     )
     llm_client = LLMFactory.create_llm_client()
     try:
-        response = await llm_client.analyze_documents_data(document_type_list, prompt, detail=detail)
+        response = await LLMClientUtil.analyze_documents_data(llm_client, document_type_list, prompt, detail=detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_documents_data call_id=%s", call_id)

@@ -117,29 +117,10 @@ class CodingAgentRunner(AbstractAgentRunner):
             if v:
                 params["envs"][str(k)] = str(v)
 
-        # LLM 設定をホスト環境から引き継ぐ。
-        # compose 側で env_file が指定されていても、ここで渡す env が優先されるため
-        # CLI で設定した LLM_MODEL 等を確実にコンテナへ反映できる。
-        # LLM settings: non-secrets come from ai-chat-util-config.yml (autonomous_agent_util section).
-        params["envs"]["LLM_PROVIDER"] = str(runtime_cfg.llm.provider)
-        params["envs"]["LLM_MODEL"] = str(runtime_cfg.llm.model)
-
-        base_url = runtime_cfg.llm.base_url_in_container or runtime_cfg.llm.base_url
-        if base_url:
-            params["envs"]["LLM_BASE_URL"] = str(base_url)
-
-        # Secret API key: prefer resolved YAML env-ref; fallback to env.
-        api_key = runtime_cfg.llm.api_key or os.getenv("LLM_API_KEY")
-        providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
-        provider = (runtime_cfg.llm.provider or "").lower()
-        if provider in providers_requiring_key and not api_key:
-            raise RuntimeError(
-                "LLM API key が未設定です。.env/環境変数で LLM_API_KEY を設定するか、"
-                "ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/LLM_API_KEY' または "
-                "'ai_chat_util_config.autonomous_agent_util.llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
-            )
-        if api_key:
-            params["envs"]["LLM_API_KEY"] = str(api_key)
+        # NOTE:
+        # This runner intentionally does NOT inject LLM_* environment variables into the
+        # container command (e.g., opencode). The external runner should manage its own
+        # model/provider/base_url/credentials.
 
         # docker-compose.yml の volumes で ${WORKSPACE} を使っているため、
         # compose 側の変数置換に効く env-file をタスクごとに生成して渡す。

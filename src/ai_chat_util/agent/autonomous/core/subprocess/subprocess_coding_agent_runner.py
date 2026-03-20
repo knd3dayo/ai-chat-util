@@ -18,6 +18,28 @@ from ..process_utils import popen_new_process_group_kwargs
 from ai_chat_util_base.config.runtime import get_autonomous_runtime_config
 
 
+def _split_command_base(command_base: str) -> list[str]:
+    """Split configured command string into argv.
+
+    NOTE: On Windows, using shlex with POSIX rules treats backslashes as escape
+    characters, which breaks common absolute paths like `C:\\Users\\...`.
+    We therefore use `posix=False` on Windows, and then strip surrounding quote
+    characters from tokens (best-effort).
+    """
+
+    if os.name == "nt":
+        parts = shlex.split(command_base, posix=False)
+    else:
+        parts = shlex.split(command_base, posix=True)
+
+    def _strip_one_pair_of_quotes(s: str) -> str:
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            return s[1:-1]
+        return s
+
+    return [_strip_one_pair_of_quotes(p) for p in parts]
+
+
 def _find_project_root(start: pathlib.Path) -> pathlib.Path | None:
     p = start.resolve()
     for parent in (p, *p.parents):
@@ -72,7 +94,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
                 "process.command が未設定です。ai-chat-util-config.yml の ai_chat_util_config.autonomous_agent_util.process.command を設定してください。"
             )
 
-        self.command_requested: list[str] = shlex.split(self.command_base)
+        self.command_requested = _split_command_base(self.command_base) #type: ignore[assignment]
         self.command: list[str] = self._wrap_command_for_platform(list(self.command_requested))
 
         # Per-task env (e.g., Authorization) to be inherited by the entrypoint process.
@@ -148,7 +170,11 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         )
         if prompt:
             runner.command_requested = [*runner.command_requested, prompt]
-            runner.command = [*runner.command, prompt]
+            # Re-apply platform wrapping after adding prompt.
+            # On Windows, shim wrapping may turn the command into:
+            #   cmd.exe /c "<resolved shim> <args...>"
+            # so appending the prompt afterwards would NOT reach the actual tool.
+            runner.command = runner._wrap_command_for_platform(list(runner.command_requested))
         runner.prepare_workspace(source_paths=source_paths)
         return runner
 
@@ -259,37 +285,10 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
                         env["PATH"] = venv_bin_str + os.pathsep + old_path
         except Exception:
             pass
-        # Ensure non-secret runtime settings are passed even if this process
-        # does not have them in os.environ.
-        env["LLM_PROVIDER"] = str(runtime_cfg.llm.provider)
-        env["LLM_MODEL"] = str(runtime_cfg.llm.model)
-        if runtime_cfg.llm.base_url:
-            env["LLM_BASE_URL"] = str(runtime_cfg.llm.base_url)
-        api_key = runtime_cfg.llm.api_key or env.get("LLM_API_KEY")
-        providers_requiring_key = {"openai", "azure", "azure_openai", "anthropic"}
-        provider = (runtime_cfg.llm.provider or "").lower()
-        if provider in providers_requiring_key and not api_key:
-            raise RuntimeError(
-                "LLM API key が未設定です。.env/環境変数で LLM_API_KEY を設定するか、"
-                "ai-chat-util-config.yml で 'ai_chat_util_config.llm.api_key: os.environ/LLM_API_KEY' または "
-                "'ai_chat_util_config.autonomous_agent_util.llm.api_key: os.environ/LLM_API_KEY' のように参照設定してください。"
-            )
-        if api_key:
-            env["LLM_API_KEY"] = str(api_key)
-
-        # Some external runners read OpenAI-style environment variables, not this
-        # project's LLM_* variables. Map them as a best-effort compatibility layer.
-        if api_key and not env.get("OPENAI_API_KEY"):
-            env["OPENAI_API_KEY"] = str(api_key)
-
-        base_url = runtime_cfg.llm.base_url or env.get("LLM_BASE_URL")
-        if base_url:
-            openai_base_url = str(base_url).rstrip("/")
-            if not openai_base_url.endswith("/v1"):
-                openai_base_url = openai_base_url + "/v1"
-            env.setdefault("OPENAI_BASE_URL", openai_base_url)
-            env.setdefault("OPENAI_API_BASE", openai_base_url)
-            env.setdefault("OPENAI_API_BASE_URL", openai_base_url)
+        # NOTE:
+        # This runner intentionally does NOT inject LLM_* / OPENAI_* environment variables
+        # into the external command (e.g., opencode). The external runner should manage
+        # its own model/provider/base_url/credentials.
         # Do not persist secrets to disk; pass per-task env via subprocess env.
         for k, v in self.extra_env.items():
             if v is None:

@@ -81,8 +81,6 @@ class MCPClient(AbstractLLMClient):
 
         return lc_messages
 
-
-
     async def simple_chat(self, prompt: str) -> str:
         chat_request = ChatRequest(
             chat_history=ChatHistory(

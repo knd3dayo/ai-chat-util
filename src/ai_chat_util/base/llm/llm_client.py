@@ -36,158 +36,6 @@ class LLMClientBase(AbstractLLMClient, ABC):
         pass
 
 
-    async def run_mcp_chat_completion(
-        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
-    ) -> ChatResponse:
-        messages = chat_request.chat_history.messages
-        mcp_client = MCPClient(llm_config)
-        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
-        kwargs.setdefault("timeout", default_timeout_seconds)
-
-        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
-        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
-        hard_timeout: float = default_timeout_seconds
-        timeout_kw = kwargs.get("timeout")
-        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
-            hard_timeout = float(timeout_kw)
-
-        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
-        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
-        logger.debug(
-            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
-            llm_config.llm.provider,
-            llm_config.llm.completion_model,
-            len(messages),
-            kwargs.get("timeout"),
-        )
-        try:
-            response = await asyncio.wait_for(
-                mcp_client.chat(chat_request),
-                timeout=hard_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(
-                "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
-                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
-            ) from e
-        logger.debug("LLM completion response type: %s", type(response))
-
-        if isinstance(response, ChatResponse):
-            return response
-
-        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
-
-    async def run_litellm_chat_completion(
-        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
-    ) -> ChatResponse:
-        messages = chat_request.chat_history.messages
-        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
-        params = {}
-        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
-        provider = (llm_config.llm.provider or "").lower()
-        api_key = llm_config.llm.api_key
-        params["api_key"] = api_key
-        params["model"] = f"{llm_config.llm.provider}/{llm_config.llm.completion_model}"
-        params["messages"] = message_dict_list
-        if llm_config.llm.base_url:
-            params["base_url"] = llm_config.llm.base_url
-        if llm_config.llm.api_version:
-            params["api_version"] = llm_config.llm.api_version
-        extra_headers = getattr(llm_config.llm, "extra_headers", None)
-        if extra_headers:
-            filtered = {
-                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
-            }
-            if filtered:
-                params["extra_headers"] = filtered
-
-        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
-        kwargs.setdefault("timeout", default_timeout_seconds)
-
-        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
-        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
-        hard_timeout: float = default_timeout_seconds
-        timeout_kw = kwargs.get("timeout")
-        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
-            hard_timeout = float(timeout_kw)
-
-        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
-        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
-        logger.debug(
-            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
-            provider,
-            params.get("model"),
-            len(message_dict_list),
-            kwargs.get("timeout"),
-        )
-        try:
-            response = await asyncio.wait_for(
-                litellm.acompletion(
-                    **params,
-                    **kwargs
-                ),
-                timeout=hard_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(
-                "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
-                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
-            ) from e
-        logger.debug("LLM completion response type: %s", type(response))
-
-        if isinstance(response, litellm.ModelResponse):
-            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
-            # 属性として見えないことがあるため dict-style access を使う。
-            usage = response.get("usage") or {}
-            output_tokens = int(usage.get("completion_tokens", 0) or 0)
-            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
-
-            choices = cast(list[Any], response.get("choices") or [])
-            output = ""
-            if choices:
-                first_choice = cast(Any, choices[0])
-                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
-                if isinstance(first_choice, dict):
-                    message = first_choice.get("message")
-                else:
-                    message = getattr(first_choice, "message", None)
-
-                if isinstance(message, dict):
-                    output = message.get("content") or ""
-                else:
-                    output = getattr(message, "content", "") or ""
-
-            # choicesが空 or contentが空の場合は、明示的に失敗させて原因をユーザーに見せる。
-            # （"何も出力されない" 体験を避ける）
-            if not choices:
-                err = response.get("error")
-                if err:
-                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
-                response_dict = cast(dict[str, Any], response)
-                raise RuntimeError(
-                    "LLM応答の choices が空でした。"
-                    f" response_keys={list(response_dict.keys())}"
-                )
-            if not str(output).strip():
-                err = response.get("error")
-                if err:
-                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
-                response_dict = cast(dict[str, Any], response)
-                raise RuntimeError(
-                    "LLM応答の content が空でした。"
-                    f" response_keys={list(response_dict.keys())}"
-                )
-
-            return ChatResponse(
-                messages=[ChatMessage(role="assistant", content=[ChatContent(params={"type": "text", "text": output})])],
-                input_tokens=input_tokens,
-                output_tokens=output_tokens
-            )
-        raise TypeError(f"Unexpected response type: {type(response)!r}")
-
-
     async def simple_chat(self, prompt: str,) -> str:
         '''
         簡易的なChatCompletionを実行する.
@@ -364,6 +212,7 @@ class LLMClient(LLMClientBase):
 
     async def _chat_completion_(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
         if self.use_mcp:
+            raise NotImplementedError("MCP経由のChatCompletionはMCPClientクラスで直接呼び出してください。")
             return await self.run_mcp_chat_completion(
                 self.llm_config, 
                 chat_request, 
@@ -377,6 +226,159 @@ class LLMClient(LLMClientBase):
                     self.default_timeout_seconds, 
                     **kwargs
             )
+
+
+    async def run_mcp_chat_completion(
+        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
+    ) -> ChatResponse:
+        messages = chat_request.chat_history.messages
+        mcp_client = MCPClient(llm_config)
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            llm_config.llm.provider,
+            llm_config.llm.completion_model,
+            len(messages),
+            kwargs.get("timeout"),
+        )
+        try:
+            response = await asyncio.wait_for(
+                mcp_client.chat(chat_request),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
+
+        if isinstance(response, ChatResponse):
+            return response
+
+        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
+
+    async def run_litellm_chat_completion(
+        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
+    ) -> ChatResponse:
+        messages = chat_request.chat_history.messages
+        message_dict_list: list[dict[str, Any]] = [msg.model_dump() for msg in messages]
+        params = {}
+        # api_key の解決/未設定エラーは設定ロード時(runtime)に行う。
+        provider = (llm_config.llm.provider or "").lower()
+        api_key = llm_config.llm.api_key
+        params["api_key"] = api_key
+        params["model"] = f"{llm_config.llm.provider}/{llm_config.llm.completion_model}"
+        params["messages"] = message_dict_list
+        if llm_config.llm.base_url:
+            params["base_url"] = llm_config.llm.base_url
+        if llm_config.llm.api_version:
+            params["api_version"] = llm_config.llm.api_version
+        extra_headers = getattr(llm_config.llm, "extra_headers", None)
+        if extra_headers:
+            filtered = {
+                k: v for k, v in extra_headers.items() if not (k or "").lower().startswith("x-mcp-")
+            }
+            if filtered:
+                params["extra_headers"] = filtered
+
+        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
+        kwargs.setdefault("timeout", default_timeout_seconds)
+
+        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
+        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
+        hard_timeout: float = default_timeout_seconds
+        timeout_kw = kwargs.get("timeout")
+        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
+            hard_timeout = float(timeout_kw)
+
+        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
+        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
+        logger.debug(
+            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
+            provider,
+            params.get("model"),
+            len(message_dict_list),
+            kwargs.get("timeout"),
+        )
+        try:
+            response = await asyncio.wait_for(
+                litellm.acompletion(
+                    **params,
+                    **kwargs
+                ),
+                timeout=hard_timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                "LLM呼び出しがタイムアウトしました。"
+                f" timeout={hard_timeout}s provider={provider} model={params.get('model')}.\n"
+                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
+            ) from e
+        logger.debug("LLM completion response type: %s", type(response))
+
+        if isinstance(response, litellm.ModelResponse):
+            # NOTE: litellm.ModelResponse は実行時に usage が載りますが、型定義上は
+            # 属性として見えないことがあるため dict-style access を使う。
+            usage = response.get("usage") or {}
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
+            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+
+            choices = cast(list[Any], response.get("choices") or [])
+            output = ""
+            if choices:
+                first_choice = cast(Any, choices[0])
+                # OpenAI互換の {"message": {"content": "..."}} を優先して読む
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                else:
+                    message = getattr(first_choice, "message", None)
+
+                if isinstance(message, dict):
+                    output = message.get("content") or ""
+                else:
+                    output = getattr(message, "content", "") or ""
+
+            # choicesが空 or contentが空の場合は、明示的に失敗させて原因をユーザーに見せる。
+            # （"何も出力されない" 体験を避ける）
+            if not choices:
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の choices が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
+            if not str(output).strip():
+                err = response.get("error")
+                if err:
+                    raise RuntimeError(f"LLM応答にエラーが含まれています: {err}")
+                response_dict = cast(dict[str, Any], response)
+                raise RuntimeError(
+                    "LLM応答の content が空でした。"
+                    f" response_keys={list(response_dict.keys())}"
+                )
+
+            return ChatResponse(
+                messages=[ChatMessage(role="assistant", content=[ChatContent(params={"type": "text", "text": output})])],
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
+            )
+        raise TypeError(f"Unexpected response type: {type(response)!r}")
+
 
     async def __normal_chat__(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
         '''

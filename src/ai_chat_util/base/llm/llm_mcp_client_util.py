@@ -554,6 +554,113 @@ class MCPClientUtil:
         return str(result), 0, 0
 
     @classmethod
+    def _guard_output(cls, payload: str, *, response_format: str | None, artifact: Any | None = None) -> Any:
+        """Return tool output compatible with LangChain's tool response_format.
+
+        MCP tools created via langchain-mcp-adapters commonly use
+        response_format='content_and_artifact', where LangChain expects a
+        (content, artifact) two-tuple. If we return a plain string here,
+        LangChain raises ValueError.
+        """
+
+        if response_format == "content_and_artifact":
+            if artifact is None:
+                artifact = {}
+            return (payload, artifact)
+        return payload
+
+
+    @classmethod
+    async def _run_tool_with_guards(
+        cls,
+        tool_name: str,
+        orig_coro: Any,
+        response_format: str | None,
+        tool_call_state: dict[str, int],
+        tool_call_limit_int: int,
+        tool_timeout_seconds_f: float,
+        tool_timeout_retries_int: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        attempts = tool_timeout_retries_int + 1
+        last_err: BaseException | None = None
+
+        used = int(tool_call_state.get("used", 0) or 0)
+        if used < 0:
+            used = 0
+            tool_call_state["used"] = 0
+
+        for attempt in range(1, attempts + 1):
+            used = int(tool_call_state.get("used", 0) or 0)
+            if used < 0:
+                used = 0
+                tool_call_state["used"] = 0
+
+            if tool_call_limit_int and used >= tool_call_limit_int:
+                logger.warning(
+                    "Tool call budget exceeded: tool=%s used=%s limit=%s",
+                    tool_name,
+                    used,
+                    tool_call_limit_int,
+                )
+                text = (
+                    "ERROR: tool call budget exceeded. "
+                    f"limit={tool_call_limit_int} used={used}. "
+                    "同一入力でツールが繰り返し実行されたため中断しました。"
+                )
+                return cls._guard_output(
+                    text,
+                    response_format=response_format,
+                    artifact={"error": "tool_call_budget_exceeded", "tool": tool_name, "limit": tool_call_limit_int, "used": used},
+                )
+
+            tool_call_state["used"] = used + 1
+            try:
+                if tool_timeout_seconds_f and tool_timeout_seconds_f > 0:
+                    # Give the tool a small cushion so inner timeouts can surface as normal output.
+                    timeout = tool_timeout_seconds_f
+                    return await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout)
+                return await orig_coro(*args, **kwargs)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                last_err = e
+                if cls._is_timeout_exception(e) and attempt < attempts:
+                    logger.warning(
+                        "Tool timeout; retrying: tool=%s attempt=%s/%s",
+                        tool_name,
+                        attempt,
+                        attempts,
+                    )
+                    continue
+
+                # Convert tool exceptions into normal tool output to avoid retry loops.
+                logger.exception(
+                    "Tool invocation failed: tool=%s attempt=%s/%s",
+                    tool_name,
+                    attempt,
+                    attempts,
+                )
+                return cls._guard_output(
+                    cls._tool_error_text(tool_name, e),
+                    response_format=response_format,
+                    artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(e).__name__},
+                )
+
+        if last_err is not None:
+            return cls._guard_output(
+                cls._tool_error_text(tool_name, last_err),
+                response_format=response_format,
+                artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(last_err).__name__},
+            )
+        return cls._guard_output(
+            f"ERROR: tool={tool_name} failed (unknown error)",
+            response_format=response_format,
+            artifact={"error": "tool_invocation_failed", "tool": tool_name},
+        )
+
+    @classmethod
     def create_tool_agent(
         cls,
         llm: BaseChatModel,
@@ -604,100 +711,11 @@ class MCPClientUtil:
             tool_call_limit, tool_timeout_seconds, tool_timeout_retries
         )
 
-        tool_calls_used = 0
+        # Shared tool call counter across all tools within this workflow.
+        # Using a mutable container avoids invalid `nonlocal` usage across methods.
+        tool_call_state: dict[str, int] = {"used": 0}
 
 
-        def _guard_output(payload: str, *, response_format: str | None, artifact: Any | None = None) -> Any:
-            """Return tool output compatible with LangChain's tool response_format.
-
-            MCP tools created via langchain-mcp-adapters commonly use
-            response_format='content_and_artifact', where LangChain expects a
-            (content, artifact) two-tuple. If we return a plain string here,
-            LangChain raises ValueError.
-            """
-
-            if response_format == "content_and_artifact":
-                if artifact is None:
-                    artifact = {}
-                return (payload, artifact)
-            return payload
-
-
-        async def _run_tool_with_guards(
-            tool_name: str,
-            orig_coro: Any,
-            response_format: str | None,
-            *args: Any,
-            **kwargs: Any,
-        ) -> Any:
-            nonlocal tool_calls_used
-
-            attempts = tool_timeout_retries_int + 1
-            last_err: BaseException | None = None
-
-            for attempt in range(1, attempts + 1):
-                if tool_call_limit_int and tool_calls_used >= tool_call_limit_int:
-                    logger.warning(
-                        "Tool call budget exceeded: tool=%s used=%s limit=%s",
-                        tool_name,
-                        tool_calls_used,
-                        tool_call_limit_int,
-                    )
-                    text = (
-                        "ERROR: tool call budget exceeded. "
-                        f"limit={tool_call_limit_int} used={tool_calls_used}. "
-                        "同一入力でツールが繰り返し実行されたため中断しました。"
-                    )
-                    return _guard_output(
-                        text,
-                        response_format=response_format,
-                        artifact={"error": "tool_call_budget_exceeded", "tool": tool_name, "limit": tool_call_limit_int, "used": tool_calls_used},
-                    )
-
-                tool_calls_used += 1
-                try:
-                    if tool_timeout_seconds_f and tool_timeout_seconds_f > 0:
-                        # Give the tool a small cushion so inner timeouts can surface as normal output.
-                        timeout = tool_timeout_seconds_f
-                        return await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout)
-                    return await orig_coro(*args, **kwargs)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    last_err = e
-                    if cls._is_timeout_exception(e) and attempt < attempts:
-                        logger.warning(
-                            "Tool timeout; retrying: tool=%s attempt=%s/%s",
-                            tool_name,
-                            attempt,
-                            attempts,
-                        )
-                        continue
-
-                    # Convert tool exceptions into normal tool output to avoid retry loops.
-                    logger.exception(
-                        "Tool invocation failed: tool=%s attempt=%s/%s",
-                        tool_name,
-                        attempt,
-                        attempts,
-                    )
-                    return _guard_output(
-                        cls._tool_error_text(tool_name, e),
-                        response_format=response_format,
-                        artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(e).__name__},
-                    )
-
-            if last_err is not None:
-                return _guard_output(
-                    cls._tool_error_text(tool_name, last_err),
-                    response_format=response_format,
-                    artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(last_err).__name__},
-                )
-            return _guard_output(
-                f"ERROR: tool={tool_name} failed (unknown error)",
-                response_format=response_format,
-                artifact={"error": "tool_invocation_failed", "tool": tool_name},
-            )
 
         if allowed_langchain_tools and (tool_call_limit_int or (tool_timeout_seconds_f and tool_timeout_seconds_f > 0) or tool_timeout_retries_int):
             for tool in allowed_langchain_tools:
@@ -710,9 +728,20 @@ class MCPClientUtil:
                         __tool_name: str = tool_name,
                         __orig_coro: Any = orig_coro,
                         __response_format: str | None = tool_response_format,
+                        __tool_call_state: dict[str, int] = tool_call_state,
                         **kwargs: Any,
                     ) -> Any:
-                        return await _run_tool_with_guards(__tool_name, __orig_coro, __response_format, *args, **kwargs)
+                        return await cls._run_tool_with_guards(
+                            __tool_name,
+                            __orig_coro,
+                            __response_format,
+                            __tool_call_state,
+                            tool_call_limit_int,
+                            tool_timeout_seconds_f,
+                            tool_timeout_retries_int,
+                            *args,
+                            **kwargs,
+                        )
                     try:
                         setattr(tool, "coroutine", _wrapped_coro)
                     except Exception:
@@ -726,32 +755,38 @@ class MCPClientUtil:
                         __tool_name: str = tool_name,
                         __orig_func: Any = orig_func,
                         __response_format: str | None = tool_response_format,
+                        __tool_call_state: dict[str, int] = tool_call_state,
                         **kwargs: Any,
                     ) -> Any:
-                        nonlocal tool_calls_used
-                        if tool_call_limit_int and tool_calls_used >= tool_call_limit_int:
+                        used = int(__tool_call_state.get("used", 0) or 0)
+                        if used < 0:
+                            used = 0
+                            __tool_call_state["used"] = 0
+
+                        if tool_call_limit_int and used >= tool_call_limit_int:
                             logger.warning(
                                 "Tool call budget exceeded (sync): tool=%s used=%s limit=%s",
                                 __tool_name,
-                                tool_calls_used,
+                                used,
                                 tool_call_limit_int,
                             )
                             text = (
                                 "ERROR: tool call budget exceeded. "
-                                f"limit={tool_call_limit_int} used={tool_calls_used}. "
+                                f"limit={tool_call_limit_int} used={used}. "
                                 "同一入力でツールが繰り返し実行されたため中断しました。"
                             )
-                            return _guard_output(
+                            return cls._guard_output(
                                 text,
                                 response_format=__response_format,
-                                artifact={"error": "tool_call_budget_exceeded", "tool": __tool_name, "limit": tool_call_limit_int, "used": tool_calls_used},
+                                artifact={"error": "tool_call_budget_exceeded", "tool": __tool_name, "limit": tool_call_limit_int, "used": used},
                             )
-                        tool_calls_used += 1
+
+                        __tool_call_state["used"] = used + 1
                         try:
                             return __orig_func(*args, **kwargs)
                         except Exception as e:
                             logger.exception("Tool invocation failed (sync): tool=%s", __tool_name)
-                            return _guard_output(
+                            return cls._guard_output(
                                 cls._tool_error_text(__tool_name, e),
                                 response_format=__response_format,
                                 artifact={"error": "tool_invocation_failed", "tool": __tool_name, "exception": type(e).__name__},

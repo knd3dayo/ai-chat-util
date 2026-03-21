@@ -13,7 +13,7 @@ from ai_chat_util_base.config.runtime import (
 )
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
 from .abstract_llm_client import AbstractLLMClient
-from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig
+from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, AutonomousAgentUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts, PromptsBase
 
@@ -23,8 +23,9 @@ logger = log_settings.getLogger(__name__)
 from .llm_mcp_client_util import MCPClientUtil
 
 class MCPClient(AbstractLLMClient):
-    def __init__(self, runtime_config: AiChatUtilConfig):
+    def __init__(self, runtime_config: AiChatUtilConfig, coding_agent_config: AutonomousAgentUtilConfig | None = None):
         self.runtime_config = runtime_config
+        self.coding_agent_config = coding_agent_config
         mcp_config_path = (
             self.runtime_config.paths.mcp_config_path
             or self.runtime_config.paths.mcp_server_config_file_path
@@ -123,6 +124,7 @@ class MCPClient(AbstractLLMClient):
 
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
+                self.coding_agent_config,
                 prompts=self.prompts,
                 allowed_langchain_tools=allowed_langchain_tools,
                 checkpointer=checkpointer,

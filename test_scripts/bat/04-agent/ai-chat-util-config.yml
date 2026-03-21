@@ -19,6 +19,10 @@ ai_chat_util_config:
     mcp_config_path: "mcp.json"
 
 autonomous_agent_util:
+  endpoint:
+    # MCPサーバー名（ai_chat_util_config.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
+    mcp_server_name: coding-agent
+
   backend:
     task_backend: process
 

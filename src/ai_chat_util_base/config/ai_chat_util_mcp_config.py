@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
 from langchain_mcp_adapters.sessions import Connection
 
 # サーバー設定のモデル定義
-class MCPServerConfig(BaseModel):
+class MCPServerConfigEntry(BaseModel):
     # langchain-mcp-adapters は `transport` を要求する。
     # 既存設定との互換のため、入力では `type` も受け付ける。
     if AliasChoices is not None:
@@ -24,6 +24,7 @@ class MCPServerConfig(BaseModel):
     else:  # pragma: no cover
         transport: Literal["stdio", "sse", "websocket", "http"] = Field(default="stdio", alias="transport")
 
+    name: str = Field(..., description="サーバーの識別名。")
     command: Optional[str] = None
     args: Optional[List[str]] = Field(default_factory=list)
     env: Optional[Dict[str, str]] = None
@@ -55,7 +56,7 @@ class MCPConfigParser:
                 cfg2["transport"] = cfg2.get("type")
             normalized[name] = cfg2
 
-        self.servers = {name: MCPServerConfig(**cfg) for name, cfg in normalized.items()}
+        self.servers = {name: MCPServerConfigEntry(**cfg) for name, cfg in normalized.items()}
 
 
     def to_langchain_config(self) -> dict[str, Connection]:

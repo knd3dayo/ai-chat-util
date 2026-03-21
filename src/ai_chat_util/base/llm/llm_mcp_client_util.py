@@ -29,6 +29,7 @@ from ai_chat_util_base.config.runtime import (
     CONFIG_ENV_VAR,
     ConfigError,
     AiChatUtilConfig,
+    AutonomousAgentUtilConfig,
     get_runtime_config_path,
 )
 from ..util.file_path_resolver import resolve_existing_file_path
@@ -735,16 +736,59 @@ class MCPClientUtil:
     @classmethod
     def create_sub_agents(
         cls,
+        config: AutonomousAgentUtilConfig | None,
         llm: BaseChatModel,
         prompts: PromptsBase,
         tool_limits: ToolLimits | None,
         hitl_approval_tools: Sequence[str] | None,
         allowed_langchain_tools: list[Any],
     ) -> list[Any]:
-        
+        logger.info("Creating sub-agents...")
+        coding_agent_name = config.endpoint.mcp_server_name if config else None
+
+        # allowed_langchain_toolsにcoding_agent_nameと一致するツールがあれば、コードエージェントを作成する。
+        agents = []
+        if coding_agent_name and any(getattr(t, "name", None) == coding_agent_name for t in allowed_langchain_tools):
+            logger.info("Creating code agent for MCP server '%s'...", coding_agent_name)
+            code_agent = cls.create_code_agent(llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools)
+            agents.append(code_agent)
+            # allowed_langchain_toolsからcoding_agent_nameと一致するツールを除外して、ツールエージェントを作成する。
+            allowed_langchain_tools = [t for t in allowed_langchain_tools if getattr(t, "name", None) != coding_agent_name]
+
+        tool_agent_tool_names = [getattr(t, "name", None) for t in allowed_langchain_tools]
+        logger.info(f"Creating tool agent with tools: {tool_agent_tool_names}")
         tool_agent = cls.create_tool_agent(llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools)
+        agents.append(tool_agent)
         # 他のサブエージェントも必要に応じてここで作成できます。
-        return [tool_agent]
+        return agents
+
+    @classmethod
+    def create_code_agent(
+        cls,
+        llm: BaseChatModel,
+        prompts: PromptsBase,
+        tool_limits: ToolLimits | None,
+        hitl_approval_tools: Sequence[str] | None,
+        allowed_langchain_tools: list[Any],
+    ) -> Any:
+        # ツール実行用のエージェント
+        # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
+        approval_tools = [t for t in (hitl_approval_tools or []) if isinstance(t, str) and t.strip()]
+        approval_tools_text = ", ".join(approval_tools) if approval_tools else "(なし)"
+
+        if tool_limits is not None and tool_limits.auto_approve:
+            hitl_policy_text = prompts.auto_approve_hitl_policy_text(approval_tools_text)
+        else:
+            hitl_policy_text = prompts.normal_hitl_policy_text(approval_tools_text)
+
+        tool_agent_system_prompt = prompts.tool_agent_system_prompt(hitl_policy_text)
+        tool_agent = create_agent(
+            llm,
+            allowed_langchain_tools,
+            system_prompt=tool_agent_system_prompt,
+            name="tool_agent",
+        )
+        return tool_agent
 
     @classmethod
     def create_tool_agent(
@@ -777,7 +821,8 @@ class MCPClientUtil:
     @classmethod
     async def create_workflow(
         cls,
-        runtime_config: AiChatUtilConfig,
+        runtime_config: AiChatUtilConfig ,
+        agent_config: AutonomousAgentUtilConfig | None,
         prompts: PromptsBase,
         allowed_langchain_tools: list[Any],
         *,
@@ -896,7 +941,10 @@ class MCPClientUtil:
 
         # ツール実行用のエージェント
         # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
-        sub_agents = cls.create_sub_agents(llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools)
+        sub_agents = cls.create_sub_agents(
+            agent_config,
+            llm, prompts, tool_limits, hitl_approval_tools, allowed_langchain_tools
+            )
 
         # Prefer tool execution agent first to reduce accidental planner-only loops.
         workflow = create_supervisor(

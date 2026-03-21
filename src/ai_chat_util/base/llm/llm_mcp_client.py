@@ -20,12 +20,12 @@ from .prompts import CodingAgentPrompts, PromptsBase
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-from .llm_mcp_client_util import MCPClientUtil, ToolLimits
+from .llm_mcp_client_util import MCPClientUtil
+from .agent import ToolLimits
 
 class MCPClient(AbstractLLMClient):
-    def __init__(self, runtime_config: AiChatUtilConfig, coding_agent_config: AutonomousAgentUtilConfig | None = None):
+    def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
-        self.coding_agent_config = coding_agent_config
         self.message_factory = LLMMessageContentFactory()
 
 
@@ -115,7 +115,6 @@ class MCPClient(AbstractLLMClient):
             max_retries = tool_limits.max_retries
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
-                self.coding_agent_config,
                 prompts=prompts,
                 checkpointer=checkpointer,
                 tool_limits=tool_limits,

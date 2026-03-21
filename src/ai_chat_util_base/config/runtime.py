@@ -448,6 +448,23 @@ class PathsSection(BaseModel):
     working_directory: str | None = Field(default=None)
 
 
+class CodingAgentEndpointSection(BaseModel):
+    """Endpoint selector for the dedicated coding-agent MCP server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # mcpServers.<name> in mcp.json
+    mcp_server_name: str = Field(default="coding-agent")
+
+    @model_validator(mode="after")
+    def _validate_mcp_server_name(self) -> "CodingAgentEndpointSection":
+        name = self.mcp_server_name
+        if not (isinstance(name, str) and name.strip()):
+            raise ValueError("mcp.coding_agent_endpoint.mcp_server_name must be a non-empty string")
+        self.mcp_server_name = name.strip()
+        return self
+
+
 class MCPSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -455,6 +472,11 @@ class MCPSection(BaseModel):
     mcp_config_path: str | None = Field(default=None)
     custom_instructions_file_path: str | None = Field(default=None)
     working_directory: str | None = Field(default=None)
+
+    coding_agent_endpoint: CodingAgentEndpointSection = Field(
+        default_factory=CodingAgentEndpointSection,
+        description="coding-agent 用の MCP サーバー名（mcp.json の mcpServers.<name>）",
+    )
 
     # Optional: extra headers/env forwarding for MCP transports ONLY.
     # Keys must start with:
@@ -528,6 +550,11 @@ class FeaturesSection(BaseModel):
             "このリストに含まれるツールを実行する前に、エージェントは人間へ承認を求めて pause します。"
         ),
     )
+
+    def get_hitl_approval_tools_text(self) -> str:
+        if not self.hitl_approval_tools:
+            return "(なし)"
+        return ", ".join(self.hitl_approval_tools)
 
 
 class LoggingSection(BaseModel):
@@ -774,12 +801,12 @@ class AiChatUtilConfig(BaseModel):
                     env2[CONFIG_ENV_VAR] = runtime_config_path
                     entry.env = env2
 
-    def get_mcp_server_config(self) -> MCPServerConfig | None:
+    def get_mcp_server_config(self) -> MCPServerConfig:
         if not self.mcp.mcp_config_path:
             logger.warning(
                 "MCP 設定ファイルパスが未設定です。ai-chat-util-config.yml の mcp.mcp_config_path を設定してください。"
             )
-            return None
+            return MCPServerConfig()
 
         # ai-chat-util-config.yml からの相対パスも解決できるよう、設定ファイルのディレクトリも探索対象に入れる
         config_dir = str(get_runtime_config_path().parent)
@@ -789,7 +816,9 @@ class AiChatUtilConfig(BaseModel):
             extra_search_dirs=[config_dir],
         ).resolved_path
 
-        config = MCPServerConfig(resolved)
+        config = MCPServerConfig()
+        config.load_server_config(resolved)
+ 
         # Apply runtime overrides (extra_headers forwarding, config path injection).
         self._apply_mcp_runtime_overrides(config)
         return config

@@ -617,7 +617,7 @@ ai_chat_util_config:
 - `ai_chat_util_config.llm.provider`, `ai_chat_util_config.llm.completion_model`, `ai_chat_util_config.llm.base_url`: LLM の非秘匿設定
 - `paths.workspace_root`: ワークスペースのデフォルト作成先
 - `paths.host_projects_root`: タスクDB（`tasks_db.json`）の保存先ルート
-- `endpoint.mcp_server_name`: `mcp.json` の `mcpServers.<name>` の `<name>`（将来の coding-agent 特別扱い用。現時点では未使用）
+- `ai_chat_util_config.mcp.coding_agent_endpoint.mcp_server_name`: `mcp.json` の `mcpServers.<name>` の `<name>`（coding-agent を識別するためのサーバー名）
 - `backend.task_backend`: API/MCP が使う実行バックエンド（`process/windows_process/linux_process/docker/compose`）
 - `compose.*`: Docker/Compose 実行時の設定
 - `process.command`: process 実行時のコマンド（必須）

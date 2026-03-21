@@ -64,6 +64,10 @@ ai_chat_util_config:
     #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
     extra_headers: null
 
+    coding_agent_endpoint:
+      # MCPサーバー名（ai_chat_util_config.mcp.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
+      mcp_server_name: coding-agent
+
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false
@@ -93,9 +97,6 @@ ai_chat_util_config:
 # autonomous-agent-util-config.yml の内容を、このファイルの
 # ルート直下の `autonomous_agent_util:` 配下に統合します。
 autonomous_agent_util:
-  endpoint:
-    # MCPサーバー名（ai_chat_util_config.mcp.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
-    mcp_server_name: coding-agent
     
   backend:
     # docker | compose | process | windows_process | linux_process

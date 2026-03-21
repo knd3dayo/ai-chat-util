@@ -37,7 +37,10 @@ class MCPServerConfigEntry(BaseModel):
         populate_by_name = True
 
 class MCPServerConfig:
-    def __init__(self, config_path: str):
+    def __init__(self):
+        self.servers = {}
+
+    def load_server_config(self, config_path: str):
         with open(config_path, 'r') as f:
             data = json.load(f)
 
@@ -51,13 +54,16 @@ class MCPServerConfig:
                 raise ValueError(f"mcpServers.{name} must be an object")
 
             cfg2 = dict(cfg)
+            # Many configs use the mcpServers.<key> as the server name.
+            # MCPServerConfigEntry requires `name`, so inject it when omitted.
+            if "name" not in cfg2:
+                cfg2["name"] = name
             # Backward/compat input: allow `type` but normalize it to `transport`.
             if "transport" not in cfg2 and "type" in cfg2:
                 cfg2["transport"] = cfg2.get("type")
             normalized[name] = cfg2
 
         self.servers = {name: MCPServerConfigEntry(**cfg) for name, cfg in normalized.items()}
-
 
     def to_langchain_config(self) -> dict[str, Connection]:
         """
@@ -84,8 +90,30 @@ class MCPServerConfig:
                 }
         return lc_config
 
-    def get_allowed_tools_map(self) -> Dict[str, Optional[List[str]]]:
+
+    def get_allowed_tools_config(self) -> "MCPServerConfig":
         """
         ツール制限用のマッピングを返します（後続のフィルタリング用）。
         """
-        return {name: cfg.allowed_tools for name, cfg in self.servers.items()}
+        allowed_servers =  {name: cfg.allowed_tools for name, cfg in self.servers.items()}
+        allowed_mcp_config = MCPServerConfig()
+        allowed_mcp_config.servers = allowed_servers
+
+        return allowed_mcp_config
+    
+    def filter(self, include_name: str |None = None, exclude_name: str| None = None) -> "MCPServerConfig":
+        """
+        指定されたサーバー名やツール名に基づいて、MCPServerConfigをフィルタリングします。
+        - include_name: このサーバー名を含むサーバーのみを許可
+        - exclude_name: このサーバー名を除外するサーバーのみを許可
+
+        """
+        filtered_config = MCPServerConfig()
+        for name, cfg in self.servers.items():
+            if include_name is not None and name != include_name:
+                continue
+            if exclude_name is not None and name == exclude_name:
+                continue
+            filtered_config.servers[name] = cfg
+
+        return filtered_config

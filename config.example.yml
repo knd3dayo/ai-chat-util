@@ -61,9 +61,17 @@ ai_chat_util_config:
     #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
     extra_headers: null
 
+    # Optional: MCP server name used for the dedicated coding-agent.
+    # This should match a key in mcp.json: mcpServers.<name>
+    coding_agent_endpoint:
+      mcp_server_name: coding-agent
+
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false
+    # LangGraph supervisor recursion (step) limit.
+    # Increase this if you hit: GraphRecursionError: Recursion limit of N reached...
+    mcp_recursion_limit: 50
     hitl_approval_tools: []
 
   logging:

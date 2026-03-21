@@ -6,6 +6,10 @@ services:
     working_dir: /workspace
     volumes:
       - ${WORKSPACE:-${HOME}/data/workspace}:/workspace
+      # Dev convenience: allow iterating on scripts without rebuilding the image.
+      - ./build-image/init-firewall.sh:/usr/local/bin/init-firewall.sh:ro
+      - ./build-image/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    
     environment:
       - USER_ID=${USER_ID:-1000}
       - GROUP_ID=${GROUP_ID:-1000}

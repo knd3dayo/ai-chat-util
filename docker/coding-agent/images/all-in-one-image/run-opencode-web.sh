@@ -4,8 +4,6 @@ set -eu
 basedir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$basedir"
 
-env_file="$basedir/env_run"
-. "$env_file"
 
 usage() {
   cat >&2 <<'EOF'

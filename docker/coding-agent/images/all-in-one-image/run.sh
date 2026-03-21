@@ -3,8 +3,6 @@ set -eu
 basedir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$basedir"
 
-env_file="$basedir/env_run"
-. "$env_file"
 
 usage() {
   cat >&2 <<'EOF'
@@ -71,12 +69,7 @@ else
   shift
 fi
 
-service_name=${COMPOSE_SERVICE_NAME}
-if [ -z "$service_name" ]; then
-  echo "COMPOSE_SERVICE_NAME is not set in env_run" >&2
-  exit 1
-fi
-
+service_name=all-in-one-code-executor
 command=${COMPOSE_COMMAND}
 
 if [ -z "$command" ]; then

@@ -1,3 +1,0 @@
-/home/user/source/repos/denodo-vql-client
-/home/user/source/repos/ai-chat-util
-

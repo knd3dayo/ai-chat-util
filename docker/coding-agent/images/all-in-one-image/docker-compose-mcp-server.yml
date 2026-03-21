@@ -1,0 +1,39 @@
+services:
+  ai-chat-util-mcp-server:
+    image: all-in-one-code-executor-image
+    command:
+      - uv
+      - --directory
+      - ${CONTAINER_MCP_PROJECT_DIR}
+      - run
+      - --no-sync
+      - python
+      - -m
+      - ai_chat_util.mcp.mcp_server
+      - --config
+      - ${CONTAINER_MCP_CONFIG_PATH}
+      - -v
+      - ${MCP_LOG_LEVEL:-DEBUG}
+      - --log_file
+      - /home/codeuser/logs/ai-chat-util-mcp.log
+    stdin_open: true
+    tty: true
+    working_dir: ${CONTAINER_MCP_PROJECT_DIR}
+    volumes:
+      - ${WORKSPACE:-${HOME}/data/workspace}:/workspace
+      - ${HOST_MCP_ROOT}:${CONTAINER_MCP_ROOT}:ro
+      - ${HOST_MCP_LOG_DIR}:/home/codeuser/logs
+      - ./build-image/init-firewall.sh:/usr/local/bin/init-firewall.sh:ro
+      - ./build-image/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    environment:
+      - USER_ID=${USER_ID:-1000}
+      - GROUP_ID=${GROUP_ID:-1000}
+    env_file:
+      - env_compose
+    cap_add:
+      - NET_ADMIN
+
+networks:
+  default:
+    name: ai_platform_internal
+    external: true

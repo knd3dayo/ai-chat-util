@@ -37,23 +37,13 @@ USER codeuser
 # 7. uvのインストール
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/codeuser/.local/bin/:$PATH"
+RUN uv python install 3.12.3
 
-# 8. アプリケーション用ディレクトリと権限設定
-
-RUN mkdir -p /home/codeuser/app
-COPY --chown=codeuser:codeuser app /home/codeuser/app
-RUN chown codeuser:codeuser /home/codeuser/app
-
-# /home/codeuser/app/*/にMCP用のプロジェクトが配置されているので、
-# entrypoint.sh内でこれらをループしてuv syncすることで、MCPプロジェクトの依存関係も解決されるようにする。
-RUN for mcp_dir in /home/codeuser/app/*/; do \
-    if [ -f "$mcp_dir/pyproject.toml" ]; then \
-        cd "$mcp_dir" && uv sync --no-dev; \
-    fi; \
-done
+# 8. ホスト側のMCPプロジェクトを bind mount する前提で、
+# ランタイムで利用するディレクトリだけを用意する。
+RUN mkdir -p /home/codeuser/logs /home/codeuser/.npm-global
 
 # 9. コーディングエージェントのインストール
-RUN mkdir -p /home/codeuser/.npm-global
 ## OpenCode AIのインストール
 RUN npm install -g opencode-ai
 
@@ -67,6 +57,14 @@ RUN npm install -g @anthropic-ai/claude-code@latest
 RUN npm install -g cline
 
 USER root
+
+# Host側の .venv が /usr/bin/python3 -> 3.12 を前提にしているため、
+# コンテナ側でも同じ見え方に揃える。
+RUN PY312="$(runuser -u codeuser -- env PATH=/home/codeuser/.local/bin:$PATH uv python find 3.12.3)" && \
+    PY312_ROOT="$(dirname "$(dirname "$PY312")")" && \
+    ln -sfn "$PY312_ROOT" /install && \
+    ln -sf "$PY312" /usr/local/bin/python3.12 && \
+    ln -sf /usr/local/bin/python3.12 /usr/bin/python3
 
 # 5. FirewallスクリプトとEntrypointの配置
 COPY init-firewall.sh /usr/local/bin/

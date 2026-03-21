@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Dict, Optional, List, Literal
 
 from pydantic import BaseModel, Field
@@ -40,6 +41,33 @@ class MCPServerConfig:
     def __init__(self):
         self.servers = {}
 
+    @staticmethod
+    def _resolve_env_value(value: str, *, config_path: str, server_name: str, env_key: str) -> str:
+        """Resolve env-ref syntax used across this project.
+
+        mcp.json supports literal env values as-is, but also allows the
+        `os.environ/VAR_NAME` form to reference a process env var.
+        """
+
+        prefix = "os.environ/"
+        if not value.startswith(prefix):
+            return value
+
+        env_name = value[len(prefix) :].strip()
+        if not env_name:
+            raise ValueError(
+                "Invalid env reference in mcp.json (empty env var name): "
+                f"config={config_path!r} server={server_name!r} env.{env_key}={value!r}"
+            )
+
+        resolved = os.getenv(env_name)
+        if resolved is None or resolved == "":
+            raise ValueError(
+                "Environment variable is not set for mcp.json env reference: "
+                f"{env_name} (config={config_path!r} server={server_name!r} env.{env_key})"
+            )
+        return resolved
+
     def load_server_config(self, config_path: str):
         with open(config_path, 'r') as f:
             data = json.load(f)
@@ -54,6 +82,30 @@ class MCPServerConfig:
                 raise ValueError(f"mcpServers.{name} must be an object")
 
             cfg2 = dict(cfg)
+
+            # Resolve env refs (os.environ/VAR_NAME) for stdio transports.
+            env = cfg2.get("env")
+            if env is not None:
+                if not isinstance(env, dict):
+                    raise ValueError(f"mcpServers.{name}.env must be an object")
+                resolved_env: Dict[str, str] = {}
+                for env_key, env_val in env.items():
+                    if not isinstance(env_key, str) or not env_key.strip():
+                        raise ValueError(
+                            f"mcpServers.{name}.env has an invalid key (must be non-empty string): {env_key!r}"
+                        )
+                    if not isinstance(env_val, str):
+                        raise ValueError(
+                            f"mcpServers.{name}.env.{env_key} must be a string: {env_val!r}"
+                        )
+                    resolved_env[env_key] = self._resolve_env_value(
+                        env_val,
+                        config_path=config_path,
+                        server_name=name,
+                        env_key=env_key,
+                    )
+                cfg2["env"] = resolved_env
+
             # Many configs use the mcpServers.<key> as the server name.
             # MCPServerConfigEntry requires `name`, so inject it when omitted.
             if "name" not in cfg2:

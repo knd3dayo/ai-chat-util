@@ -6,18 +6,19 @@
       "type": "stdio",
       "command": "uv",
       "args": [
-        "--directory",
-        "C:\\Users\\user\\source\\repos\\util\\ai-chat-util",
         "run",
         "-m",
         "ai_chat_util.mcp.mcp_server",
         "--config",
-        "work/test/openai/ai-chat-util-config.yml",
+        "ai-chat-util-config.yml",
         "--log_level",
         "INFO",
         "--log_file",
-        "work/test/openai/mcp_server.log"
-      ]
+        "mcp_server.log"
+      ],
+      "env": {
+        "LLM_API_KEY": "os.environ/LLM_API_KEY"
+      }
     }
   }
 }

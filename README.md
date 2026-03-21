@@ -205,6 +205,7 @@ ai_chat_util_config:
 
 - `mcpServers.<name>.type` と `mcpServers.<name>.transport` はどちらでも指定できます（内部で `transport` に正規化します）。
 - `allowedTools`（任意）を指定すると、内部MCPクライアント側で「使ってよいツール名」をホワイトリストできます。
+- `mcpServers.<name>.env` は stdio サーバー起動時の環境変数です。秘密情報は直書きせず、`os.environ/ENV_VAR` 参照を推奨します。
 
 例:
 
@@ -216,7 +217,7 @@ ai_chat_util_config:
       "command": "uv",
       "args": ["--directory", "<REPO_PATH>", "run", "-m", "ai_chat_util.mcp.mcp_server"],
       "env": {
-        "LLM_API_KEY": "sk-****",
+        "LLM_API_KEY": "os.environ/LLM_API_KEY",
         "AI_CHAT_UTIL_CONFIG": "<REPO_PATH>\\ai-chat-util-config.yml"
       },
       "allowedTools": ["analyze_pdf_files", "analyze_files"]

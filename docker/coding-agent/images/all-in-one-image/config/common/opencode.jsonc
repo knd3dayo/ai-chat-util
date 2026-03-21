@@ -1,0 +1,24 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+    "ai-chat-util": {
+      "enabled": true,
+      "timeout": 60000,
+      "type": "local",
+      "command":["uv", "--directory", "/home/codeuser/app/mcp/ai-chat-util", "run", "-m", "ai_chat_util.mcp.mcp_server"],
+      "environment": {
+        "LLM_PROVIDER": "openai",
+        "COMPLETION_MODEL": "gpt-4o",
+        "OPENAI_API_KEY": "sk-poc-master-key-12345",
+        "OPENAI_BASE_URL": "http://litellm:4000"
+      }
+    },
+    "denodo-log-util": {
+      "enabled": true,
+      "timeout": 60000,
+      "type": "local",
+      "command":["uv", "--directory", "/home/codeuser/app/mcp/denodo-log-util", "run", "-m", "denodo_log_util.mcp.mcp_server"]
+    }
+
+  }
+}

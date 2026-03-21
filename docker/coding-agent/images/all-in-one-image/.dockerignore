@@ -1,0 +1,14 @@
+.git/
+.github/
+.pytest_cache/
+.venv/
+.env
+env_build
+env_run
+env_compose
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+

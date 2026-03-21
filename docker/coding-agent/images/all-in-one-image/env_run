@@ -1,0 +1,2 @@
+# run.sh で使用する環境変数
+COMPOSE_SERVICE_NAME=all-in-one-code-executor

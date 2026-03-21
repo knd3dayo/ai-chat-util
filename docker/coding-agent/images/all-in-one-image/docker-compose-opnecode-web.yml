@@ -1,0 +1,35 @@
+services:
+  opencode-web-executor:
+    image: all-in-one-code-executor-image
+    command:
+      - opencode
+      - web
+      - --hostname
+      - ${OPENCODE_WEB_HOSTNAME:-0.0.0.0}
+      - --port
+      - ${OPENCODE_WEB_PORT:-4096}
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    ports:
+      - "4096:4096"
+    volumes:
+      - ${WORKSPACE:-${HOME}/data/workspace}:/workspace
+      # Dev convenience: allow iterating on scripts without rebuilding the image.
+      - ./init-firewall.sh:/usr/local/bin/init-firewall.sh:ro
+      - ./entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    environment:
+      - USER_ID=${USER_ID:-1000}
+      - GROUP_ID=${GROUP_ID:-1000}
+      # Web UI をパスワードで保護（CLI(opencode run) では不要）
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-opencode}
+    env_file:
+      - env_compose
+    cap_add:
+      # iptablesの初期化にネットワークスタックへのアクセスが必要なため
+      - NET_ADMIN
+    
+networks:
+  default:
+    name: ai_platform_egress
+    external: true

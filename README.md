@@ -691,6 +691,18 @@ curl -sS -X DELETE http://127.0.0.1:7101/cancel/<task_id>
   - Executor 側に同じパスで workspace ルートを bind mount する
   - `paths.workspace_path_rewrites` でパス変換を設定する（例: `/srv/ai_platform/workspaces` → `/workspaces`）
 
+#### rewrite を使わない（推奨運用）
+
+`paths.workspace_path_rewrites` を使わずに運用したい場合は、次の条件を満たすように構成してください。
+
+- `autonomous_agent_util.paths.workspace_root` を 1つの絶対パス（workspace のルート）として固定する
+- `autonomous_agent_util.paths.executor_allowed_workspace_root` を同じ値に設定し、`workspace_path` をその配下に限定する
+- MCPサーバを **コンテナで動かす** 場合でも、ホストの workspace_root を **同じ絶対パス** で bind mount する
+  - 例: ホスト `/srv/ai_platform/workspaces` を、MCPサーバコンテナ内にも `/srv/ai_platform/workspaces` としてマウント
+
+この構成にすると、クライアントは常に `workspace_path=<workspace_root>/<id>` を送ればよくなります。
+（逆に、MCPサーバがホストで動いているのに `workspace_path=/workspace/...` のような“コンテナ内パス”を送ると、ホスト上の `/workspace` へ mkdir しようとして失敗します。）
+
 ### 2) MCP サーバ
 
 起動（stdio）:

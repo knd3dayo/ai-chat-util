@@ -34,12 +34,15 @@ autonomous_agent_util:
     debug_container: false
 
   paths:
-    workspace_root: /home/user/data/autonomous_agent_tasks
+    # Shared workspace root (must be writable from BOTH host and MCP server container).
+    # Keep the same absolute path inside the MCP server container via bind mount.
+    workspace_root: /home/user/data/workspace
     host_projects_root: /home/user/data/workspace/projects
-    # executor_allowed_workspace_root: /tmp
+    executor_allowed_workspace_root: /home/user/data/workspace
+    # rewrite is intentionally disabled in rewrite-free deployments.
     # workspace_path_rewrites:
-    #   - from: /srv/ai_platform/workspaces
-    #     to: /workspaces
+    #   - from: /home/user/data/workspace
+    #     to: /workspace
 
   host:
     uid: 1000
@@ -53,7 +56,7 @@ autonomous_agent_util:
     command: opencode run
 
   compose:
-    directory: /home/user/source/repos/ai-platform-poc/app/docker/coding-agent/images/all-in-one-image
+    directory: /home/user/source/repos/ai-chat-util/docker/coding-agent/images/all-in-one-image
     file: docker-compose.yml
     service_name: all-in-one-code-executor
     # Example:

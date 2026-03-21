@@ -68,8 +68,15 @@ class EndPoint(AutonomousEndPointBase):
         if not p.is_absolute():
             raise HTTPException(status_code=400, detail="workspace_path must be an absolute path")
 
-        # 任意だが、パス注入対策として許可ルート配下に制限できる
-        allowed_root = get_autonomous_runtime_config().paths.executor_allowed_workspace_root
+        cfg = get_autonomous_runtime_config()
+
+        # Security / safety guard: restrict workspace_path under an allowed root.
+        #
+        # This is intentionally opt-in to preserve backward compatibility.
+        # In rewrite-free deployments, set:
+        # - paths.workspace_root
+        # - paths.executor_allowed_workspace_root (typically same as workspace_root)
+        allowed_root = (cfg.paths.executor_allowed_workspace_root or "").strip()
         if allowed_root:
             root = pathlib.Path(allowed_root).expanduser().resolve()
             resolved = p.resolve()

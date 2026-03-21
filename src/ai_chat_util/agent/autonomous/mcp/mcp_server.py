@@ -3,13 +3,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from functools import wraps
 import inspect
 from typing import Callable
 import time
+from pathlib import Path
+import tempfile
 
 from ai_chat_util_base.config.runtime import (
 	init_autonomous_runtime,
+	get_autonomous_runtime_config,
 	apply_logging_overrides,
 )
 from fastmcp import FastMCP, Context
@@ -22,6 +26,41 @@ default_port = 7101
 
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_workspace_root_writable() -> None:
+	"""Fail fast if configured workspace_root is not writable.
+
+	This MCP server creates the workspace directory (mkdir) for each execute request.
+	In rewrite-free deployments, the workspace_root must be consistently bind-mounted
+	and writable in the MCP server's own runtime environment.
+	"""
+	try:
+		cfg = get_autonomous_runtime_config()
+	except Exception as e:
+		raise RuntimeError(f"Failed to load autonomous runtime config: {e}") from e
+
+	root_raw = (getattr(getattr(cfg, "paths", None), "workspace_root", None) or "").strip()
+	if not root_raw:
+		# Keep existing behavior if user did not configure it.
+		return
+
+	root = Path(os.path.expanduser(root_raw))
+	if not root.is_absolute():
+		raise RuntimeError(f"paths.workspace_root must be an absolute path: {root_raw!r}")
+
+	try:
+		root.mkdir(parents=True, exist_ok=True)
+	except Exception as e:
+		raise RuntimeError(f"paths.workspace_root is not creatable: {root.as_posix()} ({e})") from e
+
+	# Writable check: create a temporary directory under the root.
+	try:
+		with tempfile.TemporaryDirectory(prefix="ai-chat-util-wscheck-", dir=root.as_posix()):
+			pass
+	except Exception as e:
+		raise RuntimeError(f"paths.workspace_root is not writable: {root.as_posix()} ({e})") from e
+
 
 class AutonomousMCPServer:
 	"""
@@ -232,6 +271,7 @@ class AutonomousMCPServer:
 	async def main(self, endpoint: AutonomousEndPointBase) -> None:
 		args = self.parse_args()
 		init_autonomous_runtime(args.config or None)
+		_ensure_workspace_root_writable()
 		if args.log_level:
 			apply_logging_overrides(level=args.log_level)
 

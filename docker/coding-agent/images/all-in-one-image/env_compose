@@ -1,0 +1,31 @@
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-poc-master-key-12345
+LLM_BASE_URL_IN_CONTAINER=http://litellm:4000
+LLM_MODEL=gpt-4o
+
+# Route outbound HTTP(S) via Squid proxy in ai_platform_net.
+# Note: Keep Docker-internal services in NO_PROXY.
+HTTP_PROXY=http://squid:3128
+HTTPS_PROXY=http://squid:3128
+NO_PROXY=localhost,127.0.0.1,0.0.0.0,litellm,squid
+
+http_proxy=http://squid:3128
+https_proxy=http://squid:3128
+no_proxy=localhost,127.0.0.1,0.0.0.0,litellm,squid
+
+# Disable external https://models.dev fetch (required when egress is restricted)
+OPENCODE_DISABLE_MODELS_FETCH=true
+# Disable default plugins that are installed via npm/bun (egress restricted envs)
+# OPENCODE_DISABLE_DEFAULT_PLUGINS=true
+# Disable downloading LSP binaries (often requires egress)
+OPENCODE_DISABLE_LSP_DOWNLOAD=true
+# Disable loading project/workspace config files (eg /workspace/opencode.jsonc)
+# Useful to run opencode in restricted-egress environments without MCP/project hooks.
+# OPENCODE_DISABLE_PROJECT_CONFIG=true
+# Disable features that may contact external services on startup
+OPENCODE_DISABLE_AUTOUPDATE=true
+OPENCODE_DISABLE_SHARE=true
+OPENCODE_DISABLE_EXTERNAL_SKILLS=true
+
+LIBREOFFICE_PATH=/usr/bin/soffice
+

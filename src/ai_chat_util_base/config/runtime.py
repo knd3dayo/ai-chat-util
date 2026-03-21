@@ -212,6 +212,15 @@ def _configure_litellm(config: AiChatUtilConfig) -> None:
 def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> AiChatUtilConfig:
     raw_section = extract_required_root_section(raw_root=raw_root, resolved=resolved)
 
+    # This project intentionally does NOT support the deprecated `ai_chat_util_config.paths`.
+    # The new config surface is `ai_chat_util_config.mcp`.
+    if "paths" in raw_section:
+        raise ConfigError(
+            "設定ファイルの形式が古いか、キーが誤っています: "
+            f"{resolved}\n"
+            "'ai_chat_util_config.paths' はサポートされません。'ai_chat_util_config.mcp' に移行してください。"
+        )
+
     # Secrets may be declared in YAML only via env reference (os.environ/VAR).
     raw = apply_secret_overrides_from_yaml(
         dict(raw_section),
@@ -349,6 +358,8 @@ def _resolve_autonomous_llm_api_key_in_place(
 
 
 class LLMSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: str = Field(default="openai")
     completion_model: str = Field(default="gpt-5")
     embedding_model: str = Field(default="text-embedding-3-small")
@@ -428,30 +439,52 @@ class LLMSection(BaseModel):
         return models
 
 class PathsSection(BaseModel):
-    # Preferred key name for MCP settings JSON path.
-    # Kept compatible with older key: mcp_server_config_file_path.
+    # Deprecated: kept only for type references in older versions.
+    # This project now uses MCPSection (ai_chat_util_config.mcp).
     mcp_config_path: str | None = Field(default=None)
-    mcp_server_config_file_path: str | None = Field(default=None)
     custom_instructions_file_path: str | None = Field(default=None)
     working_directory: str | None = Field(default=None)
 
+
+class MCPSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Optional: MCP client settings JSON path
+    mcp_config_path: str | None = Field(default=None)
+    custom_instructions_file_path: str | None = Field(default=None)
+    working_directory: str | None = Field(default=None)
+
+    # Optional: extra headers/env forwarding for MCP transports ONLY.
+    # Keys must start with:
+    # - x-mcp-<Header-Name>
+    # - x-mcp-env-<ENV_NAME>
+    extra_headers: dict[str, str] | None = Field(default=None)
+
     @model_validator(mode="after")
-    def _coalesce_mcp_config_path(self) -> "PathsSection":
-        a = self.mcp_config_path
-        b = self.mcp_server_config_file_path
-        if a and b and a != b:
-            raise ValueError(
-                "paths.mcp_config_path と paths.mcp_server_config_file_path の両方が設定されていますが一致しません。"
-                "どちらか一方に統一してください。"
-            )
-        if a and not b:
-            self.mcp_server_config_file_path = a
-        if b and not a:
-            self.mcp_config_path = b
+    def _validate_mcp_extra_headers_keys(self) -> "MCPSection":
+        extra = self.extra_headers
+        if extra is None:
+            return self
+        if not isinstance(extra, dict):
+            raise ValueError("mcp.extra_headers は mapping(dict) である必要があります")
+
+        for k, v in extra.items():
+            if not isinstance(k, str) or not k.strip():
+                raise ValueError("mcp.extra_headers のキーは空でない文字列である必要があります")
+            if not isinstance(v, str):
+                raise ValueError(f"mcp.extra_headers.{k} は文字列である必要があります")
+            lower = k.strip().lower()
+            if not (lower.startswith("x-mcp-") or lower.startswith("x-mcp-env-")):
+                raise ValueError(
+                    "mcp.extra_headers は MCP 転送専用です。キーは 'x-mcp-' または 'x-mcp-env-' で始まる必要があります: "
+                    + repr(k)
+                )
+
         return self
 
-
 class FeaturesSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
     mcp_recursion_limit: int = Field(
@@ -496,16 +529,22 @@ class FeaturesSection(BaseModel):
 
 
 class LoggingSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     level: str = Field(default="INFO")
     file: str | None = Field(default=None)
 
 
 class NetworkSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     requests_verify: bool = Field(default=True)
     ca_bundle: str | None = Field(default=None)
 
 
 class Office2PDFSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     libreoffice_path: str | None = Field(default=None)
 
 
@@ -636,8 +675,10 @@ class AutonomousProcessSection(BaseModel):
 
 
 class AiChatUtilConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     llm: LLMSection = Field(default_factory=LLMSection)
-    paths: PathsSection = Field(default_factory=PathsSection)
+    mcp: MCPSection = Field(default_factory=MCPSection)
     features: FeaturesSection = Field(default_factory=FeaturesSection)
     logging: LoggingSection = Field(default_factory=LoggingSection)
     network: NetworkSection = Field(default_factory=NetworkSection)

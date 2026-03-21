@@ -209,7 +209,7 @@ class MCPClientUtil:
     def create_mcp_config(cls, runtime_config: AiChatUtilConfig, mcp_config_path: str| None) -> tuple[dict, MCPConfigParser|None]:
         if not mcp_config_path:
             logger.warning(
-                "MCP 設定ファイルパスが未設定です。ai-chat-util-config.yml の paths.mcp_config_path（または互換の paths.mcp_server_config_file_path）を設定してください。"
+                "MCP 設定ファイルパスが未設定です。ai-chat-util-config.yml の mcp.mcp_config_path を設定してください。"
             )
             return {}, None
         else:
@@ -217,7 +217,7 @@ class MCPClientUtil:
             config_dir = str(get_runtime_config_path().parent)
             resolved = resolve_existing_file_path(
                 mcp_config_path,
-                working_directory=runtime_config.paths.working_directory,
+                working_directory=runtime_config.mcp.working_directory,
                 extra_search_dirs=[config_dir],
             ).resolved_path
 
@@ -225,11 +225,11 @@ class MCPClientUtil:
             # 2. LangChain用設定の生成
             mcp_config = config_parser.to_langchain_config()
 
-            # Optional: forward reserved x-mcp-* values from llm.extra_headers into MCP transports.
+            # Optional: forward reserved x-mcp-* values from mcp.extra_headers into MCP transports.
             # - x-mcp-<Header-Name>: forwarded to HTTP-like transports as headers['<Header-Name>']
             # - x-mcp-env-<ENV_NAME>: forwarded to stdio transports as env['<ENV_NAME>']
             # Values are already resolved (env ref) at runtime init.
-            extra = getattr(runtime_config.llm, "extra_headers", None)
+            extra = getattr(runtime_config.mcp, "extra_headers", None)
             mcp_headers: dict[str, str] = {}
             mcp_env: dict[str, str] = {}
             if isinstance(extra, dict) and extra:
@@ -245,11 +245,11 @@ class MCPClientUtil:
                         env_name = key[len("x-mcp-env-") :].strip()
                         if not env_name:
                             raise ConfigError(
-                                "llm.extra_headers の x-mcp-env- プレフィックス指定が不正です（ENV名が空）"
+                                "mcp.extra_headers の x-mcp-env- プレフィックス指定が不正です（ENV名が空）"
                             )
                         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
                             raise ConfigError(
-                                "llm.extra_headers の環境変数名が不正です: "
+                                "mcp.extra_headers の環境変数名が不正です: "
                                 f"{env_name} (key={raw_key!r})\n"
                                 "対処: x-mcp-env-ENV_NAME の ENV_NAME は [A-Za-z_][A-Za-z0-9_]* を満たしてください。"
                             )
@@ -260,7 +260,7 @@ class MCPClientUtil:
                         header_name = key[len("x-mcp-") :].strip()
                         if not header_name:
                             raise ConfigError(
-                                "llm.extra_headers の x-mcp- プレフィックス指定が不正です（ヘッダー名が空）"
+                                "mcp.extra_headers の x-mcp- プレフィックス指定が不正です（ヘッダー名が空）"
                             )
                         mcp_headers[header_name] = raw_val
 
@@ -378,7 +378,7 @@ class MCPClientUtil:
     def _default_checkpoint_db_path(cls, runtime_config: AiChatUtilConfig) -> Path:
         """Pick a stable per-config SQLite path for LangGraph checkpoints."""
 
-        base = runtime_config.paths.working_directory
+        base = runtime_config.mcp.working_directory
         if base:
             root = Path(base).expanduser()
         else:

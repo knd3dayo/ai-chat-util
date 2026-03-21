@@ -39,30 +39,32 @@ ai_chat_util_config:
     # Non-secret API version (mainly for Azure OpenAI; optional)
     api_version: null
 
+    # Optional: extra HTTP headers for LLM requests (may contain secrets).
+    # Values MUST be env references (do NOT write secrets directly in YAML).
+    #
+    # Reserved prefixes for MCP forwarding:
+    # - x-mcp-<Header-Name>: forwarded to MCP HTTP/SSE/WebSocket transports as request headers.
+    # - x-mcp-env-<ENV_NAME>: forwarded to MCP stdio transport as environment variables.
+    #   (ENV_NAME must match [A-Za-z_][A-Za-z0-9_]*.)
+    # NOTE: Reserved x-mcp-* keys are NOT sent to LiteLLM.
+    # Example:
+    #   extra_headers:
+    #     Authorization: os.environ/OPENAI_AUTH_HEADER
+    #     X-My-Org: os.environ/MY_ORG_ID
+    #     x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
+    #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
+    extra_headers: null
 
-  mcp:
+  paths:
     # Optional: MCP client settings JSON path
     # - Preferred key: mcp_config_path
     mcp_config_path: null
-
+    
     # Optional: custom instructions path
     custom_instructions_file_path: null
 
     # Base directory used to resolve relative paths
     working_directory: work
-
-    # Optional: extra headers/env forwarding for MCP transports (may contain secrets).
-    # Values MUST be env references (do NOT write secrets directly in YAML).
-    #
-    # - x-mcp-<Header-Name>: forwarded to MCP HTTP/SSE/WebSocket transports as request headers.
-    # - x-mcp-env-<ENV_NAME>: forwarded to MCP stdio transport as environment variables.
-    #   (ENV_NAME must match [A-Za-z_][A-Za-z0-9_]*.)
-    # NOTE: These settings are NOT sent to LiteLLM.
-    # Example:
-    #   extra_headers:
-    #     x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
-    #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
-    extra_headers: null
 
   features:
     allow_outside_modifications: false
@@ -94,7 +96,7 @@ ai_chat_util_config:
 # ルート直下の `autonomous_agent_util:` 配下に統合します。
 autonomous_agent_util:
   endpoint:
-    # MCPサーバー名（ai_chat_util_config.mcp.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
+    # MCPサーバー名（ai_chat_util_config.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
     mcp_server_name: coding-agent
     
   backend:

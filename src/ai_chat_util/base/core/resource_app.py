@@ -1,25 +1,10 @@
 from typing import Annotated, Literal
-import tempfile
-import atexit
 from pydantic import Field
-from ai_chat_util_base.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util_base.model.ai_chatl_util_models import ChatMessage, ChatContent
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util.base.llm.llm_client import LLMClientUtil
 from ai_chat_util_base.config.runtime import get_runtime_config
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
 from file_util.model import FileUtilDocument
-from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util_base.config.runtime import get_runtime_config
-
-
-def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
-    """ユーザー入力のパスを、実在するパスへ解決して返す。"""
-    llm_config = get_runtime_config()
-    resolved: list[str] = []
-    for p in file_path_list:
-        r = resolve_existing_file_path(p, working_directory=llm_config.paths.working_directory)
-        resolved.append(r.resolved_path)
-    return resolved
 
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:

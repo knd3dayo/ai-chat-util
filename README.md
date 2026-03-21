@@ -91,7 +91,7 @@ copy config.example.yml ai-chat-util-config.yml
 
 - `llm.api_key` は **環境変数参照**（`os.environ/ENV_VAR_NAME`）の形式でのみ指定できます。
 - `llm.extra_headers` も秘密情報を含み得るため、**各ヘッダー値は環境変数参照**（`os.environ/ENV_VAR_NAME`）でのみ指定できます。
-- `llm.extra_headers` のうち予約プレフィックス `x-mcp-*` / `x-mcp-env-*` は MCP 接続に転送され、LiteLLM には送信されません。
+- `mcp.extra_headers` に `x-mcp-*` / `x-mcp-env-*` を指定すると MCP 接続に転送されます（LiteLLM には送信されません）。
 - OpenAI / Azure OpenAI / Anthropic のプロバイダ（`llm.provider: openai | azure | anthropic`）を使う場合、`llm.api_key` は必須です（設定ロード時に検証されます）。
 
 例（OpenAI）:
@@ -128,10 +128,13 @@ ai_chat_util_config:
     extra_headers:
       Authorization: os.environ/OPENAI_AUTH_HEADER
       X-My-Org: os.environ/MY_ORG_ID
-      # MCP HTTP/SSE/WebSocket transport の headers に転送（キーの "x-mcp-" は除去されます）
-      x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
-      # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
-      x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
+
+    mcp:
+      extra_headers:
+        # MCP HTTP/SSE/WebSocket transport の headers に転送（キーの "x-mcp-" は除去されます）
+        x-mcp-Authorization: os.environ/MCP_AUTH_HEADER
+        # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
+        x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
 ```
 
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）
@@ -188,11 +191,11 @@ ai_chat_util_config:
 ### MCP設定（内部MCPクライアント用：任意）
 
 CLIの `chat` / `batch_chat` は `--use_mcp` を指定すると、内部の MCP クライアントを使って「MCPツール込みのワークフロー」で実行できます。
-このとき、`ai-chat-util-config.yml` の `paths.mcp_config_path`（互換キー: `paths.mcp_server_config_file_path`）に、MCPサーバー設定JSONのパスを指定してください。
+このとき、`ai-chat-util-config.yml` の `mcp.mcp_config_path`に、MCPサーバー設定JSONのパスを指定してください。
 
 ```yml
 ai_chat_util_config:
-  paths:
+  mcp:
     mcp_config_path: mcp_settings.json
 ```
 
@@ -222,7 +225,7 @@ ai_chat_util_config:
 }
 ```
 
-> 注意: `--use_mcp` を付けても `paths.mcp_config_path` が未設定の場合、MCPツールはロードされません（警告ログが出ます）。
+> 注意: `--use_mcp` を付けても `mcp.mcp_config_path` が未設定の場合、MCPツールはロードされません（警告ログが出ます）。
 
 ### 内部MCPクライアントの安全弁（無限ループ/タイムアウト）
 
@@ -255,7 +258,7 @@ features:
 - HITL（pause/resume）が発生するのは **`--use_mcp`（内部MCPクライアント）を使う場合のみ**です。
   - `--use_mcp` を付けない場合（LiteLLM経由の直接呼び出し）は、HITLは発生しません。
 - `run_simple_chat` / `run_simple_batch_chat` は常に LiteLLM 経由の直接呼び出し（MCP非対応）で実行されます（`use_mcp` 引数はありません）。
-- `--use_mcp` を使う場合は、`ai-chat-util-config.yml` の `paths.mcp_config_path`（互換: `paths.mcp_server_config_file_path`）が必要です。
+- `--use_mcp` を使う場合は、`ai-chat-util-config.yml` の `mcp.mcp_config_path`が必要です。
 - CLI の `chat` は、同一プロセス内での対話として pause/resume を処理します（プロセスを跨いだ再開のための `trace_id` 指定オプションは現状ありません）。
   - プロセスを跨いで再開したい場合は、API/ライブラリ利用で `ChatRequest.trace_id` を指定してください。
 

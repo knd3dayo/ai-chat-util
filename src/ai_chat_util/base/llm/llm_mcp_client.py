@@ -26,10 +26,7 @@ class MCPClient(AbstractLLMClient):
     def __init__(self, runtime_config: AiChatUtilConfig, coding_agent_config: AutonomousAgentUtilConfig | None = None):
         self.runtime_config = runtime_config
         self.coding_agent_config = coding_agent_config
-        mcp_config_path = (
-            self.runtime_config.paths.mcp_config_path
-            or self.runtime_config.paths.mcp_server_config_file_path
-        )
+        mcp_config_path = self.runtime_config.mcp.mcp_config_path
         self.mcp_config, self.config_parser = MCPClientUtil.create_mcp_config(runtime_config, mcp_config_path)
         self.message_factory = LLMMessageContentFactory()
         self.prompts = CodingAgentPrompts()

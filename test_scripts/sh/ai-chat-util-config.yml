@@ -15,7 +15,7 @@ ai_chat_util_config:
     # LibreOfficeのパスを指定. OfficeファイルをPDFに変換するために使用されます.
     #libreoffice_path: "c:\\Program Files\\LibreOffice\\program\\soffice.exe"
 
-  paths:
+  mcp:
     mcp_config_path: "mcp.json"
 
 autonomous_agent_util:

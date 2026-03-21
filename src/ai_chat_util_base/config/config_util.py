@@ -252,18 +252,22 @@ def apply_secret_overrides_from_yaml(
 
     - Supports llm.api_key
     - Supports llm.extra_headers (values only)
+    - Supports mcp.extra_headers (values only)
     - Secrets must be provided as env reference: os.environ/VAR
     """
 
     llm = raw.get("llm")
-    if not isinstance(llm, dict):
-        return raw
+    mcp = raw.get("mcp")
 
-    copied_llm = dict(llm)
+    copied_llm = dict(llm) if isinstance(llm, dict) else None
+    copied_mcp = dict(mcp) if isinstance(mcp, dict) else None
     changed = False
 
-    if "api_key" in llm:
-        api_key_value = llm.get("api_key")
+    if copied_llm is None and copied_mcp is None:
+        return raw
+
+    if copied_llm is not None and "api_key" in copied_llm:
+        api_key_value = copied_llm.get("api_key")
         if api_key_value is not None:
             if not isinstance(api_key_value, str):
                 raise ConfigError(
@@ -276,8 +280,8 @@ def apply_secret_overrides_from_yaml(
             )
             changed = True
 
-    if "extra_headers" in llm:
-        extra_headers_value = llm.get("extra_headers")
+    if copied_llm is not None and "extra_headers" in copied_llm:
+        extra_headers_value = copied_llm.get("extra_headers")
         if extra_headers_value is not None:
             if not isinstance(extra_headers_value, dict):
                 raise ConfigError(
@@ -302,11 +306,40 @@ def apply_secret_overrides_from_yaml(
             copied_llm["extra_headers"] = resolved_headers
             changed = True
 
+    if copied_mcp is not None and "extra_headers" in copied_mcp:
+        extra_headers_value = copied_mcp.get("extra_headers")
+        if extra_headers_value is not None:
+            if not isinstance(extra_headers_value, dict):
+                raise ConfigError(
+                    f"mcp.extra_headers は mapping(dict) である必要があります: {config_path} ({field_prefix}mcp.extra_headers)"
+                )
+            resolved_headers: dict[str, str] = {}
+            for k, v in extra_headers_value.items():
+                if not isinstance(k, str) or not k.strip():
+                    raise ConfigError(
+                        f"mcp.extra_headers のキーは空でない文字列である必要があります: {config_path} (mcp.extra_headers)"
+                    )
+                if not isinstance(v, str):
+                    raise ConfigError(
+                        f"mcp.extra_headers.{k} は文字列である必要があります: {config_path} ({field_prefix}mcp.extra_headers.{k})"
+                    )
+                resolved_headers[k] = resolve_env_ref(
+                    v,
+                    config_path=config_path,
+                    field_path=f"{field_prefix}mcp.extra_headers.{k}",
+                )
+
+            copied_mcp["extra_headers"] = resolved_headers
+            changed = True
+
     if not changed:
         return raw
 
     copied = dict(raw)
-    copied["llm"] = copied_llm
+    if copied_llm is not None:
+        copied["llm"] = copied_llm
+    if copied_mcp is not None:
+        copied["mcp"] = copied_mcp
     return copied
 
 def resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:

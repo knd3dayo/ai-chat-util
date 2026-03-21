@@ -43,7 +43,7 @@ def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
     llm_config = get_runtime_config()
     resolved: list[str] = []
     for p in file_path_list:
-        r = resolve_existing_file_path(p, working_directory=llm_config.paths.working_directory)
+        r = resolve_existing_file_path(p, working_directory=llm_config.mcp.working_directory)
         resolved.append(r.resolved_path)
     return resolved
 

@@ -30,6 +30,10 @@ class PromptsBase(ABC):
     def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text) -> str:
         pass
 
+    def create_tools_description(self, allowed_langchain_tools) -> str:
+
+        return "\n".join(f"## name: {tool.name}\n - description: {tool.description}\n - args_schema: {tool.args_schema}\n" for tool in allowed_langchain_tools)
+
 class CodingAgentPrompts(PromptsBase):
 
     def auto_approve_hitl_policy_text(self, approval_tools_text) -> str:

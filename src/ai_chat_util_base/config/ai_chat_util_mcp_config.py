@@ -36,7 +36,7 @@ class MCPServerConfigEntry(BaseModel):
     class Config:
         populate_by_name = True
 
-class MCPConfigParser:
+class MCPServerConfig:
     def __init__(self, config_path: str):
         with open(config_path, 'r') as f:
             data = json.load(f)

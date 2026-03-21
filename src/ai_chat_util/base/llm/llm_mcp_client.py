@@ -20,16 +20,13 @@ from .prompts import CodingAgentPrompts, PromptsBase
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-from .llm_mcp_client_util import MCPClientUtil
+from .llm_mcp_client_util import MCPClientUtil, ToolLimits
 
 class MCPClient(AbstractLLMClient):
     def __init__(self, runtime_config: AiChatUtilConfig, coding_agent_config: AutonomousAgentUtilConfig | None = None):
         self.runtime_config = runtime_config
         self.coding_agent_config = coding_agent_config
-        mcp_config_path = self.runtime_config.mcp.mcp_config_path
-        self.mcp_config, self.config_parser = MCPClientUtil.create_mcp_config(runtime_config, mcp_config_path)
         self.message_factory = LLMMessageContentFactory()
-        self.prompts = CodingAgentPrompts()
 
 
     @staticmethod
@@ -95,37 +92,32 @@ class MCPClient(AbstractLLMClient):
 
     async def chat(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
 
-        # LLM + MCP ツールでエージェントを作成
-        allowed_langchain_tools = await MCPClientUtil.get_allowed_tools(self.mcp_config, self.config_parser)
-
+ 
         trace_id = getattr(chat_request, "trace_id", None)
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
         
-        tool_limits = MCPClientUtil.get_tool_limits(self.runtime_config)
-
-        recursion_limit = tool_limits.tool_recursion_limit
-        tool_call_limit = tool_limits.tool_call_limit
-        tool_timeout_seconds = tool_limits.tool_timeout_seconds
-        tool_timeout_retries = tool_limits.tool_timeout_retries
-        auto_approve = tool_limits.auto_approve
-        max_retries = tool_limits.max_retries
 
         async with contextlib.AsyncExitStack() as exit_stack:
+
             checkpointer = await MCPClientUtil._create_sqlite_checkpointer(
                 MCPClientUtil._default_checkpoint_db_path(self.runtime_config),
                 exit_stack=exit_stack,
             )
 
+            prompts = CodingAgentPrompts()
+            # LLM + MCP ツールでエージェントを作成
+            tool_limits = ToolLimits.from_config(self.runtime_config)
 
+            recursion_limit = tool_limits.tool_recursion_limit
+            auto_approve = tool_limits.auto_approve
+            max_retries = tool_limits.max_retries
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
                 self.coding_agent_config,
-                prompts=self.prompts,
-                allowed_langchain_tools=allowed_langchain_tools,
+                prompts=prompts,
                 checkpointer=checkpointer,
-                hitl_approval_tools=getattr(self.runtime_config.features, "hitl_approval_tools", None),
                 tool_limits=tool_limits,
             )
 

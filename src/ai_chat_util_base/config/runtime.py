@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional, Literal, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator, ConfigDict
+from .ai_chat_util_mcp_config import MCPServerConfigEntry, MCPServerConfig
+from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
 
 from .config_util import (
     CONFIG_ENV_VAR,
@@ -18,8 +20,8 @@ from .config_util import (
     _ENV_REF_PREFIX
     
 )
-
-
+import ai_chat_util.log.log_settings as log_settings
+logger = log_settings.getLogger(__name__)
 
 # =====================
 # Autonomous Agent Util Runtime (embedded)
@@ -683,6 +685,114 @@ class AiChatUtilConfig(BaseModel):
     logging: LoggingSection = Field(default_factory=LoggingSection)
     network: NetworkSection = Field(default_factory=NetworkSection)
     office2pdf: Office2PDFSection = Field(default_factory=Office2PDFSection)
+
+    def _apply_mcp_runtime_overrides(self, config: MCPServerConfig) -> None:
+        """Apply runtime overrides from ai-chat-util-config.yml onto MCP server config.
+
+        - mcp.extra_headers with reserved prefixes are forwarded into transports:
+          - x-mcp-<Header-Name> => http/sse/websocket headers[Header-Name]
+          - x-mcp-env-<ENV_NAME> => stdio env[ENV_NAME]
+        - Ensure stdio servers can resolve the same ai-chat-util-config.yml by
+          injecting an absolute CONFIG_ENV_VAR.
+        """
+
+        extra = getattr(self.mcp, "extra_headers", None)
+        mcp_headers: dict[str, str] = {}
+        mcp_env: dict[str, str] = {}
+
+        if isinstance(extra, dict) and extra:
+            import re
+
+            for raw_key, raw_val in extra.items():
+                if not isinstance(raw_key, str) or not isinstance(raw_val, str):
+                    continue
+                key = raw_key.strip()
+                if not key:
+                    continue
+
+                lower = key.lower()
+                if lower.startswith("x-mcp-env-"):
+                    env_name = key[len("x-mcp-env-") :].strip()
+                    if not env_name:
+                        raise ConfigError(
+                            "mcp.extra_headers の x-mcp-env- プレフィックス指定が不正です（ENV名が空）"
+                        )
+                    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
+                        raise ConfigError(
+                            "mcp.extra_headers の環境変数名が不正です: "
+                            f"{env_name} (key={raw_key!r})\n"
+                            "対処: x-mcp-env-ENV_NAME の ENV_NAME は [A-Za-z_][A-Za-z0-9_]* を満たしてください。"
+                        )
+                    mcp_env[env_name] = raw_val
+                    continue
+
+                if lower.startswith("x-mcp-"):
+                    header_name = key[len("x-mcp-") :].strip()
+                    if not header_name:
+                        raise ConfigError(
+                            "mcp.extra_headers の x-mcp- プレフィックス指定が不正です（ヘッダー名が空）"
+                        )
+                    mcp_headers[header_name] = raw_val
+
+        # Forward headers/env into each server entry.
+        if (mcp_headers or mcp_env) and getattr(config, "servers", None):
+            for _, entry in config.servers.items():
+                transport = (getattr(entry, "transport", None) or "").lower()
+
+                if transport == "stdio" and mcp_env:
+                    env = getattr(entry, "env", None)
+                    if env is None:
+                        env = {}
+                    if isinstance(env, dict):
+                        env2 = dict(env)
+                        # ai-chat-util-config.yml (runtime) takes precedence
+                        env2.update(mcp_env)
+                        entry.env = env2
+
+                if transport in {"http", "sse", "websocket"} and mcp_headers:
+                    headers = getattr(entry, "headers", None)
+                    if headers is None:
+                        headers = {}
+                    if isinstance(headers, dict):
+                        headers2 = dict(headers)
+                        # ai-chat-util-config.yml (runtime) takes precedence
+                        headers2.update(mcp_headers)
+                        entry.headers = headers2
+
+        # Always inject the absolute config path for stdio servers.
+        runtime_config_path = str(get_runtime_config_path())
+        if getattr(config, "servers", None):
+            for _, entry in config.servers.items():
+                transport = (getattr(entry, "transport", None) or "").lower()
+                if transport != "stdio":
+                    continue
+                env = getattr(entry, "env", None)
+                if env is None:
+                    env = {}
+                if isinstance(env, dict):
+                    env2 = dict(env)
+                    env2[CONFIG_ENV_VAR] = runtime_config_path
+                    entry.env = env2
+
+    def get_mcp_server_config(self) -> MCPServerConfig | None:
+        if not self.mcp.mcp_config_path:
+            logger.warning(
+                "MCP 設定ファイルパスが未設定です。ai-chat-util-config.yml の mcp.mcp_config_path を設定してください。"
+            )
+            return None
+
+        # ai-chat-util-config.yml からの相対パスも解決できるよう、設定ファイルのディレクトリも探索対象に入れる
+        config_dir = str(get_runtime_config_path().parent)
+        resolved = resolve_existing_file_path(
+            self.mcp.mcp_config_path,
+            working_directory=self.mcp.working_directory,
+            extra_search_dirs=[config_dir],
+        ).resolved_path
+
+        config = MCPServerConfig(resolved)
+        # Apply runtime overrides (extra_headers forwarding, config path injection).
+        self._apply_mcp_runtime_overrides(config)
+        return config
 
 
 class AutonomousAgentUtilConfig(BaseModel):

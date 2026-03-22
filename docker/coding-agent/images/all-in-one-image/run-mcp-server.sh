@@ -10,6 +10,7 @@ Usage:
   ./run-mcp-server.sh [options] <command> [args...]
 
 Commands:
+  prepare   Populate ${HOME}/data/mcps with real directories for default mounts
   up        Start MCP server (docker compose up -d)
   down      Stop and remove containers (docker compose down)
   stop      Stop container (docker compose stop)
@@ -29,6 +30,8 @@ Options:
 Notes:
   - Host-side .venv is expected under the mounted project.
   - Start commands always use uv run python -m ... and do not call .venv/bin scripts directly.
+  - If ${HOME}/data/mcps is empty, run `./run-mcp-server.sh prepare` first.
+  - Additional arguments after `prepare` are forwarded to `prepare-mcps.sh`.
 EOF
 }
 
@@ -152,9 +155,15 @@ fi
 
 compose_file="$basedir/docker-compose-mcp-server.yml"
 service_name="ai-chat-util-mcp-server"
+prepare_script="$basedir/prepare-mcps.sh"
 
 if [ ! -f "$compose_file" ]; then
   echo "Compose file not found: $compose_file" >&2
+  exit 1
+fi
+
+if [ ! -f "$prepare_script" ]; then
+  echo "Prepare script not found: $prepare_script" >&2
   exit 1
 fi
 
@@ -192,6 +201,9 @@ compose_cmd() {
 }
 
 case "$subcommand" in
+  prepare)
+    exec "$prepare_script" --root "$host_mcp_root" "$@"
+    ;;
   up|restart)
     if [ ! -d "$host_mcp_root" ]; then
       echo "Host MCP root not found: $host_mcp_root" >&2
@@ -199,6 +211,12 @@ case "$subcommand" in
     fi
     if [ ! -d "$host_project_dir" ]; then
       echo "Project directory not found: $host_project_dir" >&2
+      echo "Run ./run-mcp-server.sh prepare to populate ${HOME}/data/mcps with real directories." >&2
+      exit 1
+    fi
+    if [ -L "$host_project_dir" ]; then
+      echo "Project directory must be a real directory, not a symlink: $host_project_dir" >&2
+      echo "Run ./run-mcp-server.sh prepare to replace symlinks with real directories." >&2
       exit 1
     fi
     if [ ! -f "$host_config_path" ]; then

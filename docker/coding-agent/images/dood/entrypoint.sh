@@ -2,6 +2,7 @@
 set -euo pipefail
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/srv/ai_platform/workspaces}"
+AI_CHAT_UTIL_CONFIG="${AI_CHAT_UTIL_CONFIG:-/opt/ai-chat-util/dood/ai-chat-util-config.yml}"
 
 mkdir -p "$WORKSPACE_ROOT"
 
@@ -17,6 +18,11 @@ fi
 if [[ -n "${HOST_UID:-}" ]]; then export AI_PLATFORM_HOST_UID="$HOST_UID"; fi
 if [[ -n "${HOST_GID:-}" ]]; then export AI_PLATFORM_HOST_GID="$HOST_GID"; fi
 
-exec python -m uvicorn ai_platform_samplelib.application.autonomous.api.api_server:app \
+cd /opt/ai-chat-util/dood
+
+exec python -m ai_chat_util.agent.coding.mcp.mcp_server \
+  -m http \
   --host "${API_HOST:-0.0.0.0}" \
-  --port "${API_PORT:-7101}"
+  -p "${API_PORT:-7101}" \
+  --config "$AI_CHAT_UTIL_CONFIG" \
+  -v "${MCP_LOG_LEVEL:-INFO}"

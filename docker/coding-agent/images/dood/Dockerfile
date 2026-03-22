@@ -5,6 +5,7 @@ ARG DOCKER_COMPOSE_VERSION=v2.27.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+  git \
     gnupg \
   && rm -rf /var/lib/apt/lists/*
 
@@ -34,26 +35,30 @@ RUN mkdir -p /usr/local/lib/docker/cli-plugins \
       -o /usr/local/lib/docker/cli-plugins/docker-compose \
   && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-WORKDIR /opt/ai-platform
+WORKDIR /opt/ai-chat-util
 
-# Install samplelib (SV + autonomous API/runner)
-COPY app/ai-platform-samplelib /opt/ai-platform/ai-platform-samplelib
+# Install ai-chat-util itself so the bundle can serve the coding MCP server.
+COPY app /opt/ai-chat-util/app
 RUN python -m pip install --no-cache-dir -U pip \
-  && pip install --no-cache-dir -e /opt/ai-platform/ai-platform-samplelib
+  && pip install --no-cache-dir -e /opt/ai-chat-util/app
 
-# Bundle the executor compose template so the client-side docker compose can read it.
-# IMPORTANT: Under DoOD, bind-mount sources are interpreted on the host daemon.
-# This template must NOT reference client-local paths (we removed script bind mounts).
-COPY app/docker/autonomous-agent-executor/images/all-in-on-image \
-  /opt/ai-platform/autonomous-agent-executor/all-in-on-image
-
-COPY app/docker/autonomous-agent-executor/images/one-set-dood/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Bundle the executor image assets and a DooD-safe compose template.
+# Under DoOD, bind-mount sources are interpreted by the host daemon, so the
+# backend compose file must avoid mounts that only exist inside this bundle.
+COPY docker/coding-agent/images/all-in-one-image \
+  /opt/ai-chat-util/docker/coding-agent/images/all-in-one-image
+COPY docker/coding-agent/images/dood/ai-chat-util-config.yml /opt/ai-chat-util/dood/ai-chat-util-config.yml
+COPY docker/coding-agent/images/dood/backend-compose.yml /opt/ai-chat-util/dood/backend-compose.yml
+COPY docker/coding-agent/images/dood/env_compose /opt/ai-chat-util/dood/env_compose
+COPY docker/coding-agent/images/dood/mcp.json /opt/ai-chat-util/dood/mcp.json
+COPY docker/coding-agent/images/dood/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV WORKSPACE_ROOT=/srv/ai_platform/workspaces \
     EXECUTOR_ALLOWED_WORKSPACE_ROOT=/srv/ai_platform/workspaces \
-    COMPOSE_DIRECTORY=/opt/ai-platform/autonomous-agent-executor/all-in-on-image \
-    COMPOSE_FILE=docker-compose.yml \
+    AI_CHAT_UTIL_CONFIG=/opt/ai-chat-util/dood/ai-chat-util-config.yml \
+    COMPOSE_DIRECTORY=/opt/ai-chat-util/dood \
+    COMPOSE_FILE=backend-compose.yml \
     COMPOSE_SERVICE_NAME=all-in-one-code-executor
 
 EXPOSE 7101

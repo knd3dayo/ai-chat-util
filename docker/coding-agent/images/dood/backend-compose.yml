@@ -1,0 +1,20 @@
+services:
+  all-in-one-code-executor:
+    image: all-in-one-code-executor-image
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      - ${WORKSPACE}:/workspace
+    environment:
+      - USER_ID=${USER_ID:-1000}
+      - GROUP_ID=${GROUP_ID:-1000}
+    env_file:
+      - ./env_compose
+    cap_add:
+      - NET_ADMIN
+
+networks:
+  default:
+    name: ai_platform_internal
+    external: true

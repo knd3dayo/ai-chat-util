@@ -1,9 +1,9 @@
 services:
-  sv-autonomous-bundle:
+  coding-agent-dood-bundle:
     build:
-      context: ../../../../..
-      dockerfile: app/docker/autonomous-agent-executor/images/one-set-dood/Dockerfile
-    image: sv-autonomous-bundle:dood-poc
+      context: ../../../..
+      dockerfile: docker/coding-agent/images/dood/Dockerfile
+    image: coding-agent-dood-bundle:dood-poc
     restart: unless-stopped
     ports:
       - "7101:7101"
@@ -11,9 +11,10 @@ services:
       # PoC固定: hostと同一絶対パスでミラーリングする
       - WORKSPACE_ROOT=/srv/ai_platform/workspaces
       - EXECUTOR_ALLOWED_WORKSPACE_ROOT=/srv/ai_platform/workspaces
-      # 実行テンプレートはバンドル内に同梱（クライアント側docker composeが読む）
-      - COMPOSE_DIRECTORY=/opt/ai-platform/autonomous-agent-executor/all-in-on-image
-      - COMPOSE_FILE=docker-compose.yml
+      # 実行テンプレートはバンドル内に同梱（docker.sock 越しの backend 起動に使用）
+      - AI_CHAT_UTIL_CONFIG=/opt/ai-chat-util/dood/ai-chat-util-config.yml
+      - COMPOSE_DIRECTORY=/opt/ai-chat-util/dood
+      - COMPOSE_FILE=backend-compose.yml
       - COMPOSE_SERVICE_NAME=all-in-one-code-executor
       # バンドルがrootで動く場合でも、生成物のownerをホストユーザーに寄せたい場合に指定
       # 例: HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d
@@ -34,5 +35,5 @@ networks:
     name: ai_platform_internal
 
   # PoC用: ホストからの疎通確認（ports公開）を成立させるためのネットワーク。
-  # 実行コンテナ(all-in-on-image)は引き続き ai_platform_internal のみ参加させる。
+  # 実行コンテナ(all-in-one-code-executor)は引き続き ai_platform_internal のみ参加させる。
   bundle_public: {}

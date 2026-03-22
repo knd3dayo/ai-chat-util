@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from ..core.endpoint import EndPoint
 from ai_chat_util_base.model.agent_util_models import CancelResponse, ExecuteResponse, HealthzResponse, TaskStatus
 from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers, get_current_request_headers
-from ai_chat_util_base.config.runtime import init_autonomous_runtime
+from ai_chat_util_base.config.runtime import init_coding_runtime
 
 
 logger = logging.getLogger(__name__)
@@ -97,9 +97,9 @@ def create_app(*, sync_mode: bool = False, init_config: bool = True) -> FastAPI:
     # Avoid initializing runtime at module import time. Some contexts (pytest collection,
     # uvicorn import-style usage) import this module before env/config is set.
     if init_config:
-        init_autonomous_runtime(None)
+        init_coding_runtime(None)
 
-    app = FastAPI(title="Autonomous Agent Executor API", version="0.1")
+    app = FastAPI(title="Coding Agent Executor API", version="0.1")
 
     @app.middleware("http")
     async def _capture_request_headers(request: Request, call_next):
@@ -175,14 +175,14 @@ if __name__ == "__main__":
     import argparse
     import uvicorn
 
-    parser = argparse.ArgumentParser(description="Run Autonomous Agent Executor API")
+    parser = argparse.ArgumentParser(description="Run Coding Agent Executor API")
     parser.add_argument(
         "--config",
         type=str,
         default="",
         help=(
             "Path to config YAML (ai-chat-util-config.yml). If omitted, resolved by env AI_CHAT_UTIL_CONFIG "
-            "(with root-level autonomous_agent_util section), or searched from CWD/project root."
+            "(with root-level coding_agent_util section), or searched from CWD/project root."
         ),
     )
     parser.add_argument("-p", "--port", type=int, default=7101)
@@ -194,6 +194,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    init_autonomous_runtime(args.config or None)
+    init_coding_runtime(args.config or None)
 
     uvicorn.run(create_app(sync_mode=args.sync_mode), host=args.host, port=args.port)

@@ -4,6 +4,7 @@ setlocal
 chcp 65001 >nul
 pushd "%~dp0" || exit /b 1
 
+set "UV_PROJECT_DIR=%~dp0..\..\..\app"
 set "AI_CHAT_UTIL_CONFIG=%~dp0ai-chat-util-config.yml"
 
 rem 分析対象のファイル1つ目を指定
@@ -33,7 +34,7 @@ if "%input_file2%"=="" (
 	exit /b 1
 )
 
-uv run -m ai_chat_util.cli --config "%AI_CHAT_UTIL_CONFIG%" analyze_files -i "%input_file1%" "%input_file2%" -p "指定したファイルを分析して"
+uv --directory "%UV_PROJECT_DIR%" run -m ai_chat_util.cli --config "%AI_CHAT_UTIL_CONFIG%" analyze_files -i "%input_file1%" "%input_file2%" -p "指定したファイルを分析して"
 
 set "RET=%ERRORLEVEL%"
 popd

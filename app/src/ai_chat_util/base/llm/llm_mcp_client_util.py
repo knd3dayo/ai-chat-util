@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover
 from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig
 from ai_chat_util_base.config.runtime import (
     AiChatUtilConfig,
-    AutonomousAgentUtilConfig,
+    CodingAgentUtilConfig,
     get_runtime_config_path,
 )
 import ai_chat_util.log.log_settings as log_settings

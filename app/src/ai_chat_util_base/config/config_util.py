@@ -9,15 +9,15 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 CONFIG_ENV_VAR = "AI_CHAT_UTIL_CONFIG"
 DEFAULT_CONFIG_FILENAME = "ai-chat-util-config.yml"
-AUTONOMOUS_DEFAULT_CONFIG_FILENAME = "autonomous-agent-util-config.yml"
+CODING_DEFAULT_CONFIG_FILENAME = "coding-agent-util-config.yml"
 AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME = DEFAULT_CONFIG_FILENAME
 
 # New config format root key (required).
 AI_CHAT_UTIL_CONFIG_ROOT_KEY = "ai_chat_util_config"
-# New autonomous-agent-util standalone config format root key (required).
-AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY = "autonomous_agent_util_config"
+# New coding-agent-util standalone config format root key (required).
+CODING_AGENT_UTIL_CONFIG_ROOT_KEY = "coding_agent_util_config"
 
-AUTONOMOUS_CONFIG_ENV_VAR = "AUTONOMOUS_AGENT_UTIL_CONFIG"
+CODING_CONFIG_ENV_VAR = "CODING_AGENT_UTIL_CONFIG"
 
 _ENV_REF_PREFIX = "os.environ/"
 
@@ -119,14 +119,14 @@ def _resolve_env_config_path(env_var: str, *, tried: list[Path]) -> Path | None:
     return candidate
 
 
-def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
+def resolve_coding_config_path(cli_config_path: str | None) -> Path:
     tried: list[Path] = []
 
     resolved = _resolve_cli_config_path(
         cli_config_path,
         tried=tried,
         # propagate to env for downstream subprocess/tool execution
-        # NOTE: autonomous MCP server passes ai-chat-util-config.yml here (integration mode).
+        # NOTE: coding MCP server passes ai-chat-util-config.yml here (integration mode).
         propagate_env_var=CONFIG_ENV_VAR,
     )
     if resolved is not None:
@@ -137,14 +137,17 @@ def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
     if resolved is not None:
         return resolved
 
-    # Backward-compat: standalone autonomous-agent-util-config.yml via env.
-    resolved = _resolve_env_config_path(AUTONOMOUS_CONFIG_ENV_VAR, tried=tried)
+    # Canonical standalone coding-agent-util-config.yml via env.
+    resolved = _resolve_env_config_path(CODING_CONFIG_ENV_VAR, tried=tried)
     if resolved is not None:
         return resolved
 
     # Integration mode: allow ai-chat-util-config.yml in CWD.
     resolved = _resolve_in_cwd(
-        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        [
+            AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME,
+            CODING_DEFAULT_CONFIG_FILENAME,
+        ],
         tried=tried,
     )
     if resolved is not None:
@@ -152,7 +155,10 @@ def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
 
     project_root = _default_project_root()
     resolved = _resolve_in_project_root(
-        [AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME, AUTONOMOUS_DEFAULT_CONFIG_FILENAME],
+        [
+            AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME,
+            CODING_DEFAULT_CONFIG_FILENAME,
+        ],
         tried=tried,
         project_root=project_root,
     )
@@ -165,7 +171,7 @@ def resolve_autonomous_config_path(cli_config_path: str | None) -> Path:
         + tried_str
         + (
             f"\n\n対処: {CONFIG_ENV_VAR} にパスを設定するか、--config を指定するか、"
-            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} を配置してください。"
+            f"カレント/プロジェクトルートに {AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME} または {CODING_DEFAULT_CONFIG_FILENAME} を配置してください。"
         )
     )
 

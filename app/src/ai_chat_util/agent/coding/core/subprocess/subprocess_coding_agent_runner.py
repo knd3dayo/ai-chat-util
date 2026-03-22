@@ -15,7 +15,7 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ai_chat_util_base.model.agent_util_models import TaskStatus, CodingAgentConfig
 from ..utils import ExecutorUtil
 from ..process_utils import popen_new_process_group_kwargs
-from ai_chat_util_base.config.runtime import get_autonomous_runtime_config
+from ai_chat_util_base.config.runtime import get_coding_runtime_config
 
 
 def _split_command_base(command_base: str) -> list[str]:
@@ -69,7 +69,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         extra_env: Optional[dict[str, str]] = None,
     ) -> None:
         self.task_id = task_id or str(uuid.uuid4())
-        self._runtime_cfg = get_autonomous_runtime_config()
+        self._runtime_cfg = get_coding_runtime_config()
         runtime_cfg = self._runtime_cfg
         cfg = CodingAgentConfig(
             workspace_root=runtime_cfg.paths.workspace_root,
@@ -88,7 +88,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         self.command_base = command_base or (process_cmd or subprocess_cmd)
         if not (self.command_base or "").strip():
             raise ValueError(
-                "process.command が未設定です。ai-chat-util-config.yml の autonomous_agent_util.process.command を設定してください。"
+                "process.command が未設定です。ai-chat-util-config.yml の coding_agent_util.process.command を設定してください。"
             )
 
         self.command_requested = _split_command_base(self.command_base) #type: ignore[assignment]
@@ -248,7 +248,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         entrypoint_cmd = [
             python_exe,
             "-m",
-            "ai_chat_util.agent.autonomous.core.subprocess.subprocess_entrypoint",
+            "ai_chat_util.agent.coding.core.subprocess.subprocess_entrypoint",
             "--workspace",
             self.workspace.as_posix(),
             "--exit-code-file",
@@ -320,6 +320,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         override = (
             os.environ.get("AI_CHAT_UTIL_PYTHON_EXECUTABLE")
             or os.environ.get("AI_CHAT_UTIL_PYTHON")
+            or os.environ.get("CODING_AGENT_PYTHON_EXECUTABLE")
             or os.environ.get("AUTONOMOUS_AGENT_PYTHON_EXECUTABLE")
         )
         if override:

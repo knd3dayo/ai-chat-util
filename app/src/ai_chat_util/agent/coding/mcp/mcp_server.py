@@ -12,13 +12,13 @@ from pathlib import Path
 import tempfile
 
 from ai_chat_util_base.config.runtime import (
-	init_autonomous_runtime,
-	get_autonomous_runtime_config,
+	init_coding_runtime,
+	get_coding_runtime_config,
 	apply_logging_overrides,
 )
 from fastmcp import FastMCP, Context
 
-from ..core.abstract_endpoint import AutonomousEndPointBase
+from ..core.abstract_endpoint import CodingEndPointBase
 from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers
 from ..core.endpoint import EndPoint
 
@@ -36,9 +36,9 @@ def _ensure_workspace_root_writable() -> None:
 	and writable in the MCP server's own runtime environment.
 	"""
 	try:
-		cfg = get_autonomous_runtime_config()
+		cfg = get_coding_runtime_config()
 	except Exception as e:
-		raise RuntimeError(f"Failed to load autonomous runtime config: {e}") from e
+		raise RuntimeError(f"Failed to load coding runtime config: {e}") from e
 
 	root_raw = (getattr(getattr(cfg, "paths", None), "workspace_root", None) or "").strip()
 	if not root_raw:
@@ -62,9 +62,9 @@ def _ensure_workspace_root_writable() -> None:
 		raise RuntimeError(f"paths.workspace_root is not writable: {root.as_posix()} ({e})") from e
 
 
-class AutonomousMCPServer:
+class CodingMCPServer:
 	"""
-	Standalone MCP server exposing Autonomous Endpoint tools.
+	Standalone MCP server exposing coding endpoint tools.
 
 	Supports multiple transport modes (stdio, sse, streamable-http) and configurable tool selection.
 	Designed for easy integration with various clients while providing robust logging and error handling.
@@ -103,14 +103,14 @@ class AutonomousMCPServer:
 		return summary
 
 	def parse_args(self) -> argparse.Namespace:
-		parser = argparse.ArgumentParser(description="Run Autonomous Agent Executor MCP server")
+		parser = argparse.ArgumentParser(description="Run Coding Agent Executor MCP server")
 		parser.add_argument(
 			"--config",
 			type=str,
 			default="",
 			help=(
 				"Path to config YAML (ai-chat-util-config.yml). If omitted, resolved by env AI_CHAT_UTIL_CONFIG "
-				"(with root-level autonomous_agent_util section), or searched from CWD/project root."
+				"(with root-level coding_agent_util section), or searched from CWD/project root."
 			),
 		)
 		parser.add_argument(
@@ -164,7 +164,7 @@ class AutonomousMCPServer:
 		return name
 
 
-	def prepare_mcp(self, endpoint: AutonomousEndPointBase, mcp: FastMCP, tools_option: str, sync_mode: bool) -> None:
+	def prepare_mcp(self, endpoint: CodingEndPointBase, mcp: FastMCP, tools_option: str, sync_mode: bool) -> None:
 		def header_aware_tool(mcp_instance: FastMCP, *, tool_name: str):
 			def decorator(func):
 				@wraps(func)
@@ -268,14 +268,14 @@ class AutonomousMCPServer:
 			header_aware_tool(mcp, tool_name=name)(tool_registry[name])
 
 
-	async def main(self, endpoint: AutonomousEndPointBase) -> None:
+	async def main(self, endpoint: CodingEndPointBase) -> None:
 		args = self.parse_args()
-		init_autonomous_runtime(args.config or None)
+		init_coding_runtime(args.config or None)
 		_ensure_workspace_root_writable()
 		if args.log_level:
 			apply_logging_overrides(level=args.log_level)
 
-		mcp = FastMCP("autonomous_agent_executor")
+		mcp = FastMCP("coding_agent_executor")
 		self.prepare_mcp(endpoint, mcp, args.tools, args.sync_mode)
 
 		if args.mode == "stdio":
@@ -292,7 +292,7 @@ class AutonomousMCPServer:
 
 if __name__ == "__main__":
 
-	server = AutonomousMCPServer()
+	server = CodingMCPServer()
 	try:
 		asyncio.run(server.main(EndPoint()))
 	except KeyboardInterrupt:

@@ -93,10 +93,10 @@ ai_chat_util_config:
     # - Or just "soffice" if it's on PATH
     libreoffice_path: null
 
-# --- autonomous-agent-util settings (integrated) ---
-# autonomous-agent-util-config.yml の内容を、このファイルの
-# ルート直下の `autonomous_agent_util:` 配下に統合します。
-autonomous_agent_util:
+# --- coding-agent-util settings (integrated) ---
+# coding-agent-util-config.yml の内容を、このファイルの
+# ルート直下の `coding_agent_util:` 配下に統合します。
+coding_agent_util:
     
   backend:
     # docker | compose | process | windows_process | linux_process
@@ -112,8 +112,8 @@ autonomous_agent_util:
     debug_container: false
 
   paths:
-    workspace_root: /tmp/autonomous_agent_tasks
-    host_projects_root: /tmp/autonomous_agent_projects
+    workspace_root: /tmp/coding_agent_tasks
+    host_projects_root: /tmp/coding_agent_projects
     # executor_allowed_workspace_root: /tmp
     # workspace_path_rewrites:
     #   - from: /srv/ai_platform/workspaces
@@ -140,4 +140,4 @@ autonomous_agent_util:
 
   logging:
     level: INFO
-    # file: /tmp/autonomous-agent-util.log
+    # file: /tmp/coding-agent-util.log

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer
 import os
 import uuid
-from ..config.runtime import get_autonomous_runtime_config
+from ..config.runtime import get_coding_runtime_config
 
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -13,7 +13,7 @@ class CodingAgentConfig(BaseModel):
 
     env_file: ClassVar[str] = ".env"  # デフォルトの環境変数ファイルパス
 
-    workspace_root: str = Field(default="/tmp/autonomous_agent_tasks", description="Root directory for task workspaces")
+    workspace_root: str = Field(default="/tmp/coding_agent_tasks", description="Root directory for task workspaces")
     
     @classmethod
     def set_env_file(cls, env_file: str):
@@ -34,7 +34,7 @@ class ComposeConfig(BaseModel):
 
     @classmethod
     def from_env(cls):
-        cfg = get_autonomous_runtime_config()
+        cfg = get_coding_runtime_config()
         params = {
             "compose_directory": cfg.compose.directory,
             "compose_file": cfg.compose.file,
@@ -71,7 +71,7 @@ class ComposeConfig(BaseModel):
                 paths.append(os.path.join(self.compose_directory, part))
         return paths
 
-class AutonomousAgentRequest(BaseModel):
+class CodingAgentRequest(BaseModel):
     prompt: str = Field(..., examples=["hello.py を修正して"])
     initial_files: Optional[Dict[str, str]] = None # 事前に配置したいファイル
     timeout: int = Field(default=300, ge=1, le=1800)

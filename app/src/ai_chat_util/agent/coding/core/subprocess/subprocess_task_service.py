@@ -17,8 +17,8 @@ from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
 from .windows_process_coding_agent_runner import WindowsProcessCodingAgentRunner
 from .linux_process_coding_agent_runner import LinuxProcessCodingAgentRunner
 from ai_chat_util_base.config.runtime import (
-    get_autonomous_runtime_config,
-    get_autonomous_runtime_config_path,
+    get_coding_runtime_config,
+    get_coding_runtime_config_path,
 )
 
 logger = get_application_logger()
@@ -38,7 +38,7 @@ class SubprocessTaskService(AbstractTaskService):
         workspace_path: Optional[Path] = None,
         extra_env: Optional[dict[str, str]] = None,
     ) -> None:
-        cfg = get_autonomous_runtime_config()
+        cfg = get_coding_runtime_config()
         backend = (cfg.backend.task_backend or "process").strip().lower()
         # `process` auto-selects based on current platform.
         if backend == "process":
@@ -68,7 +68,7 @@ class SubprocessTaskService(AbstractTaskService):
         return self.runner
 
     def spawn_detached_monitor(self, task_id: str, timeout: int) -> None:
-        cfg = get_autonomous_runtime_config()
+        cfg = get_coding_runtime_config()
         if cfg.monitor.disable_detach_monitor:
             return
 
@@ -76,14 +76,14 @@ class SubprocessTaskService(AbstractTaskService):
         interval = float(cfg.monitor.detach_monitor_interval)
 
         env = os.environ.copy()
-        cfg_path = get_autonomous_runtime_config_path()
+        cfg_path = get_coding_runtime_config_path()
         if cfg_path:
             env.setdefault("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 
         cmd = [
             SubprocessCodingAgentRunner.resolve_python_executable(),
             "-m",
-            "ai_chat_util.agent.autonomous._cli_.docker_main",
+            "ai_chat_util.agent.coding._cli_.docker_main",
             "monitor",
             task_id,
             "--interval",

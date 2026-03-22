@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 import time
 
-from ai_chat_util_base.config.runtime import init_autonomous_runtime
+from ai_chat_util_base.config.runtime import init_coding_runtime
 
 # 内部パッケージのインポート
 from ..core.task_manager import TaskManager
@@ -15,7 +15,7 @@ from .typer_actions import TyperActions
 actions = TyperActions()
 docker_task_service = DockerTaskService()
 
-app = typer.Typer(help="Autonomous Agent Executor CLI Tool")
+app = typer.Typer(help="Coding Agent Executor CLI Tool")
 
 
 @app.callback()
@@ -25,12 +25,12 @@ def _global_options(
         "--config",
         help=(
             "Path to config YAML (ai-chat-util-config.yml). If omitted, resolved by env AI_CHAT_UTIL_CONFIG "
-            "(with root-level autonomous_agent_util section), or searched from CWD/project root."
+            "(with root-level coding_agent_util section), or searched from CWD/project root."
         ),
         envvar="AI_CHAT_UTIL_CONFIG",
     ),
 ):
-    init_autonomous_runtime(str(config) if config else None)
+    init_coding_runtime(str(config) if config else None)
 
 @app.command()
 def run(

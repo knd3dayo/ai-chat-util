@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from fastapi.testclient import TestClient
 
-from ai_chat_util.agent.autonomous._api_.api_server import create_app
+from ai_chat_util.agent.coding._api_.api_server import create_app
 from ai_chat_util_base.model.agent_util_models import TaskStatus
 
 
@@ -66,16 +66,16 @@ class _FakeTaskService:
 def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> None:
     # Provide a minimal ai-chat-util-config.yml so config resolution succeeds.
     cfg_path = tmp_path / "ai-chat-util-config.yml"
-    cfg_path.write_text("ai_chat_util_config: {}\nautonomous_agent_util: {}\n", encoding="utf-8")
-    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    cfg_path.write_text("ai_chat_util_config: {}\ncoding_agent_util: {}\n", encoding="utf-8")
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
 
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
     # Patch endpoint dependencies to avoid real backends / filesystem.
-    from ai_chat_util.agent.autonomous.core import endpoint as endpoint_mod
-    from ai_chat_util.agent.autonomous.core import task_manager as tm_mod
+    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.coding.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

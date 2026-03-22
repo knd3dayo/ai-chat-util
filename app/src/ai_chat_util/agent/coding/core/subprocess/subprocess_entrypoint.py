@@ -78,7 +78,7 @@ def _format_cmd_for_text(argv: list[str]) -> str:
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Autonomous agent subprocess entrypoint")
+    parser = argparse.ArgumentParser(description="Coding agent subprocess entrypoint")
     parser.add_argument("--workspace", required=True, help="Workspace directory")
     parser.add_argument("--exit-code-file", required=True, help="Path to write exit code")
     parser.add_argument("--stdout-file", required=True, help="Path to write stdout")

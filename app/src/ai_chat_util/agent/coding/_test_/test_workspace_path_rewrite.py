@@ -9,26 +9,26 @@ from fastapi.testclient import TestClient
 import pytest
 import yaml
 
-from ai_chat_util.agent.autonomous._api_.api_server import create_app
-from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
+from ai_chat_util.agent.coding._api_.api_server import create_app
+from ai_chat_util.agent.coding.core.endpoint import EndPoint
 from ai_chat_util_base.model.agent_util_models import TaskStatus
 from ai_chat_util_base.config import runtime as runtime_mod
 
 endpoint = EndPoint() 
 
 def _reset_runtime(monkeypatch, cfg_path: Path) -> None:
-    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
-    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
-    runtime_mod.init_autonomous_runtime(None)
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_coding_runtime(None)
 
 
 def _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path: Path) -> None:
-    # Integration mode: resolve autonomous settings from ai-chat-util-config.yml.
-    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    # Integration mode: resolve coding settings from ai-chat-util-config.yml.
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
-    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
-    runtime_mod.init_autonomous_runtime(None)
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_coding_runtime(None)
 
 
 def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
@@ -36,7 +36,7 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     data = {
         "ai_chat_util_config": {},
-        "autonomous_agent_util": {
+        "coding_agent_util": {
             "paths": {
                 "workspace_path_rewrites": [
                     {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
@@ -56,11 +56,11 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     assert endpoint.rewrite_workspace_path(raw2) == raw2
 
 
-def test_init_autonomous_runtime_rejects_nested_autonomous_agent_util(tmp_path: Path, monkeypatch) -> None:
+def test_init_coding_runtime_rejects_nested_coding_agent_util(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     data = {
         "ai_chat_util_config": {
-            "autonomous_agent_util": {
+            "coding_agent_util": {
                 "paths": {
                     "workspace_path_rewrites": [
                         {"from": "/srv/ai_platform/workspaces", "to": "/tmp/x"}
@@ -70,25 +70,25 @@ def test_init_autonomous_runtime_rejects_nested_autonomous_agent_util(tmp_path: 
         }
     }
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
-    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
 
     from ai_chat_util_base.config.config_util import ConfigError
 
     with pytest.raises(ConfigError):
-        runtime_mod.init_autonomous_runtime(None)
+        runtime_mod.init_coding_runtime(None)
 
 
-def test_init_autonomous_runtime_propagates_ai_chat_util_config_env_on_cli_config(tmp_path: Path, monkeypatch) -> None:
+def test_init_coding_runtime_propagates_ai_chat_util_config_env_on_cli_config(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
-    cfg_path.write_text("ai_chat_util_config: {}\nautonomous_agent_util: {}\n", encoding="utf-8")
+    cfg_path.write_text("ai_chat_util_config: {}\ncoding_agent_util: {}\n", encoding="utf-8")
 
-    monkeypatch.delenv("AUTONOMOUS_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.delenv("AI_CHAT_UTIL_CONFIG", raising=False)
 
-    runtime_mod._autonomous_runtime_state = None  # type: ignore[attr-defined]
-    runtime_mod.init_autonomous_runtime(str(cfg_path))
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
+    runtime_mod.init_coding_runtime(str(cfg_path))
 
     assert os.getenv("AI_CHAT_UTIL_CONFIG") == str(cfg_path)
 
@@ -149,7 +149,7 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     to_prefix = (tmp_path / "executor_workspaces").as_posix()
     data = {
         "ai_chat_util_config": {},
-        "autonomous_agent_util": {
+        "coding_agent_util": {
             "paths": {
                 "workspace_path_rewrites": [
                     {"from": "/srv/ai_platform/workspaces", "to": to_prefix}
@@ -163,8 +163,8 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from ai_chat_util.agent.autonomous.core import endpoint as endpoint_mod
-    from ai_chat_util.agent.autonomous.core import task_manager as tm_mod
+    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.coding.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

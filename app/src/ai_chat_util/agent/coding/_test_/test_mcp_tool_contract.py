@@ -5,9 +5,9 @@ import asyncio
 import pytest
 from fastmcp import FastMCP
 
-from ai_chat_util.agent.autonomous.mcp.mcp_server import AutonomousMCPServer
-from ai_chat_util.agent.autonomous.core.endpoint import EndPoint
-an_server = AutonomousMCPServer()
+from ai_chat_util.agent.coding.mcp.mcp_server import CodingMCPServer
+from ai_chat_util.agent.coding.core.endpoint import EndPoint
+an_server = CodingMCPServer()
 endpoint = EndPoint()
 def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
     async def _run() -> None:

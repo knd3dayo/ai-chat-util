@@ -4,12 +4,13 @@ setlocal
 chcp 65001 >nul
 pushd "%~dp0" || exit /b 1
 
+set "UV_PROJECT_DIR=%~dp0..\..\..\app"
 set "AI_CHAT_UTIL_CONFIG=%~dp0ai-chat-util-config.yml"
 
 set "input_file=%~1"
 if "%input_file%"=="" set "input_file=..\..\..\work\test\data\test.pdf"
 
-uv run -m ai_chat_util.cli --config "%AI_CHAT_UTIL_CONFIG%" analyze_pdf_files -i "%input_file%" -p "分析して"
+uv --directory "%UV_PROJECT_DIR%" run -m ai_chat_util.cli --config "%AI_CHAT_UTIL_CONFIG%" analyze_pdf_files -i "%input_file%" -p "分析して"
 
 set "RET=%ERRORLEVEL%"
 popd

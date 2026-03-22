@@ -14,7 +14,7 @@ from ..process_utils import get_host_uid_gid
 
 from ..utils import ExecutorUtil
 
-from ai_chat_util_base.config.runtime import get_autonomous_runtime_config
+from ai_chat_util_base.config.runtime import get_coding_runtime_config
 
 from ...util.logging import get_application_logger
 
@@ -101,7 +101,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         # WORKSPACE、USER_ID、GROUP_IDを設定
         # DoOD（docker.sock）利用時は、バンドルコンテナ内の UID/GID とホスト側の所有者が
         # 一致しないことがあるため、環境変数で上書きできるようにする。
-        runtime_cfg = get_autonomous_runtime_config()
+        runtime_cfg = get_coding_runtime_config()
         uid, gid = get_host_uid_gid(
             default_uid=(runtime_cfg.host.uid if runtime_cfg.host.uid is not None else 1000),
             default_gid=(runtime_cfg.host.gid if runtime_cfg.host.gid is not None else 1000),
@@ -177,7 +177,7 @@ class CodingAgentRunner(AbstractAgentRunner):
         インスタンス生成からコンテナ起動までを一括で行うエントリーポイント
         """
         # 1. Runnerの準備（非秘匿は ai-chat-util-config.yml から取得）
-        runtime_cfg = get_autonomous_runtime_config()
+        runtime_cfg = get_coding_runtime_config()
         compose_config = ComposeConfig(
             compose_directory=runtime_cfg.compose.directory,
             compose_file=runtime_cfg.compose.file,

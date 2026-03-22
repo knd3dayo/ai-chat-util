@@ -18,7 +18,7 @@ ai_chat_util_config:
   mcp:
     mcp_config_path: "mcp.json"
 
-autonomous_agent_util:
+coding_agent_util:
     
   backend:
     # docker | compose | process | windows_process | linux_process
@@ -65,4 +65,4 @@ autonomous_agent_util:
 
   logging:
     level: INFO
-    # file: /tmp/autonomous-agent-util.log
+    # file: /tmp/coding-agent-util.log

@@ -22,7 +22,7 @@ ai_chat_util_config:
       # MCPサーバー名（mcp_config_path で指定されたJSONのキーと一致させる必要があります）
       mcp_server_name: coding-agent
 
-autonomous_agent_util:
+coding_agent_util:
   backend:
     task_backend: process
 
@@ -32,8 +32,8 @@ autonomous_agent_util:
     debug_container: false
 
   paths:
-    workspace_root: /tmp/autonomous_agent_tasks
-    host_projects_root: /tmp/autonomous_agent_projects
+    workspace_root: /tmp/coding_agent_tasks
+    host_projects_root: /tmp/coding_agent_projects
 
   process:
     command: opencode --print-logs --log-level DEBUG run

@@ -13,7 +13,7 @@ from ai_chat_util_base.config.runtime import (
 )
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
 from .abstract_llm_client import AbstractLLMClient
-from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, AutonomousAgentUtilConfig
+from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts, PromptsBase
 

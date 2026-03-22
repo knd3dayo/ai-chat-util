@@ -10,13 +10,13 @@ from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
 
 from .config_util import (
     CONFIG_ENV_VAR,
-    ConfigError, load_resolved_yaml, resolve_config_path, resolve_autonomous_config_path, 
-    resolve_env_ref,extract_required_root_section, extract_optional_ai_section_dict, 
+    CODING_AGENT_UTIL_CONFIG_ROOT_KEY,
+    CODING_DEFAULT_CONFIG_FILENAME,
+    ConfigError, load_resolved_yaml, resolve_config_path, resolve_coding_config_path,
+    resolve_env_ref,extract_required_root_section, extract_optional_ai_section_dict,
     apply_secret_overrides_from_yaml,
     AI_CHAT_UTIL_CONFIG_ROOT_KEY,
-    AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY,
     AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME,
-    AUTONOMOUS_DEFAULT_CONFIG_FILENAME,
     _ENV_REF_PREFIX
     
 )
@@ -24,11 +24,11 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 # =====================
-# Autonomous Agent Util Runtime (embedded)
+# Coding Agent Util Runtime (embedded)
 # =====================
 
 _runtime_state: _RuntimeState | None = None
-_autonomous_runtime_state: _AutonomousRuntimeState | None = None
+_coding_runtime_state: _CodingRuntimeState | None = None
 
 
 def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
@@ -43,17 +43,17 @@ def init_runtime(config_path: str | None = None) -> AiChatUtilConfig:
     return config
 
 
-def init_autonomous_runtime(config_path: str | None = None) -> AutonomousAgentUtilConfig:
-    global _autonomous_runtime_state
+def init_coding_runtime(config_path: str | None = None) -> CodingAgentUtilConfig:
+    global _coding_runtime_state
 
-    resolved, raw_root = load_resolved_yaml(config_path, resolver=resolve_autonomous_config_path)
-    config = _build_autonomous_agent_util_config(raw_root=raw_root, resolved=resolved)
+    resolved, raw_root = load_resolved_yaml(config_path, resolver=resolve_coding_config_path)
+    config = _build_coding_agent_util_config(raw_root=raw_root, resolved=resolved)
 
     # Use model_construct() to avoid re-validating `config`.
     # At this point, env-ref secrets (e.g., llm.api_key) may already be resolved
     # into literal values, and re-validation would incorrectly re-trigger the
     # secret-policy validator.
-    _autonomous_runtime_state = _AutonomousRuntimeState.model_construct(config_path=resolved, config=config)
+    _coding_runtime_state = _CodingRuntimeState.model_construct(config_path=resolved, config=config)
     _configure_python_logging(config)
     return config
 
@@ -81,16 +81,17 @@ def get_runtime_config() -> AiChatUtilConfig:
         return init_runtime(None)
     return _runtime_state.config
 
-def get_autonomous_runtime_config() -> AutonomousAgentUtilConfig:
-    if _autonomous_runtime_state is None:
-        return init_autonomous_runtime(None)
-    return _autonomous_runtime_state.config
+def get_coding_runtime_config() -> CodingAgentUtilConfig:
+    if _coding_runtime_state is None:
+        return init_coding_runtime(None)
+    return _coding_runtime_state.config
 
-def get_autonomous_runtime_config_path() -> Path:
-    if _autonomous_runtime_state is None:
-        init_autonomous_runtime(None)
-    assert _autonomous_runtime_state is not None
-    return _autonomous_runtime_state.config_path
+
+def get_coding_runtime_config_path() -> Path:
+    if _coding_runtime_state is None:
+        init_coding_runtime(None)
+    assert _coding_runtime_state is not None
+    return _coding_runtime_state.config_path
 
 
 def get_runtime_config_path() -> Path:
@@ -129,7 +130,7 @@ def _build_redacting_formatter(fmt: str):
     return _RedactingFormatter(fmt)
 
 
-def _configure_python_logging(config: AiChatUtilConfig | AutonomousAgentUtilConfig) -> None:
+def _configure_python_logging(config: AiChatUtilConfig | CodingAgentUtilConfig) -> None:
     # Keep this lightweight but deterministic: CLI/test runs often reconfigure logging.
     # We reset handlers to avoid duplicated output and to enforce UTF-8 file encoding.
     import logging
@@ -236,38 +237,41 @@ def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> A
         raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
 
 
-def _build_autonomous_agent_util_config(
+def _build_coding_agent_util_config(
     *, raw_root: dict[str, Any], resolved: Path
-) -> AutonomousAgentUtilConfig:
+) -> CodingAgentUtilConfig:
     raw: dict[str, Any]
 
     ai_section_dict = extract_optional_ai_section_dict(raw_root=raw_root, resolved=resolved)
 
-    # New integrated format:
+    # Integrated format:
     # - ai-chat-util-config.yml root contains ONLY:
     #     - ai_chat_util_config: ...
-    #     - autonomous_agent_util: ...
-    # - Backward compatibility for nested ai_chat_util_config.autonomous_agent_util is intentionally NOT supported.
-    nested_embedded = (
-        ai_section_dict.get("autonomous_agent_util", "__missing__")
-        if ai_section_dict is not None
-        else "__missing__"
+    #     - coding_agent_util: ...
+    nested_embedded_key = next(
+        (
+            key for key in ("coding_agent_util",)
+            if ai_section_dict is not None and ai_section_dict.get(key, "__missing__") != "__missing__"
+        ),
+        None,
     )
-    if nested_embedded != "__missing__":
+    if nested_embedded_key is not None:
         raise ConfigError(
             "設定ファイルの形式が不正です: "
             f"{resolved}\n"
-            "統合設定の autonomous-agent-util は 'ai_chat_util_config.autonomous_agent_util' ではなく、"
-            "ルート直下の 'autonomous_agent_util:' に記述してください。"
+            "統合設定の coding-agent-util は 'ai_chat_util_config.coding_agent_util' ではなく、"
+            "ルート直下の 'coding_agent_util:' に記述してください。"
         )
 
-    root_embedded = raw_root.get("autonomous_agent_util", "__missing__") if isinstance(raw_root, dict) else "__missing__"
+    root_embedded = "__missing__"
+    if isinstance(raw_root, dict):
+        root_embedded = raw_root.get("coding_agent_util", "__missing__")
     if root_embedded != "__missing__":
         if root_embedded is None:
             root_embedded = {}
         if not isinstance(root_embedded, dict):
             raise ConfigError(
-                f"autonomous_agent_util は mapping(dict) である必要があります: {resolved} (autonomous_agent_util)"
+                f"coding_agent_util は mapping(dict) である必要があります: {resolved} (coding_agent_util)"
             )
 
         inherited = dict(root_embedded)
@@ -282,11 +286,11 @@ def _build_autonomous_agent_util_config(
                 inherited["llm"] = inherited_llm
         raw = inherited
     else:
-        # Standalone autonomous-agent-util-config.yml must use the new root key.
+        # Standalone coding-agent-util-config.yml uses the new root key.
         if not isinstance(raw_root, dict):
             raise ConfigError(f"設定ファイルのルートは mapping(dict) である必要があります: {resolved}")
 
-        standalone_section = raw_root.get(AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY, "__missing__")
+        standalone_section = raw_root.get(CODING_AGENT_UTIL_CONFIG_ROOT_KEY, "__missing__")
         if standalone_section == "__missing__":
             # If it looks like an ai-chat-util config (or integrated config), give a clear hint.
             llm = raw_root.get("llm")
@@ -296,23 +300,23 @@ def _build_autonomous_agent_util_config(
             path_looks_ai = resolved.name == AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME
             if llm_looks_ai or root_looks_ai or path_looks_ai or ai_section_present:
                 raise ConfigError(
-                    "ai-chat-util-config.yml 形式の設定が指定されましたが、autonomous-agent-util 用の設定が見つかりません。\n"
-                    f"対処: {resolved} の ルート直下に 'autonomous_agent_util:' セクションを追加するか、{AUTONOMOUS_DEFAULT_CONFIG_FILENAME} を指定してください。"
+                    "ai-chat-util-config.yml 形式の設定が指定されましたが、coding-agent-util 用の設定が見つかりません。\n"
+                    f"対処: {resolved} の ルート直下に 'coding_agent_util:' セクションを追加するか、{CODING_DEFAULT_CONFIG_FILENAME} を指定してください。"
                 )
 
             # Otherwise, treat as old autonomous format and fail fast with migration instructions.
             raise ConfigError(
                 f"設定ファイルの形式が不正です: {resolved}\n"
-                f"ルートに '{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
+                f"ルートに '{CODING_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
                 "旧フォーマット（ルート直下に llm/compose/backend...）はサポートされません。\n"
-                "対処: 既存の llm/compose/backend... を autonomous_agent_util_config: 配下へ 1段インデントして移動してください。"
+                "対処: 既存の llm/compose/backend... を coding_agent_util_config: 配下へ 1段インデントして移動してください。"
             )
 
         if standalone_section is None:
             standalone_section = {}
         if not isinstance(standalone_section, dict):
             raise ConfigError(
-                f"{AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({AUTONOMOUS_AGENT_UTIL_CONFIG_ROOT_KEY})"
+                f"{CODING_AGENT_UTIL_CONFIG_ROOT_KEY} は mapping(dict) である必要があります: {resolved} ({CODING_AGENT_UTIL_CONFIG_ROOT_KEY})"
             )
 
         raw = dict(standalone_section)
@@ -333,15 +337,16 @@ def _build_autonomous_agent_util_config(
             raw[section_key] = {}
 
     try:
-        config = AutonomousAgentUtilConfig.model_validate(raw)
+        config = CodingAgentUtilConfig.model_validate(raw)
     except Exception as e:
         raise ConfigError(f"設定ファイルの検証に失敗しました: {resolved}\n{e}") from e
 
-    _resolve_autonomous_llm_api_key_in_place(config, config_path=resolved)
+    _resolve_coding_llm_api_key_in_place(config, config_path=resolved)
     return config
 
-def _resolve_autonomous_llm_api_key_in_place(
-    config: AutonomousAgentUtilConfig, *, config_path: Path
+
+def _resolve_coding_llm_api_key_in_place(
+    config: CodingAgentUtilConfig, *, config_path: Path
 ) -> None:
     api_key_value = config.llm.api_key
     if not api_key_value:
@@ -664,7 +669,7 @@ class WorkspacePathRewriteRule(BaseModel):
 
 
 class AutonomousPathsSection(BaseModel):
-    workspace_root: str = Field(default="/tmp/autonomous_agent_tasks")
+    workspace_root: str = Field(default="/tmp/coding_agent_tasks")
     host_projects_root: str = Field(default="/home/user/ai-platform/data/projects")
     executor_allowed_workspace_root: str | None = Field(default=None)
     workspace_path_rewrites: list[WorkspacePathRewriteRule] = Field(default_factory=list)
@@ -824,7 +829,7 @@ class AiChatUtilConfig(BaseModel):
         return config
 
 
-class AutonomousAgentUtilConfig(BaseModel):
+class CodingAgentUtilConfig(BaseModel):
     endpoint: AutonomousEndpointSection = Field(default_factory=AutonomousEndpointSection)
     llm: AutonomousAgentUtilLLMSection = Field(default_factory=AutonomousAgentUtilLLMSection)
     compose: AutonomousComposeSection = Field(default_factory=AutonomousComposeSection)
@@ -839,7 +844,7 @@ class AutonomousAgentUtilConfig(BaseModel):
     logging: AutonomousAgentUtilLoggingSection = Field(default_factory=AutonomousAgentUtilLoggingSection)
 
     @model_validator(mode="after")
-    def _coalesce_process_subprocess(self) -> "AutonomousAgentUtilConfig":
+    def _coalesce_process_subprocess(self) -> "CodingAgentUtilConfig":
         fields = set(getattr(self, "model_fields_set", set()) or set())
         has_process = "process" in fields
         has_subprocess = "subprocess" in fields
@@ -876,9 +881,9 @@ class AutonomousAgentUtilConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_required_commands(self) -> "AutonomousAgentUtilConfig":
+    def _validate_required_commands(self) -> "CodingAgentUtilConfig":
         # NOTE:
-        # This project may load autonomous_agent_util config for features that do not
+        # This project may load coding_agent_util config for features that do not
         # execute tasks (e.g., workspace path rewrites). Requiring commands at load
         # time would break those scenarios. We therefore validate required commands
         # only when the user explicitly configures the relevant sections.
@@ -901,8 +906,8 @@ class AutonomousAgentUtilConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_llm_secret_policy(self) -> "AutonomousAgentUtilConfig":
-        # Allow only env references at validation time; init_autonomous_runtime resolves it later.
+    def _validate_llm_secret_policy(self) -> "CodingAgentUtilConfig":
+        # Allow only env references at validation time; init_coding_runtime resolves it later.
         if self.llm.api_key and self.llm.api_key.startswith(_ENV_REF_PREFIX):
             return self
         if self.llm.api_key:
@@ -931,16 +936,18 @@ class AutonomousAgentUtilConfig(BaseModel):
 
 class AppConfigSection(BaseModel):
     ai_chat_util_config: AiChatUtilConfig = Field(default_factory=AiChatUtilConfig)
-    agent_util_config: AutonomousAgentUtilConfig = Field(default_factory=AutonomousAgentUtilConfig)
+    agent_util_config: CodingAgentUtilConfig = Field(default_factory=CodingAgentUtilConfig)
 
-class _AutonomousRuntimeState(BaseModel):
+class _CodingRuntimeState(BaseModel):
     # NOTE:
-    # init_autonomous_runtime() resolves env-ref secrets (e.g., llm.api_key) into
+    # init_coding_runtime() resolves env-ref secrets (e.g., llm.api_key) into
     # literal values after validation. When storing the already-validated config
     # inside this state model, Pydantic may revalidate nested instances, which
     # would re-trigger the secret-policy validator and fail.
     model_config = ConfigDict(revalidate_instances="never")
 
     config_path: Path
-    config: AutonomousAgentUtilConfig
+    config: CodingAgentUtilConfig
+
+
 

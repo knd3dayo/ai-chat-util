@@ -16,14 +16,14 @@ from ai_chat_util_base.model.agent_util_models import (
 )
 
 from ai_chat_util_base.model.request_headers import RequestHeaders, get_current_request_headers
-from ai_chat_util_base.config.runtime import get_autonomous_runtime_config
-from ai_chat_util.agent.autonomous.core.abstract_endpoint import AutonomousEndPointBase
+from ai_chat_util_base.config.runtime import get_coding_runtime_config
+from .abstract_endpoint import CodingEndPointBase
 
 from ..util.logging import get_application_logger
 
 logger = get_application_logger()
 
-class EndPoint(AutonomousEndPointBase):
+class EndPoint(CodingEndPointBase):
 
     
     def rewrite_workspace_path(self, workspace_path: str) -> str:
@@ -34,7 +34,7 @@ class EndPoint(AutonomousEndPointBase):
         different absolute paths.
         """
         try:
-            rules = get_autonomous_runtime_config().paths.workspace_path_rewrites
+            rules = get_coding_runtime_config().paths.workspace_path_rewrites
         except Exception:
             return workspace_path
 
@@ -68,7 +68,7 @@ class EndPoint(AutonomousEndPointBase):
         if not p.is_absolute():
             raise HTTPException(status_code=400, detail="workspace_path must be an absolute path")
 
-        cfg = get_autonomous_runtime_config()
+        cfg = get_coding_runtime_config()
 
         # Security / safety guard: restrict workspace_path under an allowed root.
         #

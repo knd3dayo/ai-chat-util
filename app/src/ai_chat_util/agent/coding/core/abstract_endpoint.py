@@ -12,7 +12,9 @@ from ai_chat_util_base.model.agent_util_models import (
     TaskStatus,
     CancelResponse,
 )
-class AutonomousEndPointBase(ABC):
+
+
+class CodingEndPointBase(ABC):
 
     @abstractmethod
     def rewrite_workspace_path(self, workspace_path: str) -> str:

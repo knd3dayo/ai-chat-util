@@ -15,6 +15,8 @@ Commands:
   down      Stop and remove containers (docker compose down)
   stop      Stop container (docker compose stop)
   restart   Restart container (docker compose restart)
+  status    Show compose status and recent logs
+  clean     Stop containers and remove orphans
   logs      Show logs (docker compose logs)
   bash      Open bash in the running container (docker compose exec)
 
@@ -239,6 +241,14 @@ case "$subcommand" in
     ;;
   restart)
     compose_cmd restart "$service_name"
+    ;;
+  status)
+    compose_cmd ps
+    printf '\n--- recent logs ---\n'
+    compose_cmd logs --tail=40 "$service_name"
+    ;;
+  clean)
+    compose_cmd down --remove-orphans
     ;;
   logs)
     compose_cmd logs "$@" "$service_name"

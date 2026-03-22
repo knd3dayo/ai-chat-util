@@ -11,6 +11,7 @@ services:
       # PoC固定: hostと同一絶対パスでミラーリングする
       - WORKSPACE_ROOT=/srv/ai_platform/workspaces
       - EXECUTOR_ALLOWED_WORKSPACE_ROOT=/srv/ai_platform/workspaces
+      - LLM_API_KEY=${LLM_API_KEY:?LLM_API_KEY is required}
       # 実行テンプレートはバンドル内に同梱（docker.sock 越しの backend 起動に使用）
       - AI_CHAT_UTIL_CONFIG=/opt/ai-chat-util/dood/ai-chat-util-config.yml
       - COMPOSE_DIRECTORY=/opt/ai-chat-util/dood
@@ -20,6 +21,8 @@ services:
       # 例: HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d
       - HOST_UID=${HOST_UID:-}
       - HOST_GID=${HOST_GID:-}
+    env_file:
+      - ./env_compose
     volumes:
       # DoOD: host docker daemon access
       - /var/run/docker.sock:/var/run/docker.sock

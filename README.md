@@ -32,6 +32,7 @@
 ### 🤖 コーディングエージェント実行（coding-agent-util）
 - コーディングエージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
 - 設定は `ai-chat-util-config.yml`（`coding_agent_util:` セクションで統合）、秘密情報は `.env` / 環境変数で管理。
+- Docker 実行例は [docker/coding-agent/images/all-in-one-image/README.md](docker/coding-agent/images/all-in-one-image/README.md) と [docker/coding-agent/images/dood/README.md](docker/coding-agent/images/dood/README.md) を参照。
 
 ---
 
@@ -563,6 +564,11 @@ uvicorn ai_chat_util.api.api_server:app
 - **CLI**（Typer）: タスクの起動・一覧・状態確認・キャンセル
 
 本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（ルート直下の `coding_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
+
+Docker 系の実行パターンは 2 系統あります。
+
+- [docker/coding-agent/images/all-in-one-image/README.md](docker/coding-agent/images/all-in-one-image/README.md): MCP と backend を同じ all-in-one コンテナ内で扱う構成
+- [docker/coding-agent/images/dood/README.md](docker/coding-agent/images/dood/README.md): MCP は bundle コンテナ、backend は docker.sock 経由で host daemon に起動する DooD 構成
 
 ---
 

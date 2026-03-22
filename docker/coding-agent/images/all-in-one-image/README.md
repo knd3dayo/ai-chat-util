@@ -70,6 +70,12 @@ cd docker/coding-agent/images/all-in-one-image
 ./run-mcp-server.sh logs -f
 ```
 
+状態確認:
+
+```sh
+./run-mcp-server.sh status
+```
+
 bash ログイン:
 
 ```sh
@@ -80,6 +86,12 @@ bash ログイン:
 
 ```sh
 ./run-mcp-server.sh down
+```
+
+停止 + orphan cleanup:
+
+```sh
+./run-mcp-server.sh clean
 ```
 
 ## ディレクトリ構成

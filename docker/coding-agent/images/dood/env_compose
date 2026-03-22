@@ -1,5 +1,4 @@
 LLM_PROVIDER=openai
-LLM_API_KEY=sk-poc-master-key-12345
 LLM_BASE_URL_IN_CONTAINER=http://litellm:4000
 LLM_MODEL=gpt-4o
 

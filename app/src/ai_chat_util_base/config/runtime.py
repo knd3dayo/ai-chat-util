@@ -588,12 +588,12 @@ class _RuntimeState(BaseModel):
 
 
 
-class AutonomousAgentUtilLoggingSection(BaseModel):
+class CodingAgentUtilLoggingSection(BaseModel):
     level: str = Field(default="INFO")
     file: str | None = Field(default=None)
 
 
-class AutonomousAgentUtilLLMSection(BaseModel):
+class CodingAgentUtilLLMSection(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="gpt-4o")
 
@@ -610,14 +610,14 @@ class AutonomousAgentUtilLLMSection(BaseModel):
     base_model: str | None = Field(default=None)
 
 
-class AutonomousComposeSection(BaseModel):
+class CodingComposeSection(BaseModel):
     directory: str = Field(default=".")
     file: str = Field(default="docker-compose.yml")
     service_name: str = Field(default="executor-service")
     command: str = Field(default="")
 
 
-class AutonomousBackendSection(BaseModel):
+class CodingBackendSection(BaseModel):
     # NOTE:
     # - `process` is the only local execution backend name.
     # - `subprocess` is deprecated but accepted for backward compatibility and
@@ -625,7 +625,7 @@ class AutonomousBackendSection(BaseModel):
     task_backend: str = Field(default="process")
 
     @model_validator(mode="after")
-    def _normalize_task_backend(self) -> "AutonomousBackendSection":
+    def _normalize_task_backend(self) -> "CodingBackendSection":
         b = (self.task_backend or "process").strip().lower()
         if b == "subprocess":
             b = "process"
@@ -641,7 +641,7 @@ class AutonomousBackendSection(BaseModel):
         return self
 
 
-class AutonomousMonitorSection(BaseModel):
+class CodingMonitorSection(BaseModel):
     disable_detach_monitor: bool = Field(default=False)
     detach_monitor_interval: float = Field(default=2.0, ge=0.1)
     debug_container: bool = Field(default=False)
@@ -668,19 +668,19 @@ class WorkspacePathRewriteRule(BaseModel):
         return self
 
 
-class AutonomousPathsSection(BaseModel):
+class CodingPathsSection(BaseModel):
     workspace_root: str = Field(default="/tmp/coding_agent_tasks")
     host_projects_root: str = Field(default="/home/user/ai-platform/data/projects")
     executor_allowed_workspace_root: str | None = Field(default=None)
     workspace_path_rewrites: list[WorkspacePathRewriteRule] = Field(default_factory=list)
 
 
-class AutonomousHostSection(BaseModel):
+class CodingHostSection(BaseModel):
     uid: int | None = Field(default=None)
     gid: int | None = Field(default=None)
 
 
-class AutonomousEndpointSection(BaseModel):
+class CodingEndpointSection(BaseModel):
     """Endpoint-related settings for future MCP-aware routing.
 
     NOTE: Currently not used by the executor runtime. This section exists to
@@ -691,7 +691,7 @@ class AutonomousEndpointSection(BaseModel):
     mcp_server_name: str = Field(default="coding-agent")
 
     @model_validator(mode="after")
-    def _validate_mcp_server_name(self) -> "AutonomousEndpointSection":
+    def _validate_mcp_server_name(self) -> "CodingEndpointSection":
         name = self.mcp_server_name
         if not (isinstance(name, str) and name.strip()):
             raise ValueError("endpoint.mcp_server_name must be a non-empty string")
@@ -699,12 +699,12 @@ class AutonomousEndpointSection(BaseModel):
         return self
 
 
-class AutonomousSubprocessSection(BaseModel):
+class CodingSubprocessSection(BaseModel):
     # Deprecated alias section; keep for backward compatibility.
     command: str = Field(default="")
 
 
-class AutonomousProcessSection(BaseModel):
+class CodingProcessSection(BaseModel):
     command: str = Field(default="")
 
 
@@ -830,18 +830,18 @@ class AiChatUtilConfig(BaseModel):
 
 
 class CodingAgentUtilConfig(BaseModel):
-    endpoint: AutonomousEndpointSection = Field(default_factory=AutonomousEndpointSection)
-    llm: AutonomousAgentUtilLLMSection = Field(default_factory=AutonomousAgentUtilLLMSection)
-    compose: AutonomousComposeSection = Field(default_factory=AutonomousComposeSection)
-    backend: AutonomousBackendSection = Field(default_factory=AutonomousBackendSection)
-    monitor: AutonomousMonitorSection = Field(default_factory=AutonomousMonitorSection)
-    paths: AutonomousPathsSection = Field(default_factory=AutonomousPathsSection)
-    host: AutonomousHostSection = Field(default_factory=AutonomousHostSection)
+    endpoint: CodingEndpointSection = Field(default_factory=CodingEndpointSection)
+    llm: CodingAgentUtilLLMSection = Field(default_factory=CodingAgentUtilLLMSection)
+    compose: CodingComposeSection = Field(default_factory=CodingComposeSection)
+    backend: CodingBackendSection = Field(default_factory=CodingBackendSection)
+    monitor: CodingMonitorSection = Field(default_factory=CodingMonitorSection)
+    paths: CodingPathsSection = Field(default_factory=CodingPathsSection)
+    host: CodingHostSection = Field(default_factory=CodingHostSection)
     # Preferred config section name.
-    process: AutonomousProcessSection = Field(default_factory=AutonomousProcessSection)
+    process: CodingProcessSection = Field(default_factory=CodingProcessSection)
     # Backward compatible alias (deprecated): `subprocess.command`.
-    subprocess: AutonomousSubprocessSection = Field(default_factory=AutonomousSubprocessSection)
-    logging: AutonomousAgentUtilLoggingSection = Field(default_factory=AutonomousAgentUtilLoggingSection)
+    subprocess: CodingSubprocessSection = Field(default_factory=CodingSubprocessSection)
+    logging: CodingAgentUtilLoggingSection = Field(default_factory=CodingAgentUtilLoggingSection)
 
     @model_validator(mode="after")
     def _coalesce_process_subprocess(self) -> "CodingAgentUtilConfig":

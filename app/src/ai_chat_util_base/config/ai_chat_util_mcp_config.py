@@ -2,7 +2,7 @@ import json
 import os
 from typing import Dict, Optional, List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 try:
     # Pydantic v2
@@ -14,6 +14,8 @@ from langchain_mcp_adapters.sessions import Connection
 
 # サーバー設定のモデル定義
 class MCPServerConfigEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     # langchain-mcp-adapters は `transport` を要求する。
     # 既存設定との互換のため、入力では `type` も受け付ける。
     if AliasChoices is not None:
@@ -33,9 +35,6 @@ class MCPServerConfigEntry(BaseModel):
     headers: Optional[Dict[str, str]] = Field(default_factory=dict)
     # 許可するツール名のリスト (Noneなら全許可)
     allowed_tools: Optional[List[str]] = Field(default=None, alias="allowedTools")
-
-    class Config:
-        populate_by_name = True
 
 class MCPServerConfig:
     def __init__(self):

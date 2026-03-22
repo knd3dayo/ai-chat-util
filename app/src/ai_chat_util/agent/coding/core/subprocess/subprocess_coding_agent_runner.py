@@ -321,7 +321,6 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
             os.environ.get("AI_CHAT_UTIL_PYTHON_EXECUTABLE")
             or os.environ.get("AI_CHAT_UTIL_PYTHON")
             or os.environ.get("CODING_AGENT_PYTHON_EXECUTABLE")
-            or os.environ.get("AUTONOMOUS_AGENT_PYTHON_EXECUTABLE")
         )
         if override:
             try:

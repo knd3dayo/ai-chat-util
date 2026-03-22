@@ -556,7 +556,7 @@ uvicorn ai_chat_util.api.api_server:app
 
 本プロジェクト（ai-chat-util）には、`src/ai_chat_util/agent/coding/` 配下に **coding-agent-util（コーディングエージェント実行ユーティリティ）** が統合されています。
 
-ローカルまたは Docker 上で「自律エージェント実行タスク」を起動し、進捗確認（status）やキャンセル（cancel）を行うためのユーティリティです。
+ローカルまたは Docker 上で「コーディングエージェント実行タスク」を起動し、進捗確認（status）やキャンセル（cancel）を行うためのユーティリティです。
 
 - **HTTP API**（FastAPI）: `/execute` でタスク起動、`/status/{task_id}` でログ/結果取得
 - **MCP サーバ**（fastmcp）: `execute/status/cancel/healthz` 等のツールを提供

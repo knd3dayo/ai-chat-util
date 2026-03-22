@@ -1,14 +1,14 @@
-"""Test FastMCP client for the autonomous executor MCP server.
+"""Test FastMCP client for the coding executor MCP server.
 
 This module is intended for manual / integration testing.
 
 Server (streamable-http) example:
 
-	uv run -m ai_platform_samplelib.application.autonomous.mcp.mcp_server --mode http --host 127.0.0.1 -p 7101
+	uv run -m ai_chat_util.agent.coding.mcp.mcp_server --mode http --host 127.0.0.1 -p 7101
 
 Client example:
 
-	uv run -m ai_platform_samplelib.application.autonomous._test_.mcp_client \
+	uv run -m ai_chat_util.agent.coding._test_.mcp_client \
 	  --url http://127.0.0.1:7101/mcp \
 	  --workspace-path /tmp/ai_platform_ws_mcp_client_1 \
 	  --prompt "sleep 1; echo hello > hello.txt" \
@@ -85,7 +85,7 @@ class McpClientConfig:
 	headers: dict[str, str]
 
 
-class AutonomousExecutorTestMcpClient:
+class CodingExecutorTestMcpClient:
 	def __init__(self, *, url: str, headers: Optional[dict[str, str]] = None) -> None:
 		url = (url or "").strip()
 		if not url:
@@ -157,7 +157,7 @@ class AutonomousExecutorTestMcpClient:
 
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
-	p = argparse.ArgumentParser(description="Test FastMCP client for autonomous executor")
+	p = argparse.ArgumentParser(description="Test FastMCP client for coding executor")
 	p.add_argument(
 		"--url",
 		type=str,
@@ -224,7 +224,7 @@ def _is_running(status: Any) -> bool:
 async def _run() -> int:
 	args = _parse_args()
 	headers = _parse_headers(args.header)
-	client = AutonomousExecutorTestMcpClient(url=args.url, headers=headers)
+	client = CodingExecutorTestMcpClient(url=args.url, headers=headers)
 
 	if args.list_tools:
 		tools = await client.list_tools()

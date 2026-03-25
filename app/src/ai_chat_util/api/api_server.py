@@ -4,13 +4,16 @@ from ai_chat_util_base.config.runtime import init_runtime
 from ai_chat_util.base.core.resource_app import (
     use_custom_pdf_analyzer,
     get_completion_model,
+    get_loaded_config_info,
     create_user_message,
     create_system_message,
     create_assistant_message,
     create_text_content,
+    create_pdf_content,
     create_pdf_content_from_file,
     create_image_content,
     create_image_content_from_file,
+    create_office_content,
     create_office_content_from_file,
     create_multi_format_contents_from_file,
 )
@@ -28,6 +31,8 @@ from ai_chat_util.base.core.tool_app import (
     analyze_pdf_files,
     analyze_office_files,
     analyze_files,
+    convert_office_files_to_pdf,
+    convert_pdf_files_to_images,
     analyze_documents_data,
     analyze_image_urls,
     analyze_pdf_urls,
@@ -71,6 +76,26 @@ router.add_api_route(path="/analyze_office_urls", endpoint=analyze_office_urls, 
 
 # 複数の形式のドキュメントの分析を行う URLから形式のドキュメントをダウンロードして分析する
 router.add_api_route(path="/analyze_urls", endpoint=analyze_urls, methods=["POST"])
+
+# ドキュメント変換ツール
+router.add_api_route(path="/convert_office_files_to_pdf", endpoint=convert_office_files_to_pdf, methods=["POST"])
+router.add_api_route(path="/convert_pdf_files_to_images", endpoint=convert_pdf_files_to_images, methods=["POST"])
+
+# resource_app の関数をデフォルトで公開する
+router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
+router.add_api_route(path="/get_completion_model", endpoint=get_completion_model, methods=["GET"])
+router.add_api_route(path="/get_loaded_config_info", endpoint=get_loaded_config_info, methods=["GET"])
+router.add_api_route(path="/create_user_message", endpoint=create_user_message, methods=["POST"])
+router.add_api_route(path="/create_assistant_message", endpoint=create_assistant_message, methods=["POST"])
+router.add_api_route(path="/create_system_message", endpoint=create_system_message, methods=["POST"])
+router.add_api_route(path="/create_text_content", endpoint=create_text_content, methods=["POST"])
+router.add_api_route(path="/create_image_content", endpoint=create_image_content, methods=["POST"])
+router.add_api_route(path="/create_image_content_from_file", endpoint=create_image_content_from_file, methods=["POST"])
+router.add_api_route(path="/create_pdf_content", endpoint=create_pdf_content, methods=["POST"])
+router.add_api_route(path="/create_pdf_content_from_file", endpoint=create_pdf_content_from_file, methods=["POST"])
+router.add_api_route(path="/create_office_content", endpoint=create_office_content, methods=["POST"])
+router.add_api_route(path="/create_office_content_from_file", endpoint=create_office_content_from_file, methods=["POST"])
+router.add_api_route(path="/create_multi_format_contents_from_file", endpoint=create_multi_format_contents_from_file, methods=["POST"])
 
 # NOTE: include_router は、ルート定義が揃ってから呼ぶ（呼び出し時点の router.routes が登録される）
 app.include_router(prefix="/api/ai_chat_util", router=router)

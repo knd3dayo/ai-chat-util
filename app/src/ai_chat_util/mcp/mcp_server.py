@@ -6,20 +6,7 @@ from fastmcp import FastMCP
 from ai_chat_util_base.config.runtime import init_runtime
 from ai_chat_util_base.config.runtime import apply_logging_overrides
 
-from ai_chat_util.base.core.resource_app import (
-    use_custom_pdf_analyzer,
-    get_completion_model,
-    get_loaded_config_info,
-    create_user_message,
-    create_system_message,
-    create_assistant_message,
-    create_text_content,
-    create_pdf_content_from_file,
-    create_image_content,
-    create_image_content_from_file,
-    create_office_content_from_file,
-    create_multi_format_contents_from_file,
-)
+from ai_chat_util.base.core.resource_app import get_loaded_config_info
 
 from ai_chat_util.base.core.app import (
     run_chat,
@@ -34,6 +21,8 @@ from ai_chat_util.base.core.tool_app import (
     analyze_pdf_files,
     analyze_office_files,
     analyze_files,
+    convert_office_files_to_pdf,
+    convert_pdf_files_to_images,
     analyze_documents_data,
     analyze_image_urls,
     analyze_pdf_urls,
@@ -110,25 +99,16 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_pdf_urls": analyze_pdf_urls,
         "analyze_office_urls": analyze_office_urls,
         "analyze_urls": analyze_urls,
+        "convert_office_files_to_pdf": convert_office_files_to_pdf,
+        "convert_pdf_files_to_images": convert_pdf_files_to_images,
         # chat/batch
         "run_chat": run_chat,
         "run_simple_chat": run_simple_chat,
         "run_batch_chat": run_batch_chat,
         "run_simple_batch_chat": run_simple_batch_chat,
         "run_batch_chat_from_excel": run_batch_chat_from_excel,
-        # message/content helpers
-        "use_custom_pdf_analyzer": use_custom_pdf_analyzer,
-        "get_completion_model": get_completion_model,
+        # debug helper
         "get_loaded_config_info": get_loaded_config_info,
-        "create_user_message": create_user_message,
-        "create_system_message": create_system_message,
-        "create_assistant_message": create_assistant_message,
-        "create_text_content": create_text_content,
-        "create_pdf_content_from_file": create_pdf_content_from_file,
-        "create_image_content": create_image_content,
-        "create_image_content_from_file": create_image_content_from_file,
-        "create_office_content_from_file": create_office_content_from_file,
-        "create_multi_format_contents_from_file": create_multi_format_contents_from_file,
     }
 
     if tools_option:
@@ -153,6 +133,9 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_pdf_urls",
         "analyze_office_urls",
         "analyze_urls",
+        "convert_office_files_to_pdf",
+        "convert_pdf_files_to_images",
+        "get_loaded_config_info",
     ):
         mcp.tool()(tool_registry[name])
     

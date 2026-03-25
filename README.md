@@ -24,6 +24,7 @@
 ### 🖼️ 画像・PDF・Office解析
 - 画像ファイル、PDFファイル、Officeドキュメント（Word, Excel, PowerPointなど）をAIに渡して内容を解析。
 - 画像認識、文書要約、表データ抽出などの処理をサポート。
+- 解析前処理として、Office→PDF 変換と PDF→ページ画像変換を API / MCP ツールとして利用可能。
 
 ### 🧩 MCPサーバー連携
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
@@ -86,7 +87,7 @@ copy config.example.yml ai-chat-util-config.yml
 
 > `ai-chat-util-config.yml` が見つからない場合はエラーになります。
 
-実際にどの設定ファイルが読まれたか確認したい場合は、CLI の `show_config` か MCP ツールの `get_loaded_config_info` を使ってください。
+実際にどの設定ファイルが読まれたか確認したい場合は、CLI の `show_config`、API エンドポイント `/api/ai_chat_util/get_loaded_config_info`、または MCP ツール `get_loaded_config_info` を使ってください。
 
 ```bash
 uv --directory app run -m ai_chat_util.cli --config app/ai-chat-util-config.yml show_config

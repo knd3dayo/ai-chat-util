@@ -5,6 +5,7 @@ import time
 import asyncio
 from itertools import count
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field
 from ai_chat_util_base.model.ai_chatl_util_models import  WebRequestModel
@@ -15,6 +16,8 @@ from file_util.model import FileUtilDocument
 from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
 from ai_chat_util_base.config.runtime import get_runtime_config
 from ai_chat_util.base.util.downloader import DownLoader
+from ai_chat_util.base.util.office2pdf import Office2PDFUtil
+from ai_chat_util.base.util import pdf_util
 
 import ai_chat_util.log.log_settings as log_settings
 
@@ -46,6 +49,19 @@ def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
         r = resolve_existing_file_path(p, working_directory=llm_config.mcp.working_directory)
         resolved.append(r.resolved_path)
     return resolved
+
+
+def _resolve_output_dir(output_dir: str | None) -> Path | None:
+    if output_dir is None or not str(output_dir).strip():
+        return None
+
+    candidate = Path(output_dir).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    llm_config = get_runtime_config()
+    working_directory = llm_config.mcp.working_directory or "."
+    return (Path(working_directory).expanduser() / candidate).resolve()
 
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 async def analyze_image_urls(
@@ -335,6 +351,109 @@ async def analyze_office_files(
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
             "MCP_TOOL_END tool=analyze_office_files call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
+
+
+async def convert_office_files_to_pdf(
+        office_path_list: Annotated[list[str], Field(description="List of Office file paths to convert to PDF. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
+        output_dir: Annotated[str | None, Field(description="Optional output directory for generated PDFs. If omitted, PDFs are created next to the source files.")] = None,
+    ) -> Annotated[list[dict[str, str]], Field(description="List of source and generated PDF paths")]:
+    """
+    Convert Office documents to PDF files and return the generated PDF paths.
+    """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=convert_office_files_to_pdf call_id=%s files=%d output_dir=%s",
+        call_id,
+        len(office_path_list or []),
+        output_dir,
+    )
+    try:
+        resolved_paths = _resolve_existing_file_paths(office_path_list)
+        target_dir = _resolve_output_dir(output_dir)
+        if target_dir is not None:
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, str]] = []
+        for office_path in resolved_paths:
+            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
+                input_path=office_path,
+                output_path=target_dir,
+            )
+            results.append({
+                "source_path": office_path,
+                "pdf_path": str(pdf_path),
+            })
+        return results
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=convert_office_files_to_pdf call_id=%s elapsed_ms=%s",
+            call_id,
+            elapsed_ms,
+        )
+
+
+async def convert_pdf_files_to_images(
+        pdf_path_list: Annotated[list[str], Field(description="List of PDF file paths to convert into PNG page images. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
+        output_dir: Annotated[str | None, Field(description="Optional output directory root for generated images. If omitted, an adjacent <pdf-stem>_pages directory is created for each PDF.")] = None,
+    ) -> Annotated[list[dict[str, Any]], Field(description="List of source PDF paths and generated image paths")]:
+    """
+    Convert PDF pages into PNG image files and return the generated image paths.
+    """
+    call_id = next(_TOOL_CALL_SEQ)
+    started = time.perf_counter()
+    logger.info(
+        "MCP_TOOL_START tool=convert_pdf_files_to_images call_id=%s files=%d output_dir=%s",
+        call_id,
+        len(pdf_path_list or []),
+        output_dir,
+    )
+    try:
+        resolved_paths = _resolve_existing_file_paths(pdf_path_list)
+        output_root = _resolve_output_dir(output_dir)
+        if output_root is not None:
+            output_root.mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, Any]] = []
+        for pdf_path in resolved_paths:
+            source_path = Path(pdf_path)
+            image_dir = (
+                (output_root / f"{source_path.stem}_pages")
+                if output_root is not None
+                else source_path.with_name(f"{source_path.stem}_pages")
+            )
+            image_dir.mkdir(parents=True, exist_ok=True)
+
+            image_paths: list[str] = []
+            image_index = 0
+            for element in pdf_util.extract_content_from_file(pdf_path):
+                if element.get("type") != "image":
+                    continue
+                image_index += 1
+                image_path = image_dir / f"{source_path.stem}_page_{image_index:04d}.png"
+                with image_path.open("wb") as f:
+                    f.write(element["bytes"])
+                image_paths.append(str(image_path))
+
+            results.append({
+                "source_path": pdf_path,
+                "image_paths": image_paths,
+            })
+        return results
+    except Exception:
+        logger.exception("MCP_TOOL_ERR tool=convert_pdf_files_to_images call_id=%s", call_id)
+        raise
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "MCP_TOOL_END tool=convert_pdf_files_to_images call_id=%s elapsed_ms=%s",
             call_id,
             elapsed_ms,
         )

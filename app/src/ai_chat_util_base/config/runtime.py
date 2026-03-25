@@ -12,7 +12,7 @@ from .config_util import (
     CONFIG_ENV_VAR,
     CODING_AGENT_UTIL_CONFIG_ROOT_KEY,
     CODING_DEFAULT_CONFIG_FILENAME,
-    ConfigError, load_resolved_yaml, resolve_config_path, resolve_coding_config_path,
+    ConfigError, load_resolved_yaml, load_yaml_config, resolve_config_path, resolve_coding_config_path,
     resolve_env_ref,extract_required_root_section, extract_optional_ai_section_dict,
     apply_secret_overrides_from_yaml,
     AI_CHAT_UTIL_CONFIG_ROOT_KEY,
@@ -99,6 +99,20 @@ def get_runtime_config_path() -> Path:
         init_runtime(None)
     assert _runtime_state is not None
     return _runtime_state.config_path
+
+
+def get_runtime_config_info() -> dict[str, Any]:
+    """Return the resolved config file path and the raw file content.
+
+    The returned `config` value is loaded directly from the YAML file so that
+    env references remain unresolved and secrets are not materialized.
+    """
+    config_path = get_runtime_config_path()
+    raw_root = load_yaml_config(config_path)
+    return {
+        "path": str(config_path),
+        "config": raw_root,
+    }
 
 
 def _apply_non_secret_runtime_side_effects(config: AiChatUtilConfig) -> None:

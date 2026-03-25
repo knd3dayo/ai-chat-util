@@ -2,9 +2,8 @@ from typing import Annotated, Literal
 from pydantic import Field
 from ai_chat_util_base.model.ai_chatl_util_models import ChatMessage, ChatContent
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util_base.config.runtime import get_runtime_config
+from ai_chat_util_base.config.runtime import get_runtime_config, get_runtime_config_info
 from file_util.model import FileUtilDocument
-from ai_chat_util_base.config.runtime import get_runtime_config
 
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:
@@ -20,6 +19,13 @@ def get_completion_model() -> Annotated[str, Field(description="The completion m
     """
     cfg = get_runtime_config()
     return cfg.llm.completion_model
+
+
+def get_loaded_config_info() -> Annotated[dict, Field(description="Resolved config file path and raw config content")]:
+    """
+    Return the actual config file path and the raw YAML content loaded from it.
+    """
+    return get_runtime_config_info()
 
 def create_user_message(
         chat_content_list: Annotated[list[ChatContent], Field(description="List of chat contents from the user messages")]

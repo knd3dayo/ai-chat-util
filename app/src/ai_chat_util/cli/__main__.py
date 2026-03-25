@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from typing import Iterable
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ..base.llm.llm_client_util import LLMClientUtil
-from ai_chat_util_base.config.runtime import init_runtime, apply_logging_overrides
+from ai_chat_util_base.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
@@ -229,6 +230,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    subparsers.add_parser(
+        "show_config",
+        help="実際に読み込まれた設定ファイルのパスと内容を表示します",
+    )
+
     return parser
 
 
@@ -306,6 +312,10 @@ async def main(argv: Iterable[str] | None = None) -> None:
         llm_client = LLMFactory.create_llm_client()
         response = await LLMClientUtil.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
         print(response.output)
+        return
+
+    if args.command == "show_config":
+        print(json.dumps(get_runtime_config_info(), ensure_ascii=False, indent=2))
         return
 
     parser.print_help()

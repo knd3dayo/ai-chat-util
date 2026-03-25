@@ -9,6 +9,7 @@ from ai_chat_util_base.config.runtime import apply_logging_overrides
 from ai_chat_util.base.core.resource_app import (
     use_custom_pdf_analyzer,
     get_completion_model,
+    get_loaded_config_info,
     create_user_message,
     create_system_message,
     create_assistant_message,
@@ -118,6 +119,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         # message/content helpers
         "use_custom_pdf_analyzer": use_custom_pdf_analyzer,
         "get_completion_model": get_completion_model,
+        "get_loaded_config_info": get_loaded_config_info,
         "create_user_message": create_user_message,
         "create_system_message": create_system_message,
         "create_assistant_message": create_assistant_message,

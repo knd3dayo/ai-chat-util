@@ -86,6 +86,14 @@ copy config.example.yml ai-chat-util-config.yml
 
 > `ai-chat-util-config.yml` が見つからない場合はエラーになります。
 
+実際にどの設定ファイルが読まれたか確認したい場合は、CLI の `show_config` か MCP ツールの `get_loaded_config_info` を使ってください。
+
+```bash
+uv --directory app run -m ai_chat_util.cli --config app/ai-chat-util-config.yml show_config
+```
+
+この出力には、実際に読まれた設定ファイルのパスと、そのファイルの生の設定内容が含まれます。`os.environ/VAR_NAME` の参照は解決されないため、環境変数の実値は表示されません。
+
 #### 秘密情報（APIキー等）の扱い
 
 秘密情報は `ai-chat-util-config.yml` に直書きできません。

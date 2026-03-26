@@ -35,7 +35,17 @@ dependencies = [
     "python_on_whales",
     "tabulate",
     "pytest",
-    "file_util @ git+https://github.com/knd3dayo/file-util.git@main",
+    "magika",
+    "pillow",
+    "python-docx",
+    "python-pptx",
+    "markdown",
+    "pdfminer.six",
+    "beautifulsoup4",
+    "chardet==5.2.0",
+    "aiofiles",
+    "pyzipper",
+    "smbprotocol"
 ]
 
 [tool.setuptools.packages.find]

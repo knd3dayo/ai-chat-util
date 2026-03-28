@@ -174,11 +174,29 @@ class MCPClientUtil:
                 stripped = line.strip()
                 if not stripped:
                     continue
+                exact_line_match = re.match(r"^HEADING_LINE_EXACT\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+                if exact_line_match:
+                    value = exact_line_match.group(1)
+                    if value:
+                        found.append(value)
+                    continue
+                exact_match = re.match(r"^HEADING_EXACT\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+                if exact_match:
+                    value = exact_match.group(1).strip()
+                    if value:
+                        found.append(value)
+                    continue
                 if re.match(r"^#{1,6}\s+.+$", stripped):
                     found.append(stripped)
                     continue
                 if re.match(r"^(?:[-*]|\d+[.)])\s+.+$", stripped):
                     value = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", stripped).strip()
+                    if value:
+                        found.append(value)
+                        continue
+                quote_chars = {'"', "'", "「", "」", "“", "”"}
+                if len(stripped) >= 2 and stripped[0] in quote_chars and stripped[-1] in quote_chars:
+                    value = stripped[1:-1].strip()
                     if value:
                         found.append(value)
 
@@ -264,7 +282,7 @@ class MCPClientUtil:
             if exact_headings:
                 lines.append("文書内の重要な見出し:")
                 for heading in exact_headings[:3]:
-                    lines.append(f"- {heading}")
+                    lines.append(heading)
 
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):

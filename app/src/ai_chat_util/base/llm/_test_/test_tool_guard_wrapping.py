@@ -483,6 +483,21 @@ def test_extract_successful_tool_evidence_collects_config_path_and_stdout() -> N
     assert evidence["headings"] == ["# Overview", "## Setup", "## Troubleshooting"]
 
 
+def test_extract_successful_tool_evidence_prefers_heading_exact_lines() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "tool",
+                "content": '{"stdout": "HEADING_LINE_EXACT: ### 1. 接続成立\nHEADING_LINE_EXACT: ### 2. MCP サーバー化\nHEADING_LINE_EXACT: ### 3. 検証結果", "stderr": null}',
+            },
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["headings"] == ["### 1. 接続成立", "### 2. MCP サーバー化", "### 3. 検証結果"]
+
+
 def test_evidence_reflection_overrides_negative_final_text() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
@@ -498,9 +513,9 @@ def test_evidence_reflection_overrides_negative_final_text() -> None:
     fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
 
     assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
-    assert "- # Overview" in fallback
-    assert "- ## Setup" in fallback
-    assert "- ## Troubleshooting" in fallback
+    assert "# Overview" in fallback
+    assert "## Setup" in fallback
+    assert "## Troubleshooting" in fallback
 
 
 def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings() -> None:
@@ -514,6 +529,19 @@ def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings(
         "get_loaded_config_info を使って確認しました。重要な見出しは概要、設定、トラブルシュートです。",
         evidence,
     )
+
+
+def test_tool_agent_prompt_requires_verbatim_heading_output() -> None:
+    prompt = CodingAgentPrompts().tool_agent_system_prompt(
+        hitl_policy_text="dummy policy",
+        agent_name="tool_agent_coding",
+        followup_poll_interval_seconds=2.0,
+        status_tail_lines=20,
+        result_tail_lines=80,
+    )
+
+    assert "HEADING_LINE_EXACT:" in prompt
+    assert "### 1. MCP サーバーとしての正常起動" in prompt
 
 
 def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:

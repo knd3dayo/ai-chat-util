@@ -580,6 +580,9 @@ class AgentBuilder:
         tool_agent_system_prompt = prompts.tool_agent_system_prompt(
             hitl_policy_text,
             agent_name=agent_name,
+            followup_poll_interval_seconds=float(getattr(runtime_config.features, "mcp_followup_poll_interval_seconds", 2.0) or 0.0),
+            status_tail_lines=int(getattr(runtime_config.features, "mcp_status_tail_lines", 20) or 0),
+            result_tail_lines=int(getattr(runtime_config.features, "mcp_get_result_tail_lines", 80) or 0),
         )
 
         tool_agent = create_agent(

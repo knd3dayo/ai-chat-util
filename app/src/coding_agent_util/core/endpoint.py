@@ -202,25 +202,39 @@ class EndPoint(CodingEndPointBase):
         task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")],
         tail: Annotated[
             Optional[int],
-            Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
-        ] = 200,
+            Query(description="ログの末尾 n 行（省略時は設定値、null で全量）", ge=0),
+        ] = None,
+        wait_seconds: Annotated[
+            Optional[float],
+            Query(description="状態取得前に待機する秒数。ポーリング間隔の制御に使う。", ge=0.0, le=60.0),
+        ] = None,
     ) -> TaskStatus:
         """
          タスクステータス取得用エンドポイント。SVはこれを叩いてタスクの進捗や結果を取得する。
          tailはログの末尾n行を取得するためのパラメータ。
          既存のTaskStatus(JSONをそのまま返す。SV側は status/sub_status を見て完了判定する。
         """
-        logger.debug("Received status request for task_id=%s with tail=%s", task_id, tail)
+        cfg = get_coding_runtime_config()
+        effective_tail = cfg.endpoint.status_default_tail_lines if tail is None else tail
+        effective_wait = cfg.endpoint.followup_poll_interval_seconds if wait_seconds is None else wait_seconds
+        logger.debug("Received status request for task_id=%s with tail=%s wait_seconds=%s", task_id, effective_tail, effective_wait)
 
-        return await TaskManager.get_status(task_id, tail=tail)
+        if effective_wait and effective_wait > 0:
+            await asyncio.sleep(float(effective_wait))
+
+        return await TaskManager.get_status(task_id, tail=effective_tail)
 
     async def get_result(
         self,
         task_id: Annotated[str, Path(description="/executeのレスポンスで返るtask_id")],
         tail: Annotated[
             Optional[int],
-            Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
-        ] = 200,
+            Query(description="ログの末尾 n 行（省略時は設定値、null で全量）", ge=0),
+        ] = None,
+        wait_seconds: Annotated[
+            Optional[float],
+            Query(description="結果取得前に待機する秒数。ポーリング間隔の制御に使う。", ge=0.0, le=60.0),
+        ] = None,
     ) -> Dict[str, Any]:
         """
          タスク結果取得用エンドポイント。SVはこれを叩いてタスクの結果を取得する。
@@ -228,8 +242,13 @@ class EndPoint(CodingEndPointBase):
 
          注意: task_id は必須です。execute のレスポンスで返る task_id を指定してください。
         """
-        logger.debug("Received get_result request for task_id=%s with tail=%s", task_id, tail)
-        status = await TaskManager.get_status(task_id, tail=tail)
+        cfg = get_coding_runtime_config()
+        effective_tail = cfg.endpoint.get_result_default_tail_lines if tail is None else tail
+        effective_wait = cfg.endpoint.followup_poll_interval_seconds if wait_seconds is None else wait_seconds
+        logger.debug("Received get_result request for task_id=%s with tail=%s wait_seconds=%s", task_id, effective_tail, effective_wait)
+        if effective_wait and effective_wait > 0:
+            await asyncio.sleep(float(effective_wait))
+        status = await TaskManager.get_status(task_id, tail=effective_tail)
         if not status:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"stdout": status.stdout, "stderr": status.stderr}

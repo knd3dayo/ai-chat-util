@@ -555,6 +555,21 @@ class FeaturesSection(BaseModel):
             "execute 後のポーリングや結果取得で通常ツールの予算を消費し切らないようにするための別枠です。"
         ),
     )
+    mcp_followup_poll_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="status の再ポーリング時に推奨する待機秒数。例: 10.0 を設定すると 10 秒間隔を指示できます。",
+    )
+    mcp_status_tail_lines: int = Field(
+        default=20,
+        ge=0,
+        description="status ツールで取得するログ tail 行数の既定値。0 ならログ本文を返しません。",
+    )
+    mcp_get_result_tail_lines: int = Field(
+        default=80,
+        ge=0,
+        description="get_result ツールで取得するログ tail 行数の既定値。0 ならログ本文を返しません。",
+    )
     mcp_tool_timeout_seconds: float | None = Field(
         default=None,
         ge=0.0,
@@ -712,6 +727,10 @@ class CodingEndpointSection(BaseModel):
     """
 
     mcp_server_name: str = Field(default="coding-agent")
+    followup_poll_interval_seconds: float = Field(default=2.0, ge=0.0)
+    status_default_tail_lines: int = Field(default=20, ge=0)
+    get_result_default_tail_lines: int = Field(default=80, ge=0)
+    max_tool_result_chars: int = Field(default=4000, ge=256)
 
     @model_validator(mode="after")
     def _validate_mcp_server_name(self) -> "CodingEndpointSection":

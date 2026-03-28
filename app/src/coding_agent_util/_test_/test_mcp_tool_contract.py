@@ -21,7 +21,11 @@ def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
         assert names == {"healthz", "execute", "status", "cancel", "workspace_path", "get_result"}
 
         execute = next(t for t in tools if t.name == "execute")
+        status = next(t for t in tools if t.name == "status")
+        get_result = next(t for t in tools if t.name == "get_result")
         dumped = execute.model_dump()
+        status_dumped = status.model_dump()
+        get_result_dumped = get_result.model_dump()
 
         params = dumped["parameters"]
         assert params.get("type") == "object"
@@ -38,5 +42,11 @@ def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
 
         assert req_schema.get("type") == "object"
         assert set(req_schema.get("required", [])) >= {"prompt", "workspace_path"}
+
+        status_params = status_dumped["parameters"]
+        assert "wait_seconds" in status_params.get("properties", {})
+
+        get_result_params = get_result_dumped["parameters"]
+        assert "wait_seconds" in get_result_params.get("properties", {})
 
     asyncio.run(_run())

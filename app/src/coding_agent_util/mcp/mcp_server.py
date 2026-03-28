@@ -63,6 +63,54 @@ def _ensure_workspace_root_writable() -> None:
 
 
 class CodingMCPServer:
+	def _clip_text(self, text: object, *, max_chars: int) -> str | None:
+		if not isinstance(text, str):
+			return None
+		value = text.strip()
+		if not value:
+			return None
+		if len(value) <= max_chars:
+			return value
+		head = max_chars // 2
+		tail = max_chars - head
+		return value[:head] + "\n...<truncated>...\n" + value[-tail:]
+
+	def _compact_task_status_result(self, result):
+		cfg = get_coding_runtime_config()
+		max_chars = int(getattr(getattr(cfg, "endpoint", None), "max_tool_result_chars", 4000) or 4000)
+		status_obj = result.model_copy(deep=True)
+		status_obj.stdout = self._clip_text(status_obj.stdout, max_chars=max_chars // 2)
+		status_obj.stderr = self._clip_text(status_obj.stderr, max_chars=max_chars // 3)
+		if isinstance(status_obj.artifacts, list) and len(status_obj.artifacts) > 10:
+			status_obj.artifacts = status_obj.artifacts[:10]
+		if isinstance(status_obj.metadata, dict):
+			status_obj.metadata = {
+				"metadata_keys": sorted(str(k) for k in status_obj.metadata.keys())[:10],
+				"artifact_count": len(status_obj.artifacts or []),
+			}
+		return status_obj
+
+	def _compact_get_result_payload(self, result):
+		cfg = get_coding_runtime_config()
+		max_chars = int(getattr(getattr(cfg, "endpoint", None), "max_tool_result_chars", 4000) or 4000)
+		if not isinstance(result, dict):
+			return result
+		stdout = self._clip_text(result.get("stdout"), max_chars=max_chars)
+		stderr = self._clip_text(result.get("stderr"), max_chars=max_chars // 2)
+		return {
+			"stdout": stdout,
+			"stderr": stderr,
+			"stdout_truncated": isinstance(result.get("stdout"), str) and stdout is not None and stdout != result.get("stdout"),
+			"stderr_truncated": isinstance(result.get("stderr"), str) and stderr is not None and stderr != result.get("stderr"),
+		}
+
+	def _compact_mcp_result(self, tool_name: str, result):
+		if tool_name == "status" and hasattr(result, "model_copy"):
+			return self._compact_task_status_result(result)
+		if tool_name == "get_result":
+			return self._compact_get_result_payload(result)
+		return result
+
 	"""
 	Standalone MCP server exposing coding endpoint tools.
 
@@ -99,6 +147,9 @@ class CodingMCPServer:
 			v = kwargs.get(k)
 			if isinstance(v, (str, int)):
 				summary[k] = v
+		wait_seconds = kwargs.get("wait_seconds")
+		if isinstance(wait_seconds, (int, float)):
+			summary["wait_seconds"] = wait_seconds
 
 		return summary
 
@@ -202,6 +253,8 @@ class CodingMCPServer:
 							except Exception:
 								pass
 							raise
+
+						result = self._compact_mcp_result(tool_name, result)
 
 					dt_ms = int((time.perf_counter() - start) * 1000)
 					try:

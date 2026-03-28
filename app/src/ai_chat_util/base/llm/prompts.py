@@ -11,7 +11,14 @@ class PromptsBase(ABC):
         pass
 
     @abstractmethod
-    def tool_agent_system_prompt(self, hitl_policy_text, agent_name="tool_agent") -> str:
+    def tool_agent_system_prompt(
+        self,
+        hitl_policy_text,
+        agent_name="tool_agent",
+        followup_poll_interval_seconds=2.0,
+        status_tail_lines=20,
+        result_tail_lines=80,
+    ) -> str:
         pass
 
     @abstractmethod
@@ -58,7 +65,14 @@ class CodingAgentPrompts(PromptsBase):
 - 直前のユーザー入力に 'APPROVE TOOL_NAME' があれば実行して構いません。
 - ユーザーがローカルファイルパスやURLを提示した場合、アクセス不能と決めつけず、まずは該当ツールで実行を試みてください。
 """
-    def tool_agent_system_prompt(self, hitl_policy_text, agent_name="tool_agent") -> str:
+    def tool_agent_system_prompt(
+        self,
+        hitl_policy_text,
+        agent_name="tool_agent",
+        followup_poll_interval_seconds=2.0,
+        status_tail_lines=20,
+        result_tail_lines=80,
+    ) -> str:
         return f"""
 あなたはツール実行エージェントです。チーム内でのあなたの識別名は {agent_name} です。スーパーバイザーの指示を達成するために、必要に応じてツールを使用してください。
 利用可能なツールのみを使用してください。
@@ -69,10 +83,10 @@ class CodingAgentPrompts(PromptsBase):
 - execute/status/get_result という「タスクIDで追跡する」ツール群がある場合は、必ずこの順で実行してください:
     1) execute を呼び、戻り値（JSON）の task_id を必ず抽出して保持する
     2) status を task_id でポーリングし、status/sub_status が最終状態（completed/failed/timeout/cancelled 等）になるまで待つ
-         - 進捗確認中はコンテキスト肥大化を避けるため、status の tail は小さくしてください（例: tail=20）。
+         - 進捗確認中はコンテキスト肥大化を避けるため、status では `tail={status_tail_lines}` を優先し、再ポーリング時は `wait_seconds={followup_poll_interval_seconds}` を指定してください。
     3) 最終状態になったら get_result を task_id で呼び、stdout/stderr を取得して返す
-- get_result を呼んだ後は、stdout は（可能なら全文）そのまま TEXT に貼り付けて返してください。
-- stderr は長くなりやすいので、原則として tail を指定して末尾のみ取得・貼り付けてください（例: tail=200）。
+- get_result は `tail={result_tail_lines}` を優先してください。stdout/stderr が長い場合は全文を貼らず、重要部分だけを短く引用して要約してください。
+- stderr は長くなりやすいので、原則として tail を指定して末尾のみ取得・貼り付けてください。
     形式は次を推奨します:
     [stdout]\n...\n[/stdout]\n[stderr_tail]\n...\n[/stderr_tail]
 - workspace_path は、ユーザー/スーパーバイザーから明示的に要求された場合のみ呼び出してください。

@@ -101,8 +101,12 @@ class CodingEndPointBase(ABC):
         task_id: Annotated[str, Path(description="task id")],
         tail: Annotated[
             Optional[int],
-            Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
-        ] = 200,
+            Query(description="ログの末尾 n 行（省略時は設定値、null で全量）", ge=0),
+        ] = None,
+        wait_seconds: Annotated[
+            Optional[float],
+            Query(description="状態取得前に待機する秒数。ポーリング間隔の制御に使う。", ge=0.0, le=60.0),
+        ] = None,
     ) -> TaskStatus:
         """
          タスクステータス取得用エンドポイント。SVはこれを叩いてタスクの進捗や結果を取得する。
@@ -117,8 +121,12 @@ class CodingEndPointBase(ABC):
         task_id: Annotated[str, Path(description="task id")],
         tail: Annotated[
             Optional[int],
-            Query(description="ログの末尾 n 行（省略時は 200、null で全量）", ge=0),
-        ] = 200,
+            Query(description="ログの末尾 n 行（省略時は設定値、null で全量）", ge=0),
+        ] = None,
+        wait_seconds: Annotated[
+            Optional[float],
+            Query(description="結果取得前に待機する秒数。ポーリング間隔の制御に使う。", ge=0.0, le=60.0),
+        ] = None,
     ) -> Dict[str, Any]:
         """
          タスク結果取得用エンドポイント。SVはこれを叩いてタスクの結果を取得する。

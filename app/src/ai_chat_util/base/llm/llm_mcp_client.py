@@ -156,6 +156,7 @@ class MCPClient(AbstractLLMClient):
                     output_tokens=0,
                 )
             logger.debug("Extracting output and usage from agent result: %s", result)
+            workflow_results: list[Any] = [result]
 
             output_text, input_tokens, output_tokens = MCPClientUtil._extract_output_and_usage(result)
 
@@ -209,6 +210,7 @@ class MCPClient(AbstractLLMClient):
                         {"messages": [HumanMessage(content=directive)]},
                         config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                     )
+                    workflow_results.append(result)
                     output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
                     input_tokens += add_in
                     output_tokens += add_out
@@ -230,6 +232,7 @@ class MCPClient(AbstractLLMClient):
                     {"messages": [HumanMessage(content=final_directive)]},
                     config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                 )
+                workflow_results.append(result)
                 output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
                 resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
 
@@ -237,6 +240,19 @@ class MCPClient(AbstractLLMClient):
                 input_tokens += add_in
                 output_tokens += add_out
                 user_text = extracted_text or output_text
+
+            evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
+            if MCPClientUtil.final_text_contradicts_evidence(user_text, evidence):
+                logger.warning(
+                    "Supervisor final text contradicted successful tool evidence; applying evidence-based fallback: trace_id=%s",
+                    run_trace_id,
+                )
+                fallback_text = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+                if fallback_text:
+                    user_text = fallback_text
+                    resp_type = "complete"
+                    hitl_kind = None
+                    hitl_tool = None
 
             status: str = "completed"
             hitl: HitlRequest | None = None

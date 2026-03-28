@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence, cast
 
+import ast
 import contextlib
+import json
 import re
 from pathlib import Path
 from langchain_litellm import ChatLiteLLMRouter
@@ -34,6 +36,145 @@ logger = log_settings.getLogger(__name__)
 
 
 class MCPClientUtil:
+
+    @classmethod
+    def _iter_result_messages(cls, result: Any) -> list[Any]:
+        if isinstance(result, Mapping):
+            msgs = result.get("messages")
+            if isinstance(msgs, Sequence) and not isinstance(msgs, (str, bytes, bytearray)):
+                return list(msgs)
+        return []
+
+    @classmethod
+    def _extract_mapping_from_text(cls, text: str) -> Mapping[str, Any] | None:
+        stripped = (text or "").strip()
+        if not stripped or stripped.startswith("ERROR:"):
+            return None
+
+        candidates = [stripped]
+        if "```json" in stripped:
+            candidates.extend(re.findall(r"```json\s*(.*?)\s*```", stripped, flags=re.DOTALL | re.IGNORECASE))
+        if "```" in stripped:
+            candidates.extend(re.findall(r"```\s*(.*?)\s*```", stripped, flags=re.DOTALL))
+
+        for candidate in candidates:
+            body = candidate.strip()
+            if not body:
+                continue
+            try:
+                parsed = json.loads(body)
+                if isinstance(parsed, Mapping):
+                    return parsed
+            except Exception:
+                pass
+            try:
+                parsed = ast.literal_eval(body)
+                if isinstance(parsed, Mapping):
+                    return parsed
+            except Exception:
+                pass
+        return None
+
+    @classmethod
+    def extract_successful_tool_evidence(cls, results: Sequence[Any] | Any) -> dict[str, Any]:
+        items = list(results) if isinstance(results, Sequence) and not isinstance(results, (str, bytes, bytearray, Mapping)) else [results]
+
+        config_path: str | None = None
+        stdout_blocks: list[str] = []
+        raw_texts: list[str] = []
+
+        for result in items:
+            for message in cls._iter_result_messages(result):
+                text = ""
+                artifact: Any | None = None
+
+                if isinstance(message, AIMessage):
+                    text = cls._stringify_message_content(message.content)
+                    artifact = getattr(message, "artifact", None)
+                elif isinstance(message, Mapping):
+                    text = cls._stringify_message_content(message.get("content"))
+                    artifact = message.get("artifact")
+                else:
+                    text = cls._stringify_message_content(getattr(message, "content", None))
+                    artifact = getattr(message, "artifact", None)
+
+                if text:
+                    raw_texts.append(text)
+
+                mapping_candidates: list[Mapping[str, Any]] = []
+                if isinstance(artifact, Mapping):
+                    mapping_candidates.append(artifact)
+                parsed_from_text = cls._extract_mapping_from_text(text)
+                if parsed_from_text is not None:
+                    mapping_candidates.append(parsed_from_text)
+
+                for candidate in mapping_candidates:
+                    if not config_path:
+                        path_value = candidate.get("path")
+                        if isinstance(path_value, str) and path_value.strip():
+                            config_path = path_value.strip()
+
+                    stdout_value = candidate.get("stdout")
+                    if isinstance(stdout_value, str) and stdout_value.strip() and not stdout_value.lstrip().startswith("ERROR:"):
+                        stdout_blocks.append(stdout_value.strip())
+
+                for stdout_match in re.findall(r"\[stdout\]\s*(.*?)\s*\[/stdout\]", text, flags=re.DOTALL | re.IGNORECASE):
+                    value = stdout_match.strip()
+                    if value and not value.lstrip().startswith("ERROR:"):
+                        stdout_blocks.append(value)
+
+        deduped_stdout: list[str] = []
+        seen_stdout: set[str] = set()
+        for stdout_text in stdout_blocks:
+            if stdout_text not in seen_stdout:
+                seen_stdout.add(stdout_text)
+                deduped_stdout.append(stdout_text)
+
+        return {
+            "config_path": config_path,
+            "stdout_blocks": deduped_stdout,
+            "raw_texts": raw_texts,
+        }
+
+    @classmethod
+    def final_text_contradicts_evidence(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
+        text = (user_text or "").strip().lower()
+        if not text:
+            return bool(evidence.get("config_path") or evidence.get("stdout_blocks"))
+
+        has_evidence = bool(evidence.get("config_path") or evidence.get("stdout_blocks"))
+        if not has_evidence:
+            return False
+
+        negative_markers = (
+            "取得できなかった",
+            "確認できなかった",
+            "行えませんでした",
+            "できませんでした",
+            "わかりませんでした",
+            "失敗しました",
+            "取得することができませんでした",
+        )
+        return any(marker in text for marker in negative_markers)
+
+    @classmethod
+    def build_evidence_reflected_final_text(cls, evidence: Mapping[str, Any]) -> str:
+        lines: list[str] = []
+
+        config_path = evidence.get("config_path")
+        if isinstance(config_path, str) and config_path.strip():
+            lines.append(f"設定ファイルの場所: {config_path.strip()}")
+
+        stdout_blocks = evidence.get("stdout_blocks")
+        if isinstance(stdout_blocks, Sequence):
+            stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
+            if stdout_values:
+                lines.append("取得済みの coding-agent 実行結果:")
+                lines.append("[stdout]")
+                lines.append(stdout_values[-1])
+                lines.append("[/stdout]")
+
+        return "\n".join(lines).strip()
 
     @classmethod
     def contains_tool_budget_exceeded_signal(cls, text: str | None) -> bool:

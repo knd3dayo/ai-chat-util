@@ -464,3 +464,34 @@ def test_mcp_client_forces_graceful_completion_after_budget_exhaustion(monkeypat
     assert "追加のツール実行、同一ツールの再試行、planner_agent への再委譲は行わないでください" in second_payload["messages"][0].content
     assert "/tmp/ai-chat-util-config.yml" in final_text
     assert "Overview" in final_text
+
+
+def test_extract_successful_tool_evidence_collects_config_path_and_stdout() -> None:
+    result = {
+        "messages": [
+            {"role": "tool", "content": '{"path": "/tmp/ai-chat-util-config.yml", "config": {"ai_chat_util_config": {}}}'},
+            {"role": "tool", "content": '{"stdout": "重要な見出し: Overview, Setup, Troubleshooting", "stderr": null}'},
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
+    assert evidence["stdout_blocks"] == ["重要な見出し: Overview, Setup, Troubleshooting"]
+
+
+def test_evidence_reflection_overrides_negative_final_text() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["重要な見出し: Overview, Setup, Troubleshooting"],
+    }
+
+    assert MCPClientUtil.final_text_contradicts_evidence(
+        "get_loaded_config_info の正しい情報が取得できなかった。重要な見出しを確認できなかった。",
+        evidence,
+    )
+
+    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+
+    assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
+    assert "重要な見出し: Overview, Setup, Troubleshooting" in fallback

@@ -4,6 +4,8 @@ from typing import Any
 from typing import Any, Mapping, Sequence, cast
 
 import asyncio
+import copy
+import json
 import re
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -193,6 +195,49 @@ class ToolLimits(BaseModel):
         normalized = (tool_name or "").strip().lower()
         return normalized in {"status", "get_result", "workspace_path", "cancel"}
 
+    @staticmethod
+    def _freeze_for_cache(value: Any) -> Any:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, Mapping):
+            return {
+                str(k): ToolLimits._freeze_for_cache(v)
+                for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, (list, tuple)):
+            return [ToolLimits._freeze_for_cache(v) for v in value]
+        if isinstance(value, set):
+            return sorted(ToolLimits._freeze_for_cache(v) for v in value)
+        return repr(value)
+
+    @classmethod
+    def build_call_cache_key(cls, tool_name: str, args: Sequence[Any], kwargs: Mapping[str, Any]) -> str:
+        payload = {
+            "tool": tool_name,
+            "args": cls._freeze_for_cache(list(args)),
+            "kwargs": cls._freeze_for_cache(dict(kwargs)),
+        }
+        return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def is_cacheable_tool_result(result: Any) -> bool:
+        if isinstance(result, str):
+            return not result.lstrip().startswith("ERROR:")
+        if isinstance(result, tuple) and len(result) == 2:
+            artifact = result[1]
+            if isinstance(artifact, Mapping) and artifact.get("error"):
+                return False
+            text = result[0]
+            return not (isinstance(text, str) and text.lstrip().startswith("ERROR:"))
+        return True
+
+    @staticmethod
+    def clone_cached_tool_result(result: Any) -> Any:
+        try:
+            return copy.deepcopy(result)
+        except Exception:
+            return result
+
     @classmethod
     def _resolve_budget_scope(
         cls,
@@ -263,6 +308,12 @@ class ToolLimits(BaseModel):
                     used = 0
                     tool_call_state["used"] = 0
 
+                call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
+                cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
+                if call_cache_key in cached_results:
+                    logger.info("Reusing cached tool result (sync): tool=%s", tool_name)
+                    return cls.clone_cached_tool_result(cached_results[call_cache_key])
+
                 budget_scope, used_key, scope_limit, scope_used = cls._resolve_budget_scope(
                     tool_name=tool_name,
                     tool_call_state=tool_call_state,
@@ -297,7 +348,10 @@ class ToolLimits(BaseModel):
                 tool_call_state["used"] = used + 1
                 tool_call_state[used_key] = scope_used + 1
                 try:
-                    return orig_func(*args, **kwargs)
+                    result = orig_func(*args, **kwargs)
+                    if cls.is_cacheable_tool_result(result):
+                        cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
+                    return result
                 except Exception as e:
                     logger.exception("Tool invocation failed (sync): tool=%s", tool_name)
                     return cls._guard_output(
@@ -384,6 +438,11 @@ class ToolLimits(BaseModel):
     ) -> Any:
         attempts = tool_timeout_retries_int + 1
         last_err: BaseException | None = None
+        call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
+        cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
+        if call_cache_key in cached_results:
+            logger.info("Reusing cached tool result: tool=%s", tool_name)
+            return cls.clone_cached_tool_result(cached_results[call_cache_key])
 
         used = int(tool_call_state.get("used", 0) or 0)
         if used < 0:
@@ -427,8 +486,12 @@ class ToolLimits(BaseModel):
                 if tool_timeout_seconds_f and tool_timeout_seconds_f > 0:
                     # Give the tool a small cushion so inner timeouts can surface as normal output.
                     timeout = tool_timeout_seconds_f
-                    return await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout)
-                return await orig_coro(*args, **kwargs)
+                    result = await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout)
+                else:
+                    result = await orig_coro(*args, **kwargs)
+                if cls.is_cacheable_tool_result(result):
+                    cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
+                return result
             except asyncio.CancelledError:
                 raise
             except Exception as e:

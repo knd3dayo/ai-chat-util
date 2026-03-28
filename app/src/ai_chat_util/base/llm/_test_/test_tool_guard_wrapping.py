@@ -138,8 +138,8 @@ def test_followup_tools_use_separate_budget_from_general_tools() -> None:
         "followup_limit": 2,
     }
 
-    execute_tool = _FakeTool("execute", response_format="content", func=lambda: "executed")
-    status_tool = _FakeTool("status", response_format="content", func=lambda: "running")
+    execute_tool = _FakeTool("execute", response_format="content", func=lambda task_id: f"executed:{task_id}")
+    status_tool = _FakeTool("status", response_format="content", func=lambda task_id: f"running:{task_id}")
 
     MCPClientUtil._apply_tool_execution_guards(
         [execute_tool, status_tool],
@@ -149,20 +149,85 @@ def test_followup_tools_use_separate_budget_from_general_tools() -> None:
         tool_timeout_retries_int=0,
     )
 
-    assert execute_tool.func() == "executed"
-    assert status_tool.func() == "running"
-    assert status_tool.func() == "running"
+    assert execute_tool.func("task-1") == "executed:task-1"
+    assert status_tool.func("task-1") == "running:task-1"
+    assert status_tool.func("task-2") == "running:task-2"
 
-    execute_out = execute_tool.func()
+    execute_out = execute_tool.func("task-2")
     assert isinstance(execute_out, str)
     assert "tool_call_budget_exceeded" in execute_out
 
-    status_out = status_tool.func()
+    status_out = status_tool.func("task-3")
     assert isinstance(status_out, str)
     assert "tool_call_budget_exceeded" in status_out
     assert state["general_used"] == 1
     assert state["followup_used"] == 2
     assert state["used"] == 3
+
+
+def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spending_budget() -> None:
+    state: dict[str, int] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 0,
+    }
+    calls = {"n": 0}
+
+    def _func() -> dict[str, str]:
+        calls["n"] += 1
+        return {"path": "/tmp/ai-chat-util-config.yml"}
+
+    tool = _FakeTool("get_loaded_config_info", response_format="content", func=_func)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=1,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out1 = tool.func()
+    out2 = tool.func()
+
+    assert out1 == {"path": "/tmp/ai-chat-util-config.yml"}
+    assert out2 == out1
+    assert calls["n"] == 1
+    assert state["general_used"] == 1
+    assert state["used"] == 1
+
+
+def test_duplicate_error_result_is_not_cached_and_still_hits_budget() -> None:
+    state: dict[str, int] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 0,
+    }
+    calls = {"n": 0}
+
+    def _func() -> str:
+        calls["n"] += 1
+        return "ERROR: temporary failure"
+
+    tool = _FakeTool("get_loaded_config_info", response_format="content", func=_func)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=1,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out1 = tool.func()
+    out2 = tool.func()
+
+    assert out1 == "ERROR: temporary failure"
+    assert "tool_call_budget_exceeded" in out2
+    assert calls["n"] == 1
+    assert state["general_used"] == 1
 
 
 class _FakeMCPClient:

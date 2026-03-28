@@ -25,6 +25,10 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class ToolLimits(BaseModel):
+    followup_tool_call_limit: int = Field(
+        default=8,
+        description="status/get_result/workspace_path/cancel のような追跡系ツール専用の上限。0またはNoneで無制限。",
+    )
     tool_call_limit: int = Field(
         default=50,
         description="ツール呼び出し回数の上限。0またはNoneで無制限。安全弁として、マイナス値は0として扱います。",
@@ -63,10 +67,17 @@ class ToolLimits(BaseModel):
         # tool_call_limit: 0..50 (0 means unlimited)
         try:
             raw_call_limit = getattr(config.features, "mcp_tool_call_limit", None)
-            tool_call_limit_raw = int(raw_call_limit) if raw_call_limit is not None else 2
+            tool_call_limit_raw = int(raw_call_limit) if raw_call_limit is not None else 4
         except (TypeError, ValueError):
-            tool_call_limit_raw = 2
+            tool_call_limit_raw = 4
         tool_call_limit = max(0, min(50, tool_call_limit_raw))
+
+        try:
+            raw_followup_limit = getattr(config.features, "mcp_followup_tool_call_limit", None)
+            followup_tool_call_limit_raw = int(raw_followup_limit) if raw_followup_limit is not None else 8
+        except (TypeError, ValueError):
+            followup_tool_call_limit_raw = 8
+        followup_tool_call_limit = max(0, min(50, followup_tool_call_limit_raw))
 
         # tool_timeout_seconds:
         # - If explicitly set to 0 => unlimited (do not replace with LLM timeout)
@@ -115,6 +126,7 @@ class ToolLimits(BaseModel):
         tool_recursion_limit = max(1, min(200, tool_recursion_limit_raw))
 
         return cls(
+            followup_tool_call_limit=followup_tool_call_limit,
             tool_call_limit=tool_call_limit,
             tool_timeout_seconds=tool_timeout_seconds,
             tool_timeout_retries=tool_timeout_retries,
@@ -168,6 +180,44 @@ class ToolLimits(BaseModel):
             return f"ERROR: tool={tool_name} failed ({err_type}): {msg}"
         return f"ERROR: tool={tool_name} failed ({err_type})"
 
+    @staticmethod
+    def tool_budget_exceeded_text(tool_name: str, *, limit: int, used: int) -> str:
+        return (
+            "ERROR: tool call budget exceeded. "
+            f"error=tool_call_budget_exceeded tool={tool_name} limit={limit} used={used}. "
+            "これ以上ツールを再試行せず、既に取得済みの結果だけで回答を完了してください。"
+        )
+
+    @staticmethod
+    def is_followup_tool(tool_name: str) -> bool:
+        normalized = (tool_name or "").strip().lower()
+        return normalized in {"status", "get_result", "workspace_path", "cancel"}
+
+    @classmethod
+    def _resolve_budget_scope(
+        cls,
+        *,
+        tool_name: str,
+        tool_call_state: dict[str, int],
+        tool_call_limit_int: int,
+    ) -> tuple[str, str, int, int]:
+        if cls.is_followup_tool(tool_name):
+            limit = int(tool_call_state.get("followup_limit", 0) or 0)
+            key = "followup_used"
+            scope = "followup"
+        else:
+            limit = tool_call_limit_int
+            key = "general_used"
+            scope = "general"
+
+        used = int(tool_call_state.get(key, 0) or 0)
+        if used < 0:
+            used = 0
+            tool_call_state[key] = 0
+        if limit < 0:
+            limit = 0
+        return scope, key, limit, used
+
     @classmethod
     def _apply_tool_execution_guards(
         cls,
@@ -194,6 +244,7 @@ class ToolLimits(BaseModel):
 
         needs_guards = bool(
             tool_call_limit_int
+            or int(tool_call_state.get("followup_limit", 0) or 0)
             or (tool_timeout_seconds_f and tool_timeout_seconds_f > 0)
             or tool_timeout_retries_int
         )
@@ -212,17 +263,24 @@ class ToolLimits(BaseModel):
                     used = 0
                     tool_call_state["used"] = 0
 
-                if tool_call_limit_int and used >= tool_call_limit_int:
+                budget_scope, used_key, scope_limit, scope_used = cls._resolve_budget_scope(
+                    tool_name=tool_name,
+                    tool_call_state=tool_call_state,
+                    tool_call_limit_int=tool_call_limit_int,
+                )
+
+                if scope_limit and scope_used >= scope_limit:
                     logger.warning(
-                        "Tool call budget exceeded (sync): tool=%s used=%s limit=%s",
+                        "Tool call budget exceeded (sync): tool=%s scope=%s used=%s limit=%s",
                         tool_name,
-                        used,
-                        tool_call_limit_int,
+                        budget_scope,
+                        scope_used,
+                        scope_limit,
                     )
-                    text = (
-                        "ERROR: tool call budget exceeded. "
-                        f"limit={tool_call_limit_int} used={used}. "
-                        "同一入力でツールが繰り返し実行されたため中断しました。"
+                    text = cls.tool_budget_exceeded_text(
+                        tool_name,
+                        limit=scope_limit,
+                        used=scope_used,
                     )
                     return cls._guard_output(
                         text,
@@ -230,12 +288,14 @@ class ToolLimits(BaseModel):
                         artifact={
                             "error": "tool_call_budget_exceeded",
                             "tool": tool_name,
-                            "limit": tool_call_limit_int,
-                            "used": used,
+                            "limit": scope_limit,
+                            "used": scope_used,
+                            "budget_scope": budget_scope,
                         },
                     )
 
                 tool_call_state["used"] = used + 1
+                tool_call_state[used_key] = scope_used + 1
                 try:
                     return orig_func(*args, **kwargs)
                 except Exception as e:
@@ -336,25 +396,33 @@ class ToolLimits(BaseModel):
                 used = 0
                 tool_call_state["used"] = 0
 
-            if tool_call_limit_int and used >= tool_call_limit_int:
+            budget_scope, used_key, scope_limit, scope_used = cls._resolve_budget_scope(
+                tool_name=tool_name,
+                tool_call_state=tool_call_state,
+                tool_call_limit_int=tool_call_limit_int,
+            )
+
+            if scope_limit and scope_used >= scope_limit:
                 logger.warning(
-                    "Tool call budget exceeded: tool=%s used=%s limit=%s",
+                    "Tool call budget exceeded: tool=%s scope=%s used=%s limit=%s",
                     tool_name,
-                    used,
-                    tool_call_limit_int,
+                    budget_scope,
+                    scope_used,
+                    scope_limit,
                 )
-                text = (
-                    "ERROR: tool call budget exceeded. "
-                    f"limit={tool_call_limit_int} used={used}. "
-                    "同一入力でツールが繰り返し実行されたため中断しました。"
+                text = cls.tool_budget_exceeded_text(
+                    tool_name,
+                    limit=scope_limit,
+                    used=scope_used,
                 )
                 return cls._guard_output(
                     text,
                     response_format=response_format,
-                    artifact={"error": "tool_call_budget_exceeded", "tool": tool_name, "limit": tool_call_limit_int, "used": used},
+                    artifact={"error": "tool_call_budget_exceeded", "tool": tool_name, "limit": scope_limit, "used": scope_used, "budget_scope": budget_scope},
                 )
 
             tool_call_state["used"] = used + 1
+            tool_call_state[used_key] = scope_used + 1
             try:
                 if tool_timeout_seconds_f and tool_timeout_seconds_f > 0:
                     # Give the tool a small cushion so inner timeouts can surface as normal output.
@@ -479,7 +547,12 @@ class AgentBuilder:
 
         # Shared tool call counter across all tools within this workflow.
         # Using a mutable container avoids invalid `nonlocal` usage across methods.
-        tool_call_state: dict[str, int] = {"used": 0}
+        tool_call_state: dict[str, int] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": int(tool_limits.followup_tool_call_limit) if tool_limits is not None else 0,
+        }
 
         hitl_approval_tools = runtime_config.features.hitl_approval_tools or []
 

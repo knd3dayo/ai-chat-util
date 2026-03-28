@@ -539,11 +539,20 @@ class FeaturesSection(BaseModel):
         ),
     )
     mcp_tool_call_limit: int = Field(
-        default=2,
+        default=4,
         ge=1,
         description=(
             "1ユーザー入力(=1 trace_id)あたりのツール呼び出し回数上限。\n"
-            "同一入力でツールが繰り返し実行されるのを防ぎます。"
+            "同一入力でツールが繰り返し実行されるのを防ぎます。\n"
+            "既定値は、設定確認と文書調査を含む代表的な複合シナリオが最低限完走できる水準に調整されています。"
+        ),
+    )
+    mcp_followup_tool_call_limit: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "status/get_result/workspace_path/cancel のような追跡系ツール専用の呼び出し回数上限。\n"
+            "execute 後のポーリングや結果取得で通常ツールの予算を消費し切らないようにするための別枠です。"
         ),
     )
     mcp_tool_timeout_seconds: float | None = Field(

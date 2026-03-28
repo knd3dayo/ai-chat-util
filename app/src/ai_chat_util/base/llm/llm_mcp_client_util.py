@@ -36,6 +36,68 @@ logger = log_settings.getLogger(__name__)
 class MCPClientUtil:
 
     @classmethod
+    def contains_tool_budget_exceeded_signal(cls, text: str | None) -> bool:
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            return False
+
+        markers = (
+            "tool_call_budget_exceeded",
+            "tool call budget exceeded",
+            "ツール実行の制限",
+            "ツール呼び出し回数の上限",
+            "既に取得済みの結果だけで回答を完了してください",
+        )
+        return any(marker in normalized for marker in markers)
+
+    @classmethod
+    def build_budget_exhausted_completion_directive(cls, prior_text: str) -> str:
+        return (
+            "ツール呼び出し予算に到達しました。これ以上ツールを呼び出すことはできません。\n"
+            "追加のツール実行、同一ツールの再試行、planner_agent への再委譲は行わないでください。\n"
+            "このスレッドで既に取得済みのツール結果だけを使って、回答できる部分をまとめてください。\n"
+            "不足している情報があれば、その不足点だけを短く明記してください。\n"
+            "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返してください。\n"
+            f"直前の応答: {prior_text}"
+        )
+
+    @classmethod
+    async def force_graceful_completion_after_budget_exhaustion(
+        cls,
+        *,
+        app: Any,
+        run_trace_id: str,
+        recursion_limit: int,
+        user_text: str,
+    ) -> tuple[str, str | None, str | None, str | None, int, int]:
+        result = await app.ainvoke(
+            {
+                "messages": [
+                    HumanMessage(content=cls.build_budget_exhausted_completion_directive(user_text))
+                ]
+            },
+            config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+        )
+        output_text, add_in, add_out = cls._extract_output_and_usage(result)
+        resp_type, extracted_text, hitl_kind, hitl_tool = cls._parse_supervisor_xml(output_text)
+        final_text = extracted_text or output_text
+
+        if resp_type != "complete":
+            logger.warning(
+                "MCP supervisor did not complete after budget exhaustion; returning controlled fallback: trace_id=%s resp_type=%s",
+                run_trace_id,
+                resp_type,
+            )
+            resp_type = "complete"
+            if not final_text.strip():
+                final_text = (
+                    "ツール呼び出し回数の上限に到達したため、追加の調査は行わずに処理を終了しました。\n"
+                    "既に取得済みの結果がある場合は、その結果のみを信頼してください。"
+                )
+
+        return final_text, resp_type, hitl_kind, hitl_tool, add_in, add_out
+
+    @classmethod
     def _apply_tool_execution_guards(
         cls,
         allowed_langchain_tools: Sequence[Any],

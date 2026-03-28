@@ -176,6 +176,24 @@ class MCPClient(AbstractLLMClient):
                     hitl_kind = inferred_kind
                     hitl_tool = inferred_tool
 
+            budget_exhausted = (
+                MCPClientUtil.contains_tool_budget_exceeded_signal(output_text)
+                or MCPClientUtil.contains_tool_budget_exceeded_signal(user_text)
+            )
+            if budget_exhausted:
+                logger.warning(
+                    "MCP supervisor hit tool call budget; requesting graceful completion without additional tools: trace_id=%s",
+                    run_trace_id,
+                )
+                user_text, resp_type, hitl_kind, hitl_tool, add_in, add_out = await MCPClientUtil.force_graceful_completion_after_budget_exhaustion(
+                    app=app,
+                    run_trace_id=run_trace_id,
+                    recursion_limit=recursion_limit,
+                    user_text=user_text,
+                )
+                input_tokens += add_in
+                output_tokens += add_out
+
             # AUTO_APPROVE: if we still get a question, try to push the supervisor to complete without pausing.
             if auto_approve and resp_type == "question" and max_retries > 0:
                 for attempt in range(1, max_retries + 1):

@@ -16,7 +16,7 @@ fake_sessions_module.Connection = dict[str, Any]
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
 import ai_chat_util.base.llm.agent as agent_mod
-from ai_chat_util.base.llm.agent import AgentBuilder
+from ai_chat_util.base.llm.agent import AgentBuilder, ToolLimits
 from ai_chat_util.base.llm.prompts import CodingAgentPrompts
 from ai_chat_util.base.llm.llm_mcp_client_util import MCPClientUtil
 from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
@@ -49,7 +49,7 @@ class _FakeTool:
 
 
 def test_sync_tool_budget_exceeded_returns_guard_output() -> None:
-    state: dict[str, int] = {"used": 0}
+    state: dict[str, int] = {"used": 0, "general_used": 0, "followup_used": 0, "followup_limit": 0}
 
     def _func(x: int) -> str:
         return f"ok:{x}"
@@ -68,10 +68,11 @@ def test_sync_tool_budget_exceeded_returns_guard_output() -> None:
     out2 = tool.func(2)
     assert isinstance(out2, str)
     assert "tool call budget exceeded" in out2
+    assert "tool_call_budget_exceeded" in out2
 
 
 def test_sync_tool_exception_is_converted_to_normal_output() -> None:
-    state: dict[str, int] = {"used": 0}
+    state: dict[str, int] = {"used": 0, "general_used": 0, "followup_used": 0, "followup_limit": 0}
 
     def _boom() -> str:
         raise ValueError("boom")
@@ -100,7 +101,7 @@ def test_sync_tool_exception_is_converted_to_normal_output() -> None:
 
 def test_async_tool_timeout_retries_then_succeeds() -> None:
     async def _run() -> None:
-        state: dict[str, int] = {"used": 0}
+        state: dict[str, int] = {"used": 0, "general_used": 0, "followup_used": 0, "followup_limit": 0}
         counter: dict[str, int] = {"n": 0}
 
         async def _coro() -> str:
@@ -129,6 +130,41 @@ def test_async_tool_timeout_retries_then_succeeds() -> None:
     asyncio.run(_run())
 
 
+def test_followup_tools_use_separate_budget_from_general_tools() -> None:
+    state: dict[str, int] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 2,
+    }
+
+    execute_tool = _FakeTool("execute", response_format="content", func=lambda: "executed")
+    status_tool = _FakeTool("status", response_format="content", func=lambda: "running")
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [execute_tool, status_tool],
+        tool_call_state=state,
+        tool_call_limit_int=1,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    assert execute_tool.func() == "executed"
+    assert status_tool.func() == "running"
+    assert status_tool.func() == "running"
+
+    execute_out = execute_tool.func()
+    assert isinstance(execute_out, str)
+    assert "tool_call_budget_exceeded" in execute_out
+
+    status_out = status_tool.func()
+    assert isinstance(status_out, str)
+    assert "tool_call_budget_exceeded" in status_out
+    assert state["general_used"] == 1
+    assert state["followup_used"] == 2
+    assert state["used"] == 3
+
+
 class _FakeMCPClient:
     def __init__(self, _config: Any) -> None:
         self._config = _config
@@ -141,6 +177,18 @@ class _FakeLangGraphAgent:
     def __init__(self, name: str, system_prompt: str) -> None:
         self.name = name
         self.system_prompt = system_prompt
+
+
+class _FakeSupervisorApp:
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self.calls: list[tuple[Any, Any | None]] = []
+
+    async def ainvoke(self, payload: Any, config: Any | None = None) -> Any:
+        self.calls.append((payload, config))
+        if not self._responses:
+            raise AssertionError("No fake responses left")
+        return self._responses.pop(0)
 
 
 def _build_mcp_config(*server_names: str) -> MCPServerConfig:
@@ -242,3 +290,42 @@ def test_supervisor_prompt_lists_dynamic_tool_agent_names() -> None:
 
     assert "tool_agent_coding, tool_agent_general" in prompt
     assert "ツール実行エージェント" in prompt
+
+
+def test_tool_limits_default_call_limit_is_raised_for_mixed_scenarios() -> None:
+    assert ToolLimits.from_config(_build_runtime_config()).tool_call_limit == 4
+    assert ToolLimits.from_config(_build_runtime_config()).followup_tool_call_limit == 8
+
+
+def test_mcp_client_forces_graceful_completion_after_budget_exhaustion(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_app = _FakeSupervisorApp(
+        responses=[
+            {
+                "output": (
+                    "<OUTPUT><TEXT>設定ファイルは /tmp/ai-chat-util-config.yml です。\n"
+                    "重要な見出し: Overview, Setup, Troubleshooting</TEXT>"
+                    "<RESPONSE_TYPE>complete</RESPONSE_TYPE></OUTPUT>"
+                )
+            },
+        ]
+    )
+
+    final_text, resp_type, hitl_kind, hitl_tool, add_in, add_out = asyncio.run(
+        MCPClientUtil.force_graceful_completion_after_budget_exhaustion(
+            app=fake_app,
+            run_trace_id="1234567890abcdef1234567890abcdef",
+            recursion_limit=50,
+            user_text="ERROR: tool call budget exceeded. error=tool_call_budget_exceeded tool=analyze_files limit=4 used=4.",
+        )
+    )
+
+    assert resp_type == "complete"
+    assert hitl_kind is None
+    assert hitl_tool is None
+    assert add_in == 0
+    assert add_out == 0
+    assert len(fake_app.calls) == 1
+    second_payload, _second_config = fake_app.calls[0]
+    assert "追加のツール実行、同一ツールの再試行、planner_agent への再委譲は行わないでください" in second_payload["messages"][0].content
+    assert "/tmp/ai-chat-util-config.yml" in final_text
+    assert "Overview" in final_text

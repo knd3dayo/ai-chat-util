@@ -4,9 +4,11 @@ import asyncio
 import sys
 import types
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from langgraph.errors import GraphRecursionError
 
 fake_client_module = types.ModuleType("langchain_mcp_adapters.client")
 fake_client_module.MultiServerMCPClient = object
@@ -495,3 +497,43 @@ def test_evidence_reflection_overrides_negative_final_text() -> None:
 
     assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
     assert "重要な見出し: Overview, Setup, Troubleshooting" in fallback
+
+
+def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
+    class _FakeApp:
+        async def aget_state(self, config: Any) -> Any:
+            return SimpleNamespace(values={"messages": [{"role": "tool", "content": '{"path": "/tmp/a.yml"}'}]})
+
+        async def aget_state_history(self, config: Any, limit: int | None = None):
+            yield SimpleNamespace(values={"messages": [{"role": "tool", "content": '{"stdout": "hello"}'}]})
+
+    results = asyncio.run(MCPClientUtil.collect_checkpoint_results(app=_FakeApp(), run_trace_id="abc"))
+
+    assert len(results) == 2
+    evidence = MCPClientUtil.extract_successful_tool_evidence(results)
+    assert evidence["config_path"] == "/tmp/a.yml"
+    assert evidence["stdout_blocks"] == ["hello"]
+
+
+def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
+    text = MCPClientUtil.build_recursion_limit_fallback_text(
+        "Recursion limit of 50 reached without hitting a stop condition",
+        {
+            "config_path": "/tmp/ai-chat-util-config.yml",
+            "stdout_blocks": ["重要な見出し: Overview, Setup, Troubleshooting"],
+        },
+    )
+
+    assert "再帰上限に到達" in text
+    assert "/tmp/ai-chat-util-config.yml" in text
+    assert "重要な見出し: Overview, Setup, Troubleshooting" in text
+
+
+def test_build_recursion_limit_fallback_text_without_evidence_returns_error() -> None:
+    text = MCPClientUtil.build_recursion_limit_fallback_text(
+        "Recursion limit of 50 reached without hitting a stop condition",
+        {"config_path": None, "stdout_blocks": []},
+    )
+
+    assert "ERROR: MCPワークフローが再帰上限に到達したため停止しました。" in text
+    assert "Recursion limit of 50 reached without hitting a stop condition" in text

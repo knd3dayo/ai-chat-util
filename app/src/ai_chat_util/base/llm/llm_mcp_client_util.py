@@ -38,6 +38,35 @@ logger = log_settings.getLogger(__name__)
 class MCPClientUtil:
 
     @classmethod
+    async def collect_checkpoint_results(
+        cls,
+        *,
+        app: Any,
+        run_trace_id: str,
+        history_limit: int = 32,
+    ) -> list[Any]:
+        config = {"configurable": {"thread_id": run_trace_id}}
+        results: list[Any] = []
+
+        try:
+            state = await app.aget_state(config)
+            values = getattr(state, "values", None)
+            if values is not None:
+                results.append(values)
+        except Exception:
+            logger.debug("Failed to load latest graph state for trace_id=%s", run_trace_id, exc_info=True)
+
+        try:
+            async for snapshot in app.aget_state_history(config, limit=history_limit):
+                values = getattr(snapshot, "values", None)
+                if values is not None:
+                    results.append(values)
+        except Exception:
+            logger.debug("Failed to load graph state history for trace_id=%s", run_trace_id, exc_info=True)
+
+        return results
+
+    @classmethod
     def _iter_result_messages(cls, result: Any) -> list[Any]:
         if isinstance(result, Mapping):
             msgs = result.get("messages")
@@ -175,6 +204,20 @@ class MCPClientUtil:
                 lines.append("[/stdout]")
 
         return "\n".join(lines).strip()
+
+    @classmethod
+    def build_recursion_limit_fallback_text(cls, error_text: str, evidence: Mapping[str, Any]) -> str:
+        evidence_text = cls.build_evidence_reflected_final_text(evidence)
+        prefix = (
+            "ワークフローが再帰上限に到達したため、追加のツール実行は停止しました。"
+            "既に取得済みの結果だけを返します。"
+        )
+        if evidence_text:
+            return prefix + "\n" + evidence_text
+        return (
+            "ERROR: MCPワークフローが再帰上限に到達したため停止しました。\n"
+            f"- error: {error_text}"
+        )
 
     @classmethod
     def contains_tool_budget_exceeded_signal(cls, text: str | None) -> bool:

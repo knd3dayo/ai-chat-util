@@ -6,6 +6,7 @@ import contextlib
 import uuid
 
 import asyncio
+from langgraph.errors import GraphRecursionError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from ai_chat_util_base.config.runtime import (
     AiChatUtilConfig,
@@ -125,10 +126,36 @@ class MCPClient(AbstractLLMClient):
             if not lc_messages:
                 raise ValueError("chat_request.chat_history.messages が空です。")
 
+            workflow_results: list[Any] = []
+
             try:
                 result = await app.ainvoke(
                     {"messages": lc_messages},
                     config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
+                )
+                workflow_results.append(result)
+            except GraphRecursionError as e:
+                logger.warning("MCP supervisor hit recursion limit: trace_id=%s", run_trace_id, exc_info=True)
+                checkpoint_results = await MCPClientUtil.collect_checkpoint_results(
+                    app=app,
+                    run_trace_id=run_trace_id,
+                )
+                workflow_results.extend(checkpoint_results)
+                evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
+                msg = str(e).strip() or type(e).__name__
+                user_text = MCPClientUtil.build_recursion_limit_fallback_text(msg, evidence)
+                return ChatResponse(
+                    status=cast(Any, "completed"),
+                    trace_id=run_trace_id,
+                    hitl=None,
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": user_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
                 )
             except Exception as e:
                 # Ensure we terminate with a user-visible message (avoid apparent hangs).
@@ -156,7 +183,6 @@ class MCPClient(AbstractLLMClient):
                     output_tokens=0,
                 )
             logger.debug("Extracting output and usage from agent result: %s", result)
-            workflow_results: list[Any] = [result]
 
             output_text, input_tokens, output_tokens = MCPClientUtil._extract_output_and_usage(result)
 

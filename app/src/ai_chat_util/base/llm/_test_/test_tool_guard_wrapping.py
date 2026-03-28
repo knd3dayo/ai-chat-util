@@ -1,9 +1,34 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from typing import Any
 
+import pytest
+
+fake_client_module = types.ModuleType("langchain_mcp_adapters.client")
+fake_client_module.MultiServerMCPClient = object
+sys.modules.setdefault("langchain_mcp_adapters.client", fake_client_module)
+
+fake_sessions_module = types.ModuleType("langchain_mcp_adapters.sessions")
+fake_sessions_module.Connection = dict[str, Any]
+sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
+
+import ai_chat_util.base.llm.agent as agent_mod
+from ai_chat_util.base.llm.agent import AgentBuilder
+from ai_chat_util.base.llm.prompts import CodingAgentPrompts
 from ai_chat_util.base.llm.llm_mcp_client_util import MCPClientUtil
+from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
+from ai_chat_util_base.config.runtime import (
+    AiChatUtilConfig,
+    FeaturesSection,
+    LLMSection,
+    LoggingSection,
+    MCPSection,
+    NetworkSection,
+    Office2PDFSection,
+)
 
 
 class _FakeTool:
@@ -102,3 +127,118 @@ def test_async_tool_timeout_retries_then_succeeds() -> None:
         assert state["used"] == 2
 
     asyncio.run(_run())
+
+
+class _FakeMCPClient:
+    def __init__(self, _config: Any) -> None:
+        self._config = _config
+
+    async def get_tools(self) -> list[Any]:
+        return []
+
+
+class _FakeLangGraphAgent:
+    def __init__(self, name: str, system_prompt: str) -> None:
+        self.name = name
+        self.system_prompt = system_prompt
+
+
+def _build_mcp_config(*server_names: str) -> MCPServerConfig:
+    config = MCPServerConfig()
+    config.servers = {
+        server_name: MCPServerConfigEntry(name=server_name, command="dummy")
+        for server_name in server_names
+    }
+    return config
+
+
+def _build_runtime_config() -> AiChatUtilConfig:
+    return AiChatUtilConfig.model_construct(
+        llm=LLMSection.model_construct(
+            provider="openai",
+            completion_model="gpt-5",
+            embedding_model="text-embedding-3-small",
+            timeout_seconds=60.0,
+            api_key="dummy",
+            base_url=None,
+            api_version=None,
+            extra_headers=None,
+        ),
+        mcp=MCPSection(),
+        features=FeaturesSection(),
+        logging=LoggingSection(),
+        network=NetworkSection(),
+        office2pdf=Office2PDFSection(),
+    )
+
+
+def _patch_agent_creation(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    created: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(agent_mod, "MultiServerMCPClient", _FakeMCPClient)
+
+    def _fake_create_agent(_llm: Any, _tools: list[Any], *, system_prompt: str, name: str) -> _FakeLangGraphAgent:
+        created.append((name, system_prompt))
+        return _FakeLangGraphAgent(name=name, system_prompt=system_prompt)
+
+    monkeypatch.setattr(agent_mod, "create_agent", _fake_create_agent)
+    return created
+
+
+def test_create_sub_agents_assigns_unique_names_for_mixed_mcp_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config("coding-agent", "general-tools"),
+            llm=object(),
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+        )
+    )
+
+    assert [name for name, _ in created] == ["tool_agent_coding", "tool_agent_general"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding", "tool_agent_general"]
+    assert len({agent.get_agent().name for agent in agents}) == 2
+    assert "tool_agent_coding" in created[0][1]
+    assert "tool_agent_general" in created[1][1]
+
+
+@pytest.mark.parametrize(
+    ("server_names", "expected_name"),
+    [
+        (("coding-agent",), "tool_agent_coding"),
+        (("general-tools",), "tool_agent_general"),
+    ],
+)
+def test_create_sub_agents_keeps_stable_name_for_single_group(
+    monkeypatch: pytest.MonkeyPatch,
+    server_names: tuple[str, ...],
+    expected_name: str,
+) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config(*server_names),
+            llm=object(),
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+        )
+    )
+
+    assert [name for name, _ in created] == [expected_name]
+    assert [agent.get_agent_name() for agent in agents] == [expected_name]
+
+
+def test_supervisor_prompt_lists_dynamic_tool_agent_names() -> None:
+    prompt = CodingAgentPrompts().supervisor_system_prompt(
+        tools_description="dummy tools",
+        supervisor_hitl_policy_text="dummy policy",
+        tool_agent_names=["tool_agent_coding", "tool_agent_general"],
+    )
+
+    assert "tool_agent_coding, tool_agent_general" in prompt
+    assert "ツール実行エージェント" in prompt

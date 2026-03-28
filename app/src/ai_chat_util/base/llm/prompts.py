@@ -11,7 +11,7 @@ class PromptsBase(ABC):
         pass
 
     @abstractmethod
-    def tool_agent_system_prompt(self, hitl_policy_text) -> str:
+    def tool_agent_system_prompt(self, hitl_policy_text, agent_name="tool_agent") -> str:
         pass
 
     @abstractmethod
@@ -27,7 +27,7 @@ class PromptsBase(ABC):
         pass
 
     @abstractmethod
-    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text) -> str:
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None) -> str:
         pass
 
     def create_tools_description(self, allowed_langchain_tools) -> str:
@@ -58,9 +58,9 @@ class CodingAgentPrompts(PromptsBase):
 - 直前のユーザー入力に 'APPROVE TOOL_NAME' があれば実行して構いません。
 - ユーザーがローカルファイルパスやURLを提示した場合、アクセス不能と決めつけず、まずは該当ツールで実行を試みてください。
 """
-    def tool_agent_system_prompt(self, hitl_policy_text) -> str:
+    def tool_agent_system_prompt(self, hitl_policy_text, agent_name="tool_agent") -> str:
         return f"""
-あなたはツール実行エージェント（tool_agent）です。スーパーバイザーの指示を達成するために、必要に応じてツールを使用してください。
+あなたはツール実行エージェントです。チーム内でのあなたの識別名は {agent_name} です。スーパーバイザーの指示を達成するために、必要に応じてツールを使用してください。
 利用可能なツールのみを使用してください。
 
 {hitl_policy_text}
@@ -132,29 +132,31 @@ class CodingAgentPrompts(PromptsBase):
         return (
                 "[HITL承認ポリシー]\n"
                 f"- 次のツールは人間の承認があるまで実行してはいけません: {approval_tools_text}\n"
-                "- 承認が必要なツール一覧が (なし) の場合、承認要求はせず、必要に応じて tool_agent に実行させてください。\n"
+                "- 承認が必要なツール一覧が (なし) の場合、承認要求はせず、必要に応じてツール実行エージェントに実行させてください。\n"
                 "- 承認が必要なら、<RESPONSE_TYPE>question</RESPONSE_TYPE> と <HITL_KIND>approval</HITL_KIND> と <HITL_TOOL>TOOL_NAME</HITL_TOOL> を含めて止めてください。\n"
             )
     
-    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text) -> str:
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None) -> str:
+        tool_agent_names = [name for name in (tool_agent_names or []) if isinstance(name, str) and name.strip()]
+        tool_agent_names_text = ", ".join(tool_agent_names) if tool_agent_names else "tool_agent"
         return f"""
-あなたはチームのスーパーバイザーです。tool_agent（ツール実行）と planner_agent（計画）の各エージェントを管理し、
+あなたはチームのスーパーバイザーです。ツール実行エージェント（{tool_agent_names_text}）と planner_agent（計画）の各エージェントを管理し、
 スーパーバイザーの目的を達成してください。
 [重要: 委譲の原則]
 - ユーザーがローカルファイルパス/URLの分析を求めている場合、あなた自身の推測で「アクセスできない」と断定しないでください。
-  必ず最初に tool_agent に実行させてください（planner_agent ではありません）。
-- {tools_description} の中にユーザーの要求を満たすツールがある場合は、必ず tool_agent に実行させてください。
-- 承認ツール一覧が (なし) の場合、承認要求は不要です。tool_agent に必要なツールを実行させてください。
-- planner_agent は補助です。ツールが明確な場合は planner_agent を挟まず、即 tool_agent に委譲してください。
-- planner_agent を使った場合でも、計画で推奨されたツールがあるなら、必ず次のステップで tool_agent に実行させてください。
+    必ず最初にツール実行エージェントへ実行させてください（planner_agent ではありません）。
+- {tools_description} の中にユーザーの要求を満たすツールがある場合は、必ずツール実行エージェントへ実行させてください。
+- 承認ツール一覧が (なし) の場合、承認要求は不要です。ツール実行エージェントに必要なツールを実行させてください。
+- planner_agent は補助です。ツールが明確な場合は planner_agent を挟まず、即ツール実行エージェントに委譲してください。
+- planner_agent を使った場合でも、計画で推奨されたツールがあるなら、必ず次のステップでツール実行エージェントに実行させてください。
 
 [ローカルパス/URLの扱い]
-- ローカルパスが与えられたら、tool_agent にそのまま渡してツール実行を試みてください。ユーザーに「アップロードして」と返すのは tool_agent が実行失敗した場合に限ります。
-- tool_agent がツール実行に成功した場合、あなたはその結果を要約して <RESPONSE_TYPE>complete</RESPONSE_TYPE> で返してください。
+- ローカルパスが与えられたら、ツール実行エージェントにそのまま渡してツール実行を試みてください。ユーザーに「アップロードして」と返すのはツール実行エージェントが実行失敗した場合に限ります。
+- ツール実行エージェントがツール実行に成功した場合、あなたはその結果を要約して <RESPONSE_TYPE>complete</RESPONSE_TYPE> で返してください。
 
 [ループ抑制: 重要]
-- 同一のユーザー入力に対して tool_agent へ不必要に何度も再委譲しないでください。結果を使って完了できる場合は完了させてください。
-- tool_agent が失敗を返した場合のみ、planner_agent に原因切り分け（使うツール/引数の修正案）を出させたうえで、tool_agent に再実行を1回だけ許可します。
+- 同一のユーザー入力に対してツール実行エージェントへ不必要に何度も再委譲しないでください。結果を使って完了できる場合は完了させてください。
+- ツール実行エージェントが失敗を返した場合のみ、planner_agent に原因切り分け（使うツール/引数の修正案）を出させたうえで、ツール実行エージェントに再実行を1回だけ許可します。
 
 [重要: タスク系ツールの完了条件]
 - execute/status/get_result という「タスクIDで追跡する」ツール群がある場合、最終的なユーザー出力には get_result の stdout を“本文として”必ず含めてください（「確認しました」「問題ありません」等の要約だけで終えない）。
@@ -163,7 +165,7 @@ class CodingAgentPrompts(PromptsBase):
     [stdout]\n...\n[/stdout]\n[stderr_tail]\n...\n[/stderr_tail]
 - workspace_path は、明示的に必要な場合のみ使ってください。使う場合も execute の戻り task_id を必ず用いてください。
 
-計画が必要なら planner_agent を使い、具体的な実行が必要なら tool_agent を使ってください。
+計画が必要なら planner_agent を使い、具体的な実行が必要ならツール実行エージェントを使ってください。
 あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。
 
 各エージェントからの出力フォーマットはXML形式です。

@@ -4,6 +4,7 @@ from typing import Any
 from typing import Any, Mapping, Sequence, cast
 
 import asyncio
+import re
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
@@ -417,6 +418,32 @@ class ToolLimits(BaseModel):
 
 class AgentBuilder:
 
+    @staticmethod
+    def _slugify_agent_name_part(value: str) -> str:
+        normalized = re.sub(r"[^0-9A-Za-z]+", "_", value.strip().lower())
+        normalized = re.sub(r"_+", "_", normalized).strip("_")
+        return normalized or "default"
+
+    @classmethod
+    def build_tool_agent_name(
+        cls,
+        *,
+        group_label: str | None = None,
+        server_names: Sequence[str] | None = None,
+    ) -> str:
+        suffix_source = group_label
+        if suffix_source is None:
+            normalized_servers = [
+                cls._slugify_agent_name_part(name)
+                for name in (server_names or [])
+                if isinstance(name, str) and name.strip()
+            ]
+            if normalized_servers:
+                suffix_source = "_".join(sorted(dict.fromkeys(normalized_servers)))
+
+        suffix = cls._slugify_agent_name_part(suffix_source or "default")
+        return f"tool_agent_{suffix}"
+
     def get_tools(self) -> list[Any]:
         return self.langchain_tools
     
@@ -425,6 +452,9 @@ class AgentBuilder:
     
     def get_hitl_approval_tools(self) -> Sequence[str]:
         return self.hitl_approval_tools
+
+    def get_agent_name(self) -> str:
+        return self.agent_name
 
     def get_tools_description(self) -> str:
         tools_description = "\n".join(f"## name: {tool.name}\n - description: {tool.description}\n - args_schema: {tool.args_schema}\n" for tool in self.langchain_tools)
@@ -437,6 +467,7 @@ class AgentBuilder:
             llm: BaseChatModel,
             prompts: PromptsBase,
             tool_limits: ToolLimits | None,
+            agent_name: str,
         ):
 
         # Safety valves: cap tool calls and hard-timeout tool execution.
@@ -473,16 +504,20 @@ class AgentBuilder:
         else:
             hitl_policy_text = prompts.normal_hitl_policy_text(approval_tools_text)
 
-        tool_agent_system_prompt = prompts.tool_agent_system_prompt(hitl_policy_text)
+        tool_agent_system_prompt = prompts.tool_agent_system_prompt(
+            hitl_policy_text,
+            agent_name=agent_name,
+        )
 
         tool_agent = create_agent(
             llm,
             coding_agent_langchain_tools,
             system_prompt=tool_agent_system_prompt,
-            name="tool_agent",
+            name=agent_name,
         )
 
         self.agent = tool_agent
+        self.agent_name = agent_name
         self.langchain_tools = coding_agent_langchain_tools
         self.hitl_approval_tools = hitl_approval_tools
 
@@ -526,6 +561,10 @@ class AgentBuilder:
                 llm=llm,
                 prompts=prompts,
                 tool_limits=tool_limits,
+                agent_name=cls.build_tool_agent_name(
+                    group_label="coding",
+                    server_names=tuple(code_agent_mcp_config.servers.keys()),
+                ),
             )
             agents.append(code_agent_builder)
 
@@ -538,6 +577,10 @@ class AgentBuilder:
                 llm=llm,
                 prompts=prompts,
                 tool_limits=tool_limits,
+                agent_name=cls.build_tool_agent_name(
+                    group_label="general",
+                    server_names=tuple(normal_tools_mcp_config.servers.keys()),
+                ),
             )
             agents.append(normal_agent_builder)
 

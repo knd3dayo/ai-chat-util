@@ -460,7 +460,11 @@ class MCPClientUtil:
         else:
             supervisor_hitl_policy_text = prompts.supervisor_normal_hitl_policy_text(approval_tools_text)
 
-        supervisor_prompt = prompts.supervisor_system_prompt(tools_description, supervisor_hitl_policy_text)
+        supervisor_prompt = prompts.supervisor_system_prompt(
+            tools_description,
+            supervisor_hitl_policy_text,
+            tool_agent_names=[agent.get_agent_name() for agent in sub_agents],
+        )
 
         # Prefer tool execution agent first to reduce accidental planner-only loops.
         workflow = create_supervisor(

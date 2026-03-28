@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 import pytest
 import yaml
 
-from ai_chat_util.agent.coding._api_.api_server import create_app
-from ai_chat_util.agent.coding.core.endpoint import EndPoint
+from coding_agent_util._api_.api_server import create_app
+from coding_agent_util.core.endpoint import EndPoint
 from ai_chat_util_base.model.agent_util_models import TaskStatus
 from ai_chat_util_base.config import runtime as runtime_mod
 
@@ -163,8 +163,8 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
-    from ai_chat_util.agent.coding.core import task_manager as tm_mod
+    from coding_agent_util.core import endpoint as endpoint_mod
+    from coding_agent_util.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

@@ -8,21 +8,34 @@ import atexit
 import base64
 from abc import ABC, abstractmethod
 
-from ai_chat_util_base.config.runtime import AiChatUtilConfig
+from ai_chat_util_base.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util_base.model.ai_chatl_util_models import (
     ChatHistory, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel
 )
-from ..util.office2pdf import Office2PDFUtil
-from ..util.downloader import DownLoader
-
 from file_util.model import FileUtilDocument
+from file_util.util.office2pdf import Office2PDFUtil
+from file_util.util.downloader import DownLoader
+from file_util.util import pdf_util
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 
 class LLMMessageContentFactoryBase(ABC):
+
+    def _get_effective_config(self) -> AiChatUtilConfig:
+        config = self.get_config()
+        if config is not None:
+            return config
+        return get_runtime_config()
+
+    def _get_network_download_options(self) -> tuple[bool, str | None]:
+        config = self._get_effective_config()
+        return config.network.requests_verify, config.network.ca_bundle
+
+    def _get_configured_libreoffice_path(self) -> str | None:
+        return self._get_effective_config().office2pdf.libreoffice_path
 
     def is_text_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "text"
@@ -73,12 +86,24 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = DownLoader.download_files([file_url], tmpdir.name)
+        requests_verify, ca_bundle = self._get_network_download_options()
+        file_paths = DownLoader.download_files(
+            [file_url],
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
         return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
 
     async def create_image_content_from_url_async(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            file_paths = await DownLoader.download_files_async([file_url], tmp_dir)
+            requests_verify, ca_bundle = self._get_network_download_options()
+            file_paths = await DownLoader.download_files_async(
+                [file_url],
+                tmp_dir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
             return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
     
     def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
@@ -99,7 +124,13 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        requests_verify, ca_bundle = self._get_network_download_options()
+        file_paths = DownLoader.download_files(
+            [WebRequestModel(url=file_url)],
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
         return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
     def _create_custom_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
@@ -114,8 +145,6 @@ class LLMMessageContentFactoryBase(ABC):
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-        import ai_chat_util.base.util.pdf_util as pdf_util
-
         page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.identifier} の内容を以下に示します。")
         pdf_contents = [page_info_content]
         # PDFからテキストと画像を抽出
@@ -141,7 +170,8 @@ class LLMMessageContentFactoryBase(ABC):
         temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
         Office2PDFUtil.create_pdf_from_document_bytes(
             input_bytes=document_type.data,
-            output_path=temp_file_path
+            output_path=temp_file_path,
+            configured_libreoffice_path=self._get_configured_libreoffice_path(),
         )
         # 元ファイルからPDFに変換した旨の説明を追加
         explanation_text = f"""
@@ -174,7 +204,13 @@ class LLMMessageContentFactoryBase(ABC):
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
 
-        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        requests_verify, ca_bundle = self._get_network_download_options()
+        file_paths = DownLoader.download_files(
+            [WebRequestModel(url=file_url)],
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
 
         office_contents = []
         for file_path in file_paths:
@@ -240,7 +276,13 @@ class LLMMessageContentFactoryBase(ABC):
         '''
         tmpdir = tempfile.TemporaryDirectory()
         atexit.register(tmpdir.cleanup)
-        file_paths = DownLoader.download_files([WebRequestModel(url=file_url)], tmpdir.name)
+        requests_verify, ca_bundle = self._get_network_download_options()
+        file_paths = DownLoader.download_files(
+            [WebRequestModel(url=file_url)],
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
 
         return self.create_multi_format_contents_from_file(
             file_paths[0], detail=detail

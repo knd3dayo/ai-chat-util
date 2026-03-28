@@ -1,44 +1,29 @@
 from __future__ import annotations
 
+import os
+import shlex
+import shutil
+import signal
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Iterable
-import signal
-import time
-import shlex
 
-import os
-import shutil
-import tempfile
-
-from ai_chat_util_base.config.runtime import get_runtime_config
 
 class Office2PDFUtil:
-    DEFAULT_TIMEOUT_SECONDS = 600  # 10 minutes
+    DEFAULT_TIMEOUT_SECONDS = 600
 
     class _ConversionTimeout(RuntimeError):
         """Internal exception used to distinguish timeout paths."""
 
     @classmethod
     def _build_user_installation_arg(cls, user_profile_dir: Path) -> str:
-        """Build `-env:UserInstallation=...` for LibreOffice.
-
-        LibreOffice expects a *file URL* (e.g. file:///... ), not a plain filesystem path.
-        """
-        # `as_uri()` requires an absolute path
         uri = user_profile_dir.resolve().as_uri()
         return f"-env:UserInstallation={uri}"
 
     @classmethod
     def _kill_process_tree(cls, proc: subprocess.Popen[bytes]) -> None:
-        """Best-effort: kill the process *and its children*.
-
-        LibreOffice may spawn child processes; on timeout we want to clean up the whole
-        process tree.
-
-        - Windows: `taskkill /T /F`
-        - POSIX: `killpg` (requires `start_new_session=True` on Popen)
-        """
         if proc.poll() is not None:
             return
 
@@ -67,28 +52,14 @@ class Office2PDFUtil:
 
     @classmethod
     def _kill_libreoffice_by_user_installation(cls, user_installation_arg: str) -> None:
-        """Best-effort: kill LibreOffice processes whose command line contains UserInstallation.
-
-        LibreOffice sometimes returns to foreground quickly and continues conversion in the
-        background. In such cases, killing only the originally spawned PID may not stop the
-        conversion. We therefore additionally search for processes that were launched with the
-        same `-env:UserInstallation=...` value and terminate them.
-
-        `user_installation_arg` is expected to be the exact argument string, e.g.
-        "-env:UserInstallation=file:///...".
-        """
         if not user_installation_arg:
             return
 
-        # We match by the unique file URI (UserInstallation=file:///...) to avoid killing
-        # unrelated LibreOffice instances.
-        marker = user_installation_arg.split("-env:")[-1]  # "UserInstallation=..."
+        marker = user_installation_arg.split("-env:")[-1]
         if not marker:
             return
 
         if os.name == "nt":
-            # Use PowerShell to query Win32_Process.CommandLine and stop matching processes.
-            # Note: this requires no admin privileges for processes owned by the same user.
             ps = (
                 "$m = "
                 + shlex.quote(marker)
@@ -115,11 +86,9 @@ class Office2PDFUtil:
                     check=False,
                 )
             except Exception:
-                # ignore best-effort failures
                 pass
             return
 
-        # POSIX fallback: parse `ps` output.
         try:
             res = subprocess.run(
                 ["ps", "-eo", "pid,args"],
@@ -132,7 +101,6 @@ class Office2PDFUtil:
                 line = line.strip()
                 if not line:
                     continue
-                # pid is first token
                 parts = line.split(maxsplit=1)
                 if len(parts) != 2:
                     continue
@@ -156,19 +124,12 @@ class Office2PDFUtil:
         poll_interval: float = 0.25,
         start_time_epoch: float | None = None,
     ) -> Path:
-        """Wait until a PDF exists and appears stable.
-
-        Stability definition: file exists and size is unchanged for `stable_seconds`.
-        """
         deadline = None
         if timeout_seconds is not None:
             deadline = time.monotonic() + timeout_seconds
 
         last_size: int | None = None
         last_change_t: float | None = None
-
-        # Fallback candidate: when LibreOffice picks a slightly different name.
-        # We'll search for the newest pdf modified after conversion start.
         start_epoch = start_time_epoch or time.time()
 
         while True:
@@ -177,7 +138,6 @@ class Office2PDFUtil:
 
             candidate = expected_path
             if not candidate.exists():
-                # Fallback: find a pdf created/updated after start.
                 newest: Path | None = None
                 newest_mtime = 0.0
                 try:
@@ -205,47 +165,10 @@ class Office2PDFUtil:
                     if last_size != size:
                         last_size = size
                         last_change_t = now
-                    else:
-                        if last_change_t is not None and (now - last_change_t) >= stable_seconds:
-                            return candidate
+                    elif last_change_t is not None and (now - last_change_t) >= stable_seconds:
+                        return candidate
 
             time.sleep(poll_interval)
-
-    @classmethod
-    def _run_command_with_timeout(
-        cls,
-        command: list[str],
-        timeout: int | None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        """Run a command and ensure it's cleaned up on timeout."""
-        proc = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            # POSIX: create a process group so we can killpg on timeout.
-            start_new_session=True,
-        )
-
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            cls._kill_process_tree(proc)
-            # Reap the process if possible.
-            try:
-                proc.communicate(timeout=5)
-            except Exception:
-                pass
-            raise RuntimeError(f"LibreOffice conversion timed out after {timeout}s") from exc
-
-        if proc.returncode != 0:
-            raise subprocess.CalledProcessError(
-                proc.returncode,
-                command,
-                output=stdout,
-                stderr=stderr,
-            )
-
-        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
     @classmethod
     def _run_command_with_timeout_return_proc(
@@ -253,10 +176,6 @@ class Office2PDFUtil:
         command: list[str],
         timeout: int | None,
     ) -> tuple[subprocess.CompletedProcess[bytes], subprocess.Popen[bytes]]:
-        """Run a command, returning both CompletedProcess and the Popen instance.
-
-        This is useful when we need the PID for additional clean-up on timeout.
-        """
         proc = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -290,11 +209,8 @@ class Office2PDFUtil:
         libreoffice_binary: str,
         source: Path,
         output_dir: Path,
-        extra_args: Iterable[str] | None = None
+        extra_args: Iterable[str] | None = None,
     ) -> list[str]:
-        """
-        Compose the LibreOffice CLI command used for PDF conversion.
-        """
         command = [
             libreoffice_binary,
             "--headless",
@@ -302,7 +218,6 @@ class Office2PDFUtil:
             "--nolockcheck",
         ]
         if extra_args:
-            # LibreOffice CLI options should appear before the document path.
             command.extend(extra_args)
         command.extend([
             "--convert-to",
@@ -319,6 +234,7 @@ class Office2PDFUtil:
         input_bytes: bytes,
         output_path: str | Path | None = None,
         libreoffice_path: str | Path | None = None,
+        configured_libreoffice_path: str | Path | None = None,
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
         temp_dir: str | Path | None = None,
     ) -> Path:
@@ -331,6 +247,7 @@ class Office2PDFUtil:
                 input_path=source_path,
                 output_path=output_path,
                 libreoffice_path=libreoffice_path,
+                configured_libreoffice_path=configured_libreoffice_path,
                 timeout=timeout,
             )
 
@@ -340,25 +257,9 @@ class Office2PDFUtil:
         input_path: str | Path,
         output_path: str | Path | None = None,
         libreoffice_path: str | Path | None = None,
+        configured_libreoffice_path: str | Path | None = None,
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
     ) -> Path:
-        """
-        Convert an Office document to PDF using LibreOffice.
-
-        Args:
-            input_path: Path to the Office document to convert.
-            output_path: Target PDF path or directory. When omitted, a sibling PDF is created.
-            libreoffice_path: Override path to the LibreOffice binary; otherwise use
-                ai-chat-util-config.yml の ``office2pdf.libreoffice_path`` または PATH を使用。
-            timeout: Seconds to wait for LibreOffice. ``None`` disables the timeout.
-
-        Returns:
-            The resolved output PDF path.
-
-        Raises:
-            FileNotFoundError: When the input or LibreOffice binary cannot be found.
-            RuntimeError: When LibreOffice fails to produce a PDF.
-        """
         source = Path(input_path).expanduser()
         if not source.exists():
             raise FileNotFoundError(f"Input file not found: {source}")
@@ -373,42 +274,35 @@ class Office2PDFUtil:
             else:
                 target = output_candidate
         target.parent.mkdir(parents=True, exist_ok=True)
-        
-        libreoffice_binary = cls.find_libreoffice_binary(libreoffice_path)
-        output_dir = target.parent.resolve()
 
+        libreoffice_binary = cls.find_libreoffice_binary(
+            explicit_path=libreoffice_path,
+            configured_path=configured_libreoffice_path,
+        )
+        output_dir = target.parent.resolve()
         expected_produced_path = output_dir / (source.stem + ".pdf")
         start_epoch = time.time()
         start_mono = time.monotonic()
 
-        # Avoid false positives when a PDF from a previous run already exists.
         for p in (target, expected_produced_path):
             try:
                 if p.exists():
                     p.unlink()
             except Exception:
-                # best-effort: don't fail conversion just because cleanup couldn't happen
                 pass
 
-        # Isolate LibreOffice user profile per conversion to avoid profile locks and
-        # lingering state across runs.
         with tempfile.TemporaryDirectory() as lo_profile_dirname:
             lo_profile_dir = Path(lo_profile_dirname)
             user_installation_arg = cls._build_user_installation_arg(lo_profile_dir)
-            extra_args = [user_installation_arg]
-
             command = cls._build_command(
                 libreoffice_binary,
                 source,
                 output_dir,
-                extra_args=extra_args,
+                extra_args=[user_installation_arg],
             )
 
             try:
-                # Step 1: wait for the soffice command itself (it might return quickly).
                 result, proc = cls._run_command_with_timeout_return_proc(command=command, timeout=timeout)
-
-                # Step 2: wait for the PDF to be produced (some environments convert in background).
                 if timeout is None:
                     remaining = None
                 else:
@@ -421,28 +315,24 @@ class Office2PDFUtil:
                     timeout_seconds=remaining,
                     start_time_epoch=start_epoch,
                 )
-            except subprocess.CalledProcessError as exc:  # pragma: no cover - raised paths tested
+            except subprocess.CalledProcessError as exc:
                 stderr = exc.stderr.decode(errors="ignore") if exc.stderr else ""
                 raise RuntimeError(
                     f"LibreOffice failed to convert {source.name}: {stderr.strip()}"
                 ) from exc
             except (TimeoutError, cls._ConversionTimeout) as exc:
-                # Ensure we stop any lingering background LibreOffice processes.
                 try:
-                    # We don't always have `proc` in scope if an exception happened before spawn.
                     if "proc" in locals() and isinstance(locals().get("proc"), subprocess.Popen):
-                        cls._kill_process_tree(locals()["proc"])  # type: ignore[index]
+                        cls._kill_process_tree(locals()["proc"])
                 except Exception:
                     pass
                 cls._kill_libreoffice_by_user_installation(user_installation_arg)
                 raise RuntimeError(f"LibreOffice conversion timed out after {timeout}s") from exc
             except FileNotFoundError:
                 raise
-            except Exception as exc:  # pragma: no cover - defensive guard
+            except Exception as exc:
                 raise RuntimeError(f"Failed to convert {source} to PDF") from exc
 
-        # LibreOffice names the output after the source stem. Rename if the caller requested a custom
-        # filename.
         produced_path = produced_candidate
         if produced_path.exists() and produced_path.resolve() != target.resolve():
             produced_path.rename(target)
@@ -456,20 +346,13 @@ class Office2PDFUtil:
 
         return target.resolve()
 
-
-
     @classmethod
-    def find_libreoffice_binary(cls, explicit_path: str | Path | None = None) -> str:
-        """
-        Resolve the LibreOffice executable path.
-
-        Preference order:
-        1) explicit path argument
-        2) ai-chat-util-config.yml: office2pdf.libreoffice_path
-        3) ``soffice`` or ``libreoffice`` on PATH
-        """
-        cfg = get_runtime_config()
-        candidate = explicit_path or cfg.office2pdf.libreoffice_path
+    def find_libreoffice_binary(
+        cls,
+        explicit_path: str | Path | None = None,
+        configured_path: str | Path | None = None,
+    ) -> str:
+        candidate = explicit_path or configured_path
         if candidate:
             candidate_path = Path(candidate).expanduser()
             if candidate_path.exists():
@@ -488,3 +371,6 @@ class Office2PDFUtil:
             "LibreOffice binary not found. Set office2pdf.libreoffice_path in ai-chat-util-config.yml "
             "or ensure LibreOffice is on PATH."
         )
+
+
+__all__ = ["Office2PDFUtil"]

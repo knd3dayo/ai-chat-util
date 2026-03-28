@@ -13,11 +13,10 @@ from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ai_chat_util.base.llm.llm_client_util import LLMClientUtil
 from ai_chat_util_base.config.runtime import get_runtime_config
 from file_util.model import FileUtilDocument
-from ai_chat_util.base.util.file_path_resolver import resolve_existing_file_path
-from ai_chat_util_base.config.runtime import get_runtime_config
-from ai_chat_util.base.util.downloader import DownLoader
-from ai_chat_util.base.util.office2pdf import Office2PDFUtil
-from ai_chat_util.base.util import pdf_util
+from file_util.util.downloader import DownLoader
+from file_util.util.file_path_resolver import resolve_existing_file_path
+from file_util.util.office2pdf import Office2PDFUtil
+from file_util.util import pdf_util
 
 import ai_chat_util.log.log_settings as log_settings
 
@@ -62,6 +61,15 @@ def _resolve_output_dir(output_dir: str | None) -> Path | None:
     llm_config = get_runtime_config()
     working_directory = llm_config.mcp.working_directory or "."
     return (Path(working_directory).expanduser() / candidate).resolve()
+
+
+def _get_network_download_options() -> tuple[bool, str | None]:
+    cfg = get_runtime_config()
+    return cfg.network.requests_verify, cfg.network.ca_bundle
+
+
+def _get_configured_libreoffice_path() -> str | None:
+    return get_runtime_config().office2pdf.libreoffice_path
 
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 async def analyze_image_urls(
@@ -214,7 +222,13 @@ async def analyze_pdf_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = DownLoader.download_files(pdf_path_urls, tmpdir.name)
+        requests_verify, ca_bundle = _get_network_download_options()
+        path_list = DownLoader.download_files(
+            pdf_path_urls,
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
         response = await LLMClientUtil.analyze_pdf_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:
@@ -300,7 +314,13 @@ async def analyze_office_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = DownLoader.download_files(office_path_urls, tmpdir.name)
+        requests_verify, ca_bundle = _get_network_download_options()
+        path_list = DownLoader.download_files(
+            office_path_urls,
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
         response = await LLMClientUtil.analyze_office_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:
@@ -382,6 +402,7 @@ async def convert_office_files_to_pdf(
             pdf_path = Office2PDFUtil.create_pdf_from_document_file(
                 input_path=office_path,
                 output_path=target_dir,
+                configured_libreoffice_path=_get_configured_libreoffice_path(),
             )
             results.append({
                 "source_path": office_path,
@@ -487,7 +508,13 @@ async def analyze_urls(
     atexit.register(tmpdir.cleanup)
     llm_client = LLMFactory.create_llm_client()
     try:
-        path_list = DownLoader.download_files(file_path_urls, tmpdir.name)
+        requests_verify, ca_bundle = _get_network_download_options()
+        path_list = DownLoader.download_files(
+            file_path_urls,
+            tmpdir.name,
+            requests_verify=requests_verify,
+            ca_bundle=ca_bundle,
+        )
         response = await LLMClientUtil.analyze_files(llm_client, path_list, prompt, detail)
         return response.output
     except Exception:

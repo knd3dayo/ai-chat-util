@@ -20,7 +20,7 @@ if [[ -n "${HOST_GID:-}" ]]; then export AI_PLATFORM_HOST_GID="$HOST_GID"; fi
 
 cd /opt/ai-chat-util/dood
 
-exec python -m ai_chat_util.agent.coding.mcp.mcp_server \
+exec python -m coding_agent_util.mcp.mcp_server \
   -m http \
   --host "${API_HOST:-0.0.0.0}" \
   -p "${API_PORT:-7101}" \

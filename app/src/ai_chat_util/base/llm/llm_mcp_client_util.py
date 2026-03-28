@@ -102,6 +102,21 @@ class MCPClientUtil:
                     return parsed
             except Exception:
                 pass
+
+        fallback: dict[str, Any] = {}
+        path_match = re.search(r'"path"\s*:\s*"([^\"]+)"', stripped, flags=re.DOTALL)
+        if path_match:
+            fallback["path"] = path_match.group(1).strip()
+
+        stdout_match = re.search(r'"stdout"\s*:\s*"(.*)"\s*(?:,\s*"stderr"|\}$)', stripped, flags=re.DOTALL)
+        if stdout_match:
+            stdout_value = stdout_match.group(1)
+            stdout_value = stdout_value.replace("\\n", "\n").strip()
+            if stdout_value:
+                fallback["stdout"] = stdout_value
+
+        if fallback:
+            return fallback
         return None
 
     @classmethod
@@ -110,6 +125,7 @@ class MCPClientUtil:
 
         config_path: str | None = None
         stdout_blocks: list[str] = []
+        headings: list[str] = []
         raw_texts: list[str] = []
 
         for result in items:
@@ -152,16 +168,44 @@ class MCPClientUtil:
                     if value and not value.lstrip().startswith("ERROR:"):
                         stdout_blocks.append(value)
 
+        def _extract_heading_candidates(block: str) -> list[str]:
+            found: list[str] = []
+            for line in block.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if re.match(r"^#{1,6}\s+.+$", stripped):
+                    found.append(stripped)
+                    continue
+                if re.match(r"^(?:[-*]|\d+[.)])\s+.+$", stripped):
+                    value = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", stripped).strip()
+                    if value:
+                        found.append(value)
+
+            label_match = re.search(r"重要な見出し\s*[:：]\s*(.+)", block)
+            if label_match:
+                tail = label_match.group(1).strip()
+                if tail:
+                    for part in re.split(r"\s*,\s*|\s*、\s*|\s*\|\s*", tail):
+                        value = part.strip()
+                        if value:
+                            found.append(value)
+            return found
+
         deduped_stdout: list[str] = []
         seen_stdout: set[str] = set()
         for stdout_text in stdout_blocks:
             if stdout_text not in seen_stdout:
                 seen_stdout.add(stdout_text)
                 deduped_stdout.append(stdout_text)
+            for heading in _extract_heading_candidates(stdout_text):
+                if heading not in headings:
+                    headings.append(heading)
 
         return {
             "config_path": config_path,
             "stdout_blocks": deduped_stdout,
+            "headings": headings,
             "raw_texts": raw_texts,
         }
 
@@ -187,6 +231,26 @@ class MCPClientUtil:
         return any(marker in text for marker in negative_markers)
 
     @classmethod
+    def final_text_missing_concrete_evidence(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
+        text = (user_text or "").strip()
+        if not text:
+            return bool(evidence.get("config_path") or evidence.get("headings"))
+
+        config_path = evidence.get("config_path")
+        if isinstance(config_path, str) and config_path.strip() and config_path.strip() not in text:
+            return True
+
+        headings = evidence.get("headings")
+        if isinstance(headings, Sequence):
+            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
+            if exact_headings:
+                matched = sum(1 for heading in exact_headings[:3] if heading in text)
+                if matched < min(3, len(exact_headings)):
+                    return True
+
+        return False
+
+    @classmethod
     def build_evidence_reflected_final_text(cls, evidence: Mapping[str, Any]) -> str:
         lines: list[str] = []
 
@@ -194,10 +258,18 @@ class MCPClientUtil:
         if isinstance(config_path, str) and config_path.strip():
             lines.append(f"設定ファイルの場所: {config_path.strip()}")
 
+        headings = evidence.get("headings")
+        if isinstance(headings, Sequence):
+            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
+            if exact_headings:
+                lines.append("文書内の重要な見出し:")
+                for heading in exact_headings[:3]:
+                    lines.append(f"- {heading}")
+
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):
             stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
-            if stdout_values:
+            if stdout_values and not headings:
                 lines.append("取得済みの coding-agent 実行結果:")
                 lines.append("[stdout]")
                 lines.append(stdout_values[-1])

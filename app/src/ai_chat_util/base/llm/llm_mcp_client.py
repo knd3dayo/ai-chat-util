@@ -268,9 +268,12 @@ class MCPClient(AbstractLLMClient):
                 user_text = extracted_text or output_text
 
             evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
-            if MCPClientUtil.final_text_contradicts_evidence(user_text, evidence):
+            if (
+                MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
+                or MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
+            ):
                 logger.warning(
-                    "Supervisor final text contradicted successful tool evidence; applying evidence-based fallback: trace_id=%s",
+                    "Supervisor final text did not faithfully reflect successful tool evidence; applying evidence-based fallback: trace_id=%s",
                     run_trace_id,
                 )
                 fallback_text = MCPClientUtil.build_evidence_reflected_final_text(evidence)

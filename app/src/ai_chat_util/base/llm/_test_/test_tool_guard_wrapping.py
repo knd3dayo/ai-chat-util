@@ -472,20 +472,22 @@ def test_extract_successful_tool_evidence_collects_config_path_and_stdout() -> N
     result = {
         "messages": [
             {"role": "tool", "content": '{"path": "/tmp/ai-chat-util-config.yml", "config": {"ai_chat_util_config": {}}}'},
-            {"role": "tool", "content": '{"stdout": "重要な見出し: Overview, Setup, Troubleshooting", "stderr": null}'},
+            {"role": "tool", "content": '{"stdout": "# Overview\n## Setup\n## Troubleshooting", "stderr": null}'},
         ]
     }
 
     evidence = MCPClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
-    assert evidence["stdout_blocks"] == ["重要な見出し: Overview, Setup, Troubleshooting"]
+    assert evidence["stdout_blocks"] == ["# Overview\n## Setup\n## Troubleshooting"]
+    assert evidence["headings"] == ["# Overview", "## Setup", "## Troubleshooting"]
 
 
 def test_evidence_reflection_overrides_negative_final_text() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
-        "stdout_blocks": ["重要な見出し: Overview, Setup, Troubleshooting"],
+        "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
+        "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
 
     assert MCPClientUtil.final_text_contradicts_evidence(
@@ -496,7 +498,22 @@ def test_evidence_reflection_overrides_negative_final_text() -> None:
     fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
 
     assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
-    assert "重要な見出し: Overview, Setup, Troubleshooting" in fallback
+    assert "- # Overview" in fallback
+    assert "- ## Setup" in fallback
+    assert "- ## Troubleshooting" in fallback
+
+
+def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
+        "headings": ["# Overview", "## Setup", "## Troubleshooting"],
+    }
+
+    assert MCPClientUtil.final_text_missing_concrete_evidence(
+        "get_loaded_config_info を使って確認しました。重要な見出しは概要、設定、トラブルシュートです。",
+        evidence,
+    )
 
 
 def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
@@ -520,13 +537,16 @@ def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
         "Recursion limit of 50 reached without hitting a stop condition",
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
-            "stdout_blocks": ["重要な見出し: Overview, Setup, Troubleshooting"],
+            "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
+            "headings": ["# Overview", "## Setup", "## Troubleshooting"],
         },
     )
 
     assert "再帰上限に到達" in text
     assert "/tmp/ai-chat-util-config.yml" in text
-    assert "重要な見出し: Overview, Setup, Troubleshooting" in text
+    assert "# Overview" in text
+    assert "## Setup" in text
+    assert "## Troubleshooting" in text
 
 
 def test_build_recursion_limit_fallback_text_without_evidence_returns_error() -> None:

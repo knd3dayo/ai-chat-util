@@ -306,6 +306,28 @@ class ToolLimits(BaseModel):
             f"{latest_text}"
         )
 
+    @staticmethod
+    def stale_followup_task_text(tool_name: str, task_id: str, latest_task_id: str) -> str:
+        return (
+            "ERROR: follow-up task_id is stale. "
+            f"error=stale_followup_task_id tool={tool_name} task_id={task_id} latest_task_id={latest_task_id}. "
+            "status/get_result/workspace_path/cancel は最新の成功 execute task_id 1件だけを追跡してください。"
+        )
+
+    @staticmethod
+    def should_block_non_latest_followup_task(
+        tool_name: str,
+        followup_task_id: str | None,
+        latest_task_id: str | None,
+    ) -> bool:
+        if not ToolLimits.is_followup_tool(tool_name):
+            return False
+        if not isinstance(followup_task_id, str) or not followup_task_id:
+            return False
+        if not isinstance(latest_task_id, str) or not latest_task_id:
+            return False
+        return followup_task_id != latest_task_id
+
     @classmethod
     def remember_successful_execute_task_id(cls, tool_call_state: dict[str, Any], result: Any) -> None:
         task_id = cls.extract_execute_task_id(result)
@@ -390,6 +412,23 @@ class ToolLimits(BaseModel):
                 followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
                 invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
                 latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+                if cls.should_block_non_latest_followup_task(tool_name, followup_task_id, latest_execute_task_id):
+                    logger.info(
+                        "Blocking stale follow-up task_id (sync): tool=%s task_id=%s latest=%s",
+                        tool_name,
+                        followup_task_id,
+                        latest_execute_task_id,
+                    )
+                    return cls._guard_output(
+                        cls.stale_followup_task_text(tool_name, cast(str, followup_task_id), cast(str, latest_execute_task_id)),
+                        response_format=response_format,
+                        artifact={
+                            "error": "stale_followup_task_id",
+                            "tool": tool_name,
+                            "task_id": followup_task_id,
+                            "latest_execute_task_id": latest_execute_task_id,
+                        },
+                    )
                 if followup_task_id and followup_task_id in invalid_task_ids:
                     logger.info("Skipping repeated invalid follow-up task_id (sync): tool=%s task_id=%s", tool_name, followup_task_id)
                     return cls._guard_output(
@@ -552,6 +591,23 @@ class ToolLimits(BaseModel):
         followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
         invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
         latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+        if cls.should_block_non_latest_followup_task(tool_name, followup_task_id, latest_execute_task_id):
+            logger.info(
+                "Blocking stale follow-up task_id: tool=%s task_id=%s latest=%s",
+                tool_name,
+                followup_task_id,
+                latest_execute_task_id,
+            )
+            return cls._guard_output(
+                cls.stale_followup_task_text(tool_name, cast(str, followup_task_id), cast(str, latest_execute_task_id)),
+                response_format=response_format,
+                artifact={
+                    "error": "stale_followup_task_id",
+                    "tool": tool_name,
+                    "task_id": followup_task_id,
+                    "latest_execute_task_id": latest_execute_task_id,
+                },
+            )
         if followup_task_id and followup_task_id in invalid_task_ids:
             logger.info("Skipping repeated invalid follow-up task_id: tool=%s task_id=%s", tool_name, followup_task_id)
             return cls._guard_output(
@@ -811,6 +867,7 @@ class AgentBuilder:
         llm: BaseChatModel,
         prompts: PromptsBase,
         tool_limits: ToolLimits | None,
+        include_general_agent: bool = True,
     ) -> list[AgentBuilder]:
         logger.info("Creating sub-agents...")
 
@@ -850,7 +907,8 @@ class AgentBuilder:
             )
             agents.append(code_agent_builder)
 
-        if len(normal_tools_mcp_config.servers) > 0:
+        should_create_general_agent = include_general_agent or len(code_agent_mcp_config.servers) == 0
+        if should_create_general_agent and len(normal_tools_mcp_config.servers) > 0:
             logger.info("Creating normal agent for MCP server '%s'...", ", ".join(normal_tools_mcp_config.servers.keys()))
             normal_agent_builder = AgentBuilder()
             await normal_agent_builder.prepare(

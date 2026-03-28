@@ -114,18 +114,20 @@ class MCPClient(AbstractLLMClient):
             recursion_limit = tool_limits.tool_recursion_limit
             auto_approve = tool_limits.auto_approve
             max_retries = tool_limits.max_retries
+            lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
+            if not lc_messages:
+                raise ValueError("chat_request.chat_history.messages が空です。")
+
+            force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
                 prompts=prompts,
                 checkpointer=checkpointer,
                 tool_limits=tool_limits,
+                force_coding_agent_route=force_coding_agent_route,
             )
 
             # 実行
-            lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
-            if not lc_messages:
-                raise ValueError("chat_request.chat_history.messages が空です。")
-
             workflow_results: list[Any] = []
 
             try:
@@ -267,7 +269,12 @@ class MCPClient(AbstractLLMClient):
                 output_tokens += add_out
                 user_text = extracted_text or output_text
 
-            evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
+            evidence_results = await MCPClientUtil.collect_evidence_results(
+                app=app,
+                run_trace_id=run_trace_id,
+                workflow_results=workflow_results,
+            )
+            evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
             if (
                 MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
                 or MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)

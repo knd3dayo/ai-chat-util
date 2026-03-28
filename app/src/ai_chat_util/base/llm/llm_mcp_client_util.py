@@ -11,7 +11,7 @@ from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools.structured import StructuredTool
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
@@ -36,6 +36,40 @@ logger = log_settings.getLogger(__name__)
 
 
 class MCPClientUtil:
+
+    _EXPLICIT_CODING_AGENT_PATTERNS: tuple[str, ...] = (
+        r"\bcoding(?:[\s\-_]+agent)(?:\s+mcp)?\b",
+        r"コーディング[\s\-]*エージェント",
+    )
+
+    @classmethod
+    def explicitly_requests_coding_agent(cls, messages: Sequence[Any]) -> bool:
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in cls._EXPLICIT_CODING_AGENT_PATTERNS):
+                return True
+
+        return False
 
     @classmethod
     async def collect_checkpoint_results(
@@ -168,8 +202,31 @@ class MCPClientUtil:
                     if value and not value.lstrip().startswith("ERROR:"):
                         stdout_blocks.append(value)
 
-        def _extract_heading_candidates(block: str) -> list[str]:
-            found: list[str] = []
+        def _extract_path_candidate(block: str) -> str | None:
+            patterns = (
+                r"(/[\w.\-~/一-龠ぁ-んァ-ヶー_%]+\.ya?ml)",
+                r"(/[^\s'`\"]+\.ya?ml)",
+            )
+            for pattern in patterns:
+                match = re.search(pattern, block)
+                if match:
+                    value = match.group(1).strip()
+                    if value:
+                        return value
+            return None
+
+        def _strip_markdown_emphasis(value: str) -> str:
+            text = value.strip()
+            if len(text) >= 4 and text.startswith("**") and text.endswith("**"):
+                return text[2:-2].strip()
+            if len(text) >= 2 and text.startswith("`") and text.endswith("`"):
+                return text[1:-1].strip()
+            return text
+
+        def _extract_heading_candidates(block: str) -> dict[str, list[str]]:
+            exact_lines: list[str] = []
+            markdown_lines: list[str] = []
+            fallback_lines: list[str] = []
             for line in block.splitlines():
                 stripped = line.strip()
                 if not stripped:
@@ -178,27 +235,36 @@ class MCPClientUtil:
                 if exact_line_match:
                     value = exact_line_match.group(1)
                     if value:
-                        found.append(value)
+                        exact_lines.append(value)
                     continue
                 exact_match = re.match(r"^HEADING_EXACT\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
                 if exact_match:
                     value = exact_match.group(1).strip()
                     if value:
-                        found.append(value)
+                        exact_lines.append(value)
                     continue
                 if re.match(r"^#{1,6}\s+.+$", stripped):
-                    found.append(stripped)
+                    markdown_lines.append(stripped)
                     continue
-                if re.match(r"^(?:[-*]|\d+[.)])\s+.+$", stripped):
-                    value = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", stripped).strip()
-                    if value:
-                        found.append(value)
+                numbered_match = re.match(r"^\d+[.)]\s+(.+)$", stripped)
+                if numbered_match:
+                    value = _strip_markdown_emphasis(numbered_match.group(1).strip())
+                    if value and not value.endswith((":", "：")):
+                        fallback_lines.append(value)
                         continue
+                bullet_match = re.match(r"^(?:[-*])\s+(.+)$", stripped)
+                if bullet_match:
+                    value = bullet_match.group(1).strip()
+                    if value.startswith("**") and value.endswith("**"):
+                        normalized = _strip_markdown_emphasis(value)
+                        if normalized and not normalized.endswith((":", "：")):
+                            fallback_lines.append(normalized)
+                    continue
                 quote_chars = {'"', "'", "「", "」", "“", "”"}
                 if len(stripped) >= 2 and stripped[0] in quote_chars and stripped[-1] in quote_chars:
                     value = stripped[1:-1].strip()
                     if value:
-                        found.append(value)
+                        fallback_lines.append(value)
 
             label_match = re.search(r"重要な見出し\s*[:：]\s*(.+)", block)
             if label_match:
@@ -207,18 +273,90 @@ class MCPClientUtil:
                     for part in re.split(r"\s*,\s*|\s*、\s*|\s*\|\s*", tail):
                         value = part.strip()
                         if value:
-                            found.append(value)
-            return found
+                            fallback_lines.append(value)
+            return {
+                "exact": exact_lines,
+                "markdown": markdown_lines,
+                "fallback": fallback_lines,
+            }
+
+        def _dedupe(values: Sequence[str]) -> list[str]:
+            items: list[str] = []
+            seen: set[str] = set()
+            for value in values:
+                normalized = str(value).strip()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                items.append(normalized)
+            return items
 
         deduped_stdout: list[str] = []
         seen_stdout: set[str] = set()
+        exact_heading_blocks: list[list[str]] = []
+        markdown_heading_blocks: list[list[str]] = []
+        fallback_heading_blocks: list[list[str]] = []
         for stdout_text in stdout_blocks:
             if stdout_text not in seen_stdout:
                 seen_stdout.add(stdout_text)
                 deduped_stdout.append(stdout_text)
-            for heading in _extract_heading_candidates(stdout_text):
-                if heading not in headings:
-                    headings.append(heading)
+
+            candidates = _extract_heading_candidates(stdout_text)
+            exact_values = _dedupe(candidates["exact"])
+            markdown_values = _dedupe(candidates["markdown"])
+            fallback_values = _dedupe(candidates["fallback"])
+
+            if exact_values:
+                exact_heading_blocks.append(exact_values)
+                continue
+            if markdown_values:
+                markdown_heading_blocks.append(markdown_values)
+                continue
+            if fallback_values:
+                fallback_heading_blocks.append(fallback_values)
+
+        def _pick_best_heading_block(blocks: Sequence[list[str]]) -> list[str]:
+            if not blocks:
+                return []
+            return list(max(enumerate(blocks), key=lambda item: (len(item[1]), item[0]))[1])
+
+        headings = _pick_best_heading_block(exact_heading_blocks)
+        if not headings:
+            headings = _pick_best_heading_block(markdown_heading_blocks)
+        if not headings:
+            headings = _pick_best_heading_block(fallback_heading_blocks)
+
+        if not config_path or not headings:
+            raw_exact_blocks: list[list[str]] = []
+            raw_markdown_blocks: list[list[str]] = []
+            raw_fallback_blocks: list[list[str]] = []
+
+            for raw_text in raw_texts:
+                if not config_path:
+                    raw_path = _extract_path_candidate(raw_text)
+                    if raw_path:
+                        config_path = raw_path
+
+                candidates = _extract_heading_candidates(raw_text)
+                exact_values = _dedupe(candidates["exact"])
+                markdown_values = _dedupe(candidates["markdown"])
+                fallback_values = _dedupe(candidates["fallback"])
+
+                if exact_values:
+                    raw_exact_blocks.append(exact_values)
+                    continue
+                if markdown_values:
+                    raw_markdown_blocks.append(markdown_values)
+                    continue
+                if fallback_values:
+                    raw_fallback_blocks.append(fallback_values)
+
+            if not headings:
+                headings = _pick_best_heading_block(raw_exact_blocks)
+            if not headings:
+                headings = _pick_best_heading_block(raw_markdown_blocks)
+            if not headings:
+                headings = _pick_best_heading_block(raw_fallback_blocks)
 
         return {
             "config_path": config_path,
@@ -226,6 +364,24 @@ class MCPClientUtil:
             "headings": headings,
             "raw_texts": raw_texts,
         }
+
+    @classmethod
+    async def collect_evidence_results(
+        cls,
+        *,
+        app: Any,
+        run_trace_id: str,
+        workflow_results: Sequence[Any] | Any,
+    ) -> list[Any]:
+        items = list(workflow_results) if isinstance(workflow_results, Sequence) and not isinstance(workflow_results, (str, bytes, bytearray, Mapping)) else [workflow_results]
+
+        checkpoint_results = await cls.collect_checkpoint_results(
+            app=app,
+            run_trace_id=run_trace_id,
+        )
+        if checkpoint_results:
+            items.extend(checkpoint_results)
+        return items
 
     @classmethod
     def final_text_contradicts_evidence(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
@@ -772,6 +928,7 @@ class MCPClientUtil:
         *,
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
+        force_coding_agent_route: bool = False,
     ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
@@ -784,6 +941,7 @@ class MCPClientUtil:
             runtime_config,
             mcp_config,
             llm, prompts, tool_limits, 
+            include_general_agent=not force_coding_agent_route,
             )
 
 

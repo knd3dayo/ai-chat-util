@@ -224,11 +224,46 @@ def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
     }
     status_calls = {"n": 0}
 
-    execute_tool = _FakeTool("execute", response_format="content", func=lambda: {"task_id": "task-valid"})
-
     def _status(task_id: str) -> str:
         status_calls["n"] += 1
         raise HTTPException(status_code=404, detail="Task not found")
+
+    status_tool = _FakeTool("status", response_format="content", func=_status)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [status_tool],
+        tool_call_state=state,
+        tool_call_limit_int=4,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out1 = status_tool.func("task-missing")
+    out2 = status_tool.func("task-missing")
+
+    assert isinstance(out1, str)
+    assert "invalid_followup_task_id" in out1
+    assert "task-missing" in out1
+    assert isinstance(out2, str)
+    assert "invalid_followup_task_id" in out2
+    assert status_calls["n"] == 1
+    assert state["followup_used"] == 1
+
+
+def test_followup_with_stale_task_id_is_blocked_before_invocation() -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+    }
+    status_calls = {"n": 0}
+
+    execute_tool = _FakeTool("execute", response_format="content", func=lambda task_id: {"task_id": task_id})
+
+    def _status(task_id: str) -> str:
+        status_calls["n"] += 1
+        return f"running:{task_id}"
 
     status_tool = _FakeTool("status", response_format="content", func=_status)
 
@@ -240,18 +275,16 @@ def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
         tool_timeout_retries_int=0,
     )
 
-    execute_result = execute_tool.func()
-    assert execute_result == {"task_id": "task-valid"}
+    assert execute_tool.func("task-old") == {"task_id": "task-old"}
+    assert execute_tool.func("task-new") == {"task_id": "task-new"}
 
-    out1 = status_tool.func("task-missing")
-    out2 = status_tool.func("task-missing")
+    stale_out = status_tool.func("task-old")
+    latest_out = status_tool.func("task-new")
 
-    assert isinstance(out1, str)
-    assert "invalid_followup_task_id" in out1
-    assert "task-missing" in out1
-    assert "task-valid" in out1
-    assert isinstance(out2, str)
-    assert "invalid_followup_task_id" in out2
+    assert isinstance(stale_out, str)
+    assert "stale_followup_task_id" in stale_out
+    assert "latest_task_id=task-new" in stale_out
+    assert latest_out == "running:task-new"
     assert status_calls["n"] == 1
     assert state["followup_used"] == 1
 
@@ -390,6 +423,42 @@ def test_create_sub_agents_assigns_unique_names_for_mixed_mcp_groups(monkeypatch
     assert "tool_agent_general" in created[1][1]
 
 
+def test_create_sub_agents_excludes_general_when_coding_agent_route_is_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config("coding-agent", "general-tools"),
+            llm=object(),
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+            include_general_agent=False,
+        )
+    )
+
+    assert [name for name, _ in created] == ["tool_agent_coding"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding"]
+
+
+def test_create_sub_agents_keeps_general_when_coding_agent_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config("general-tools"),
+            llm=object(),
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+            include_general_agent=False,
+        )
+    )
+
+    assert [name for name, _ in created] == ["tool_agent_general"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_general"]
+
+
 @pytest.mark.parametrize(
     ("server_names", "expected_name"),
     [
@@ -498,6 +567,108 @@ def test_extract_successful_tool_evidence_prefers_heading_exact_lines() -> None:
     assert evidence["headings"] == ["### 1. 接続成立", "### 2. MCP サーバー化", "### 3. 検証結果"]
 
 
+def test_extract_successful_tool_evidence_prefers_exact_block_over_noisy_fallbacks() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "tool",
+                "content": '{"stdout": "重要な見出し: 検証目的, R検証手順, 判定基準", "stderr": null}',
+            },
+            {
+                "role": "tool",
+                "content": '{"stdout": "HEADING_LINE_EXACT: ### 1. MCP サーバーとしての正常起動\nHEADING_LINE_EXACT: ### 2. スーパーバイザーからの接続成立\nHEADING_LINE_EXACT: ### 3. 委譲と統合の正常系", "stderr": null}',
+            },
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["headings"] == [
+        "### 1. MCP サーバーとしての正常起動",
+        "### 2. スーパーバイザーからの接続成立",
+        "### 3. 委譲と統合の正常系",
+    ]
+
+
+def test_extract_successful_tool_evidence_prefers_most_complete_exact_block() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "tool",
+                "content": '{"stdout": "HEADING_LINE_EXACT: ### 0. 途中経過", "stderr": null}',
+            },
+            {
+                "role": "tool",
+                "content": '{"stdout": "HEADING_LINE_EXACT: ### 1. MCP サーバーとしての正常起動\nHEADING_LINE_EXACT: ### 2. スーパーバイザーからの接続成立\nHEADING_LINE_EXACT: ### 3. 委譲と統合の正常系", "stderr": null}',
+            },
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["headings"] == [
+        "### 1. MCP サーバーとしての正常起動",
+        "### 2. スーパーバイザーからの接続成立",
+        "### 3. 委譲と統合の正常系",
+    ]
+
+
+def test_extract_successful_tool_evidence_uses_raw_text_when_stdout_is_absent() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": (
+                    "以下が指定された内容のまとめです:\n\n"
+                    "1. **設定ファイルの場所**:\n"
+                    "   - `/tmp/ai-chat-util-config.yml`\n\n"
+                    "2. **重要な見出し**:\n"
+                    "   1. **MCP サーバーとしての正常起動**\n"
+                    "   2. **スーパーバイザーからの接続成立**\n"
+                    "   3. **委譲と統合の正常系**\n"
+                ),
+            }
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
+    assert evidence["headings"] == [
+        "MCP サーバーとしての正常起動",
+        "スーパーバイザーからの接続成立",
+        "委譲と統合の正常系",
+    ]
+
+
+def test_extract_successful_tool_evidence_ignores_descriptive_bullets_in_raw_text() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": (
+                    "以下に示す内容は、指定された要求に基づいた結果です。\n\n"
+                    "2. **文書からの重要な見出し**:\n"
+                    "   1. 検証目的\n"
+                    "      - コーディングエージェントのMCPサーバー化の実用性を確認することを目的とします。\n"
+                    "   2. 検証範囲と優先確認項目\n"
+                    "      - 起動検証と接続確認を中心に構成します。\n"
+                    "   3. 役割分担の考え方\n"
+                    "      - 各サーバーの役割を切り分けます。\n"
+                ),
+            }
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["headings"] == [
+        "検証目的",
+        "検証範囲と優先確認項目",
+        "役割分担の考え方",
+    ]
+
+
 def test_evidence_reflection_overrides_negative_final_text() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
@@ -544,6 +715,39 @@ def test_tool_agent_prompt_requires_verbatim_heading_output() -> None:
     assert "### 1. MCP サーバーとしての正常起動" in prompt
 
 
+def test_supervisor_prompt_requires_coding_agent_when_explicitly_requested() -> None:
+    prompt = CodingAgentPrompts().supervisor_system_prompt(
+        tools_description="dummy tools",
+        supervisor_hitl_policy_text="dummy policy",
+        tool_agent_names=["tool_agent_coding", "tool_agent_general"],
+    )
+
+    assert "`coding agent` / `coding-agent` / `コーディングエージェント`" in prompt
+    assert "通常ツール（例: analyze_files）へ置き換えてはいけません" in prompt
+
+
+def test_explicitly_requests_coding_agent_detects_user_instruction() -> None:
+    assert MCPClientUtil.explicitly_requests_coding_agent(
+        [
+            {
+                "role": "user",
+                "content": "まず get_loaded_config_info を呼んでから、coding-agent を使ってこの markdown を確認してください。",
+            }
+        ]
+    )
+
+
+def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:
+    assert not MCPClientUtil.explicitly_requests_coding_agent(
+        [
+            {
+                "role": "assistant",
+                "content": "次は coding-agent を使うかもしれません。",
+            }
+        ]
+    )
+
+
 def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
     class _FakeApp:
         async def aget_state(self, config: Any) -> Any:
@@ -558,6 +762,52 @@ def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
     evidence = MCPClientUtil.extract_successful_tool_evidence(results)
     assert evidence["config_path"] == "/tmp/a.yml"
     assert evidence["stdout_blocks"] == ["hello"]
+
+
+def test_collect_evidence_results_merges_checkpoint_history_for_headings() -> None:
+    workflow_results = [
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "config_path: /tmp/ai-chat-util-config.yml",
+                }
+            ]
+        }
+    ]
+
+    class _FakeApp:
+        async def aget_state(self, config: Any) -> Any:
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {
+                            "role": "tool",
+                            "content": '{"stdout": "HEADING_LINE_EXACT: ## 概要\\nHEADING_LINE_EXACT: ### MCP サーバー", "stderr": null}',
+                        }
+                    ]
+                }
+            )
+
+        async def aget_state_history(self, config: Any, limit: int | None = None):
+            if False:
+                yield None
+
+    results = asyncio.run(
+        MCPClientUtil.collect_evidence_results(
+            app=_FakeApp(),
+            run_trace_id="abc",
+            workflow_results=workflow_results,
+        )
+    )
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence(results)
+
+    assert evidence["headings"] == ["## 概要", "### MCP サーバー"]
+
+    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+    assert "## 概要" in fallback
+    assert "### MCP サーバー" in fallback
 
 
 def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:

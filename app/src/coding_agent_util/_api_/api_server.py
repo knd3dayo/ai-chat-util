@@ -171,7 +171,7 @@ def create_app(*, sync_mode: bool = False, init_config: bool = True) -> FastAPI:
 # Runtime config is initialized on actual execution paths (CLI __main__ or explicit create_app(init_config=True)).
 app = create_app(sync_mode=False, init_config=False)
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
     import uvicorn
 
@@ -197,3 +197,7 @@ if __name__ == "__main__":
     init_coding_runtime(args.config or None)
 
     uvicorn.run(create_app(sync_mode=args.sync_mode), host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

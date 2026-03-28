@@ -110,4 +110,4 @@ bash ログイン:
 
 - `${HOME}/data/mcps` 配下は symlink ではなく実ディレクトリで運用してください。
 - Python minor version が変わった場合は、host 側 `.venv` を再作成したうえで `prepare` を再実行してください。
-- 起動時は `uv run --no-sync python -m ...` を使うため、`.venv/bin` の console script を直接呼ぶ運用は想定していません。
+- 起動時は `uv run --no-sync coding-agent-mcp ...` のように console script を使う前提です。

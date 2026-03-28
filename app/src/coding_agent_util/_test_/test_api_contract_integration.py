@@ -6,8 +6,8 @@ from typing import Any, AsyncGenerator, Optional
 
 from fastapi.testclient import TestClient
 
-from coding_agent_util._api_.api_server import create_app
 from ai_chat_util_base.model.agent_util_models import TaskStatus
+from coding_agent_util._api_.api_server import create_app
 
 
 @dataclass
@@ -47,7 +47,6 @@ class _FakeTaskService:
         return self._runner
 
     def spawn_detached_monitor(self, task_id: str, timeout: int) -> None:
-        # no-op for tests
         return
 
     def cancel_task(self, task: TaskStatus) -> None:
@@ -55,7 +54,6 @@ class _FakeTaskService:
         self._store[task.task_id] = task
 
     async def monitor(self, timeout: int) -> AsyncGenerator[TaskStatus, None]:
-        # converge to completion
         assert self._runner is not None
         st = self._runner.st
         st.completed()
@@ -64,7 +62,6 @@ class _FakeTaskService:
 
 
 def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> None:
-    # Provide a minimal ai-chat-util-config.yml so config resolution succeeds.
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     cfg_path.write_text("ai_chat_util_config: {}\ncoding_agent_util: {}\n", encoding="utf-8")
     monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
@@ -73,7 +70,6 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    # Patch endpoint dependencies to avoid real backends / filesystem.
     from coding_agent_util.core import endpoint as endpoint_mod
     from coding_agent_util.core import task_manager as tm_mod
 
@@ -92,7 +88,9 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
         return {"task_id": task_id, "status": st.status, "sub_status": st.sub_status, "message": "cancelled"}
 
     monkeypatch.setattr(tm_mod.TaskManager, "upsert_task", classmethod(lambda cls, status: _upsert(status)))
-    monkeypatch.setattr(tm_mod.TaskManager, "get_status", classmethod(lambda cls, task_id, tail=200: _get_status(task_id, tail)))
+    monkeypatch.setattr(
+        tm_mod.TaskManager, "get_status", classmethod(lambda cls, task_id, tail=200: _get_status(task_id, tail))
+    )
     monkeypatch.setattr(tm_mod.TaskManager, "cancel_task", classmethod(lambda cls, task_id: _cancel_task(task_id)))
 
     app = create_app(sync_mode=False)
@@ -101,7 +99,6 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     ws = tmp_path / "ws"
     ws.mkdir()
 
-    # execute (async)
     res = client.post(
         "/execute",
         json={"prompt": "hello", "workspace_path": str(ws), "timeout": 10, "task_id": "t1"},
@@ -111,15 +108,12 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     data = res.json()
     assert data["task_id"] == "t1"
 
-    # status
     res2 = client.get("/status/t1")
     assert res2.status_code == 200
     st = res2.json()
     assert st["task_id"] == "t1"
     assert st.get("trace_id") == "trace-123"
 
-    # get_result (stdout/stderr convenience)
-    # Populate outputs to verify the endpoint returns them.
     store["t1"].stdout = "hello out"
     store["t1"].stderr = "hello err"
     res_r = client.get("/get_result/t1")
@@ -128,7 +122,6 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     assert data_r.get("stdout") == "hello out"
     assert data_r.get("stderr") == "hello err"
 
-    # cancel
     res3 = client.delete("/cancel/t1")
     assert res3.status_code == 200
     cancel = res3.json()

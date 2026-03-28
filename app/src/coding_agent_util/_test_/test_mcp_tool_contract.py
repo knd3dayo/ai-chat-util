@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 from fastmcp import FastMCP
 
-from coding_agent_util.mcp.mcp_server import CodingMCPServer
 from coding_agent_util.core.endpoint import EndPoint
+from coding_agent_util.mcp.mcp_server import CodingMCPServer
+
 an_server = CodingMCPServer()
 endpoint = EndPoint()
+
+
 def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
     async def _run() -> None:
         mcp = FastMCP("test")
-        an_server.prepare_mcp(endpoint,mcp, tools_option="", sync_mode=False)
+        an_server.prepare_mcp(endpoint, mcp, tools_option="", sync_mode=False)
 
         tools = await mcp._list_tools()
         names = {t.name for t in tools}
@@ -26,18 +28,15 @@ def test_mcp_tools_are_stable_and_execute_requires_req() -> None:
         assert "req" in params.get("required", [])
 
         req_schema = params["properties"]["req"]
-        # JSON Schema may either inline the object schema or use a $ref into $defs.
         if "$ref" in req_schema:
             ref = req_schema["$ref"]
             assert isinstance(ref, str)
-            # e.g. "#/$defs/ExecuteRequest"
             name = ref.split("/")[-1]
             defs = params.get("$defs") or {}
             assert name in defs
             req_schema = defs[name]
 
         assert req_schema.get("type") == "object"
-        # At minimum, prompt/workspace_path are required
         assert set(req_schema.get("required", [])) >= {"prompt", "workspace_path"}
 
     asyncio.run(_run())

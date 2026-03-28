@@ -31,7 +31,7 @@ Options:
 
 Notes:
   - Host-side .venv is expected under the mounted project.
-  - Start commands always use uv run python -m ... and do not call .venv/bin scripts directly.
+  - Start commands use uv run --no-sync with console scripts such as coding-agent-mcp.
   - If ${HOME}/data/mcps is empty, run `./run-mcp-server.sh prepare` first.
   - Additional arguments after `prepare` are forwarded to `prepare-mcps.sh`.
 EOF

@@ -36,23 +36,19 @@ def test_backend_windows_linux_constraints() -> None:
 
 
 def test_process_subprocess_command_coalesce() -> None:
-    # Old config style: subprocess.command only.
     cfg = CodingAgentUtilConfig.model_validate({"subprocess": {"command": "agent run"}})
     assert cfg.process.command == "agent run"
     assert cfg.subprocess.command == "agent run"
 
-    # New config style: process.command only.
     cfg2 = CodingAgentUtilConfig.model_validate({"process": {"command": "agent --version"}})
     assert cfg2.process.command == "agent --version"
     assert cfg2.subprocess.command == "agent --version"
 
-    # Both present and consistent.
     cfg3 = CodingAgentUtilConfig.model_validate(
         {"process": {"command": "agent run"}, "subprocess": {"command": "agent run"}}
     )
     assert cfg3.process.command == "agent run"
 
-    # Both present but inconsistent should fail.
     with pytest.raises(ValueError):
         CodingAgentUtilConfig.model_validate(
             {"process": {"command": "a"}, "subprocess": {"command": "b"}}

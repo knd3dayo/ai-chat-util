@@ -4,9 +4,8 @@ import logging
 
 import pytest
 
-from ai_chat_util_base.config.runtime import CodingAgentUtilConfig
-from ai_chat_util_base.config.runtime import AiChatUtilConfig
 from ai_chat_util_base.config import runtime as runtime_mod
+from ai_chat_util_base.config.runtime import AiChatUtilConfig, CodingAgentUtilConfig
 
 
 def test_logging_redacts_common_secrets(capsys: pytest.CaptureFixture[str]) -> None:
@@ -22,10 +21,7 @@ def test_logging_redacts_common_secrets(capsys: pytest.CaptureFixture[str]) -> N
 
     out = capsys.readouterr().err
 
-    # Original secret must not be present
     assert secret_key not in out
-
-    # Best-effort redactions should appear
     assert "Authorization: Bearer ***" in out
     assert "sk-***" in out
 

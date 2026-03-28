@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
-import os
 
-from fastapi.testclient import TestClient
 import pytest
 import yaml
+from fastapi.testclient import TestClient
 
+from ai_chat_util_base.config import runtime as runtime_mod
+from ai_chat_util_base.model.agent_util_models import TaskStatus
 from coding_agent_util._api_.api_server import create_app
 from coding_agent_util.core.endpoint import EndPoint
-from ai_chat_util_base.model.agent_util_models import TaskStatus
-from ai_chat_util_base.config import runtime as runtime_mod
 
-endpoint = EndPoint() 
+endpoint = EndPoint()
+
 
 def _reset_runtime(monkeypatch, cfg_path: Path) -> None:
     monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
@@ -24,7 +25,6 @@ def _reset_runtime(monkeypatch, cfg_path: Path) -> None:
 
 
 def _reset_runtime_via_ai_chat_util_config(monkeypatch, cfg_path: Path) -> None:
-    # Integration mode: resolve coding settings from ai-chat-util-config.yml.
     monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
     runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
@@ -51,7 +51,6 @@ def test_rewrite_workspace_path_pure(tmp_path: Path, monkeypatch) -> None:
     rewritten = endpoint.rewrite_workspace_path(raw)
     assert rewritten == f"{to_prefix}/e2e_sv_ws_1"
 
-    # Non-matching path should pass through
     raw2 = "/tmp/other"
     assert endpoint.rewrite_workspace_path(raw2) == raw2
 
@@ -199,5 +198,4 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     assert st.metadata.get("rewritten_workspace_path") == f"{to_prefix}/e2e_sv_ws_1"
     assert st.metadata.get("workspace_path") == f"{to_prefix}/e2e_sv_ws_1"
 
-    # Directory should have been created by validate_workspace_path.
     assert Path(st.workspace_path).is_dir()

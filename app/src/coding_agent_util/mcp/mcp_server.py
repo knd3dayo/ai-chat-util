@@ -290,13 +290,15 @@ class CodingMCPServer:
 		await mcp.run_async(transport="streamable-http", host=args.host, port=args.port)
 
 
-if __name__ == "__main__":
-
+def main() -> None:
 	server = CodingMCPServer()
 	try:
 		asyncio.run(server.main(EndPoint()))
 	except KeyboardInterrupt:
-		# Allow clean shutdown without traceback on Ctrl+C.
 		pass
+
+
+if __name__ == "__main__":
+	main()
 
 

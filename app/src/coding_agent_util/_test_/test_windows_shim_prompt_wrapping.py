@@ -26,12 +26,9 @@ def test_windows_cmd_shim_wrap_includes_prompt_inside_cmdline(tmp_path) -> None:
         )
     )
 
-    # The Windows shim wrapper should convert `.cmd` into `cmd.exe /c "<cmdline>"`.
     assert runner.command[:4] == ["cmd.exe", "/d", "/s", "/c"]
     assert len(runner.command) == 5
 
     cmdline = runner.command[4]
-    # Ensure the prompt is part of the actual command string passed to cmd.exe,
-    # not a separate argv item.
     assert "hello" in cmdline
     assert '"hello world"' in cmdline

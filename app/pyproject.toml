@@ -53,4 +53,6 @@ where = ["src"]
 
 [project.scripts]
 ai-chat-util = "ai_chat_util.cli.__main__:cli_main"
+coding-agent-api = "coding_agent_util._api_.api_server:main"
+coding-agent-mcp = "coding_agent_util.mcp.mcp_server:main"
 coding-agent-util = "coding_agent_util._cli_.main:main"

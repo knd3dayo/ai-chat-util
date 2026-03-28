@@ -33,7 +33,7 @@
 ### 🤖 コーディングエージェント実行（coding-agent-util）
 - コーディングエージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
 - 設定は `ai-chat-util-config.yml`（`coding_agent_util:` セクションで統合）、秘密情報は `.env` / 環境変数で管理。
-- 独立 namespace として `coding_agent_util` を追加しており、CLI は `coding-agent-util` コマンドから起動できます。
+- 独立 namespace として `coding_agent_util` を追加しており、正規の起動点は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` です。
 - Docker 実行例は [docker/coding-agent/images/all-in-one-image/README.md](docker/coding-agent/images/all-in-one-image/README.md) と [docker/coding-agent/images/dood/README.md](docker/coding-agent/images/dood/README.md) を参照。
 
 ---
@@ -45,7 +45,7 @@
 ```
 app/src/
 ├── ai_chat_util/        # LLMアプリ本体（API / CLI / MCP / agent / chat workflow）
-│   ├── agent/           # coding-agent-util
+│   ├── agent/           # coding-agent の互換 wrapper / legacy entrypoint
 │   ├── api/             # FastAPI APIサーバー
 │   ├── base/            # chat / batch / llm / resource 組み立て
 │   ├── cli/             # CLI
@@ -55,7 +55,7 @@ app/src/
 ├── ai_chat_util_base/   # 共通設定・共通モデル・契約
 │   ├── config/          # YAML設定ロード・runtime・MCP設定モデル
 │   └── model/           # Pydanticモデル / request headers / agent models
-├── coding_agent_util/   # coding-agent の独立入口
+├── coding_agent_util/   # coding-agent の正規 runtime / test 配置
 │   ├── _api_/           # API entrypoint
 │   ├── _cli_/           # CLI entrypoint
 │   ├── core/subprocess/ # detached subprocess entrypoint
@@ -74,7 +74,8 @@ app/src/
 - `file_util` は最下層のファイル処理基盤です。`ai_chat_util` と `ai_chat_util_base` を import しません。
 - `ai_chat_util_base` は共通設定・共通モデル・契約を持つ層です。`ai_chat_util` を import しません。
 - `ai_chat_util` はアプリケーション層です。`ai_chat_util_base` と `file_util` に依存して構いません。
-- `coding_agent_util` は coding-agent の独立入口です。実装本体は当面 `ai_chat_util.agent.coding` に残しつつ、外部起動点を分離します。
+- `coding_agent_util` は coding-agent の正規 package です。runtime / entrypoint / test は原則ここへ配置します。
+- `ai_chat_util.agent.coding` は後方互換のための wrapper 層として残します。
 - LLM 非依存のファイル処理は `file_util` に置きます。
 - LLM 固有のメッセージ組み立てや chat workflow は `ai_chat_util` に置きます。
 
@@ -98,7 +99,7 @@ ai_chat_util
 
 1. 共通で使うが LLM 非依存な処理を `file_util` または `ai_chat_util_base` に移す
 2. `ai_chat_util/base/util` に残るものを「LLM 固有かどうか」で分類する
-3. `ai_chat_util/agent/coding` を将来的に独立 package に分離するか判断する
+3. `ai_chat_util/agent/coding` に残る互換 wrapper をどこまで維持するか判断する
 
 ### 現在の再編状況
 
@@ -108,9 +109,21 @@ ai_chat_util
 - `downloader` は `file_util/util/downloader.py` に配置
 - `office2pdf` は `file_util/util/office2pdf.py` に配置
 - PDF のテキスト/画像抽出は `file_util/util/pdf_util.py` に配置
-- coding-agent の API / CLI / MCP / subprocess entrypoint は `coding_agent_util` namespace に追加
+- coding-agent の API / CLI / MCP / subprocess entrypoint は `coding_agent_util` namespace に集約
+- console script は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` を提供
+- coding-agent の自動テストは `coding_agent_util/_test_` に移動
 
 `ai_chat_util/base/util` の file util shim は削除済みです。
+
+### 互換レイヤの扱い
+
+現在の `ai_chat_util/agent/coding` には次のものを残しています。
+
+- 旧 import path を壊さないための forwarding wrapper
+- `python -m ai_chat_util.agent.coding...` を維持するための互換 entrypoint
+- 手動検証用の最小ファイル（例: `mcp_client.py`）
+
+新規実装・新規テストは `coding_agent_util` 側へ追加してください。
 
 ### 次の移動候補
 
@@ -119,7 +132,7 @@ ai_chat_util
 - `ai_chat_util/base/util` 全体
   - 最終的には「LLM 文脈を知らなくても成立する処理」を残さない方針です。
 - `ai_chat_util/agent/coding`
-  - 外部起動点は `coding_agent_util` に分離済みです。次段階では実装本体の移設を検討します。
+  - runtime 実装の大半は `coding_agent_util` へ移設済みです。次段階では wrapper の維持範囲を整理します。
 
 ---
 
@@ -631,13 +644,21 @@ uvicorn ai_chat_util.api.api_server:app
 
 ## coding-agent-util（コーディングエージェント実行ユーティリティ）
 
-本プロジェクト（ai-chat-util）には、`src/ai_chat_util/agent/coding/` 配下に **coding-agent-util（コーディングエージェント実行ユーティリティ）** が統合されています。
+本プロジェクト（ai-chat-util）には、`src/coding_agent_util/` 配下に **coding-agent-util（コーディングエージェント実行ユーティリティ）** が統合されています。
 
 ローカルまたは Docker 上で「コーディングエージェント実行タスク」を起動し、進捗確認（status）やキャンセル（cancel）を行うためのユーティリティです。
 
 - **HTTP API**（FastAPI）: `/execute` でタスク起動、`/status/{task_id}` でログ/結果取得
 - **MCP サーバ**（fastmcp）: `execute/status/cancel/healthz` 等のツールを提供
 - **CLI**（Typer）: タスクの起動・一覧・状態確認・キャンセル
+
+正規の起動コマンドは次の 3 つです。
+
+- `coding-agent-api`
+- `coding-agent-mcp`
+- `coding-agent-util`
+
+`src/ai_chat_util/agent/coding/` 側は後方互換の import path / module entrypoint を維持する wrapper 層です。
 
 本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（ルート直下の `coding_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
 
@@ -728,13 +749,13 @@ LLM_API_KEY=xxxxxxxx
 起動:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._api_.api_server --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
+uv --directory ./app run coding-agent-api --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
 ```
 
 `--config` で明示する場合:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._api_.api_server --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
+uv --directory ./app run coding-agent-api --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
 ```
 
 実行（非同期）:
@@ -792,13 +813,13 @@ curl -sS -X DELETE http://127.0.0.1:7101/cancel/<task_id>
 起動（stdio）:
 
 ```bash
-uv --directory ./app run -m coding_agent_util.mcp.mcp_server --config ./ai-chat-util-config.yml --mode stdio
+uv --directory ./app run coding-agent-mcp --config ./ai-chat-util-config.yml --mode stdio
 ```
 
 起動（HTTP）:
 
 ```bash
-uv --directory ./app run -m coding_agent_util.mcp.mcp_server --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
+uv --directory ./app run coding-agent-mcp --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
 ```
 
 > 注意: MCPサーバ（http/sse）の既定ポートは 7101 です。APIサーバ（既定 7101）と同時に動かす場合は、上記例のように `-p 7102` 等を指定してください。
@@ -806,7 +827,7 @@ uv --directory ./app run -m coding_agent_util.mcp.mcp_server --config ./ai-chat-
 `--config` を使う場合:
 
 ```bash
-uv --directory ./app run -m coding_agent_util.mcp.mcp_server --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
+uv --directory ./app run coding-agent-mcp --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
 ```
 
 公開されるツール（代表）:
@@ -872,13 +893,13 @@ Supervisor 等のクライアントから呼び出す際は、以下を **契約
 ヘルプ:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._cli_.docker_main --help
+uv --directory ./app run coding-agent-util --help
 ```
 
 実行:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._cli_.docker_main --config ./ai-chat-util-config.yml run \
+uv --directory ./app run coding-agent-util --config ./ai-chat-util-config.yml run \
   "Hello. Please respond with a single word and exit." \
   --wait
 ```
@@ -886,7 +907,7 @@ uv --directory ./app run -m coding_agent_util._cli_.docker_main --config ./ai-ch
 非同期（task_id を返して終了）:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._cli_.docker_main --config ./ai-chat-util-config.yml run \
+uv --directory ./app run coding-agent-util --config ./ai-chat-util-config.yml run \
   "Hello" \
   --no-wait
 ```
@@ -894,7 +915,7 @@ uv --directory ./app run -m coding_agent_util._cli_.docker_main --config ./ai-ch
 状態確認:
 
 ```bash
-uv --directory ./app run -m coding_agent_util._cli_.docker_main --config ./ai-chat-util-config.yml status <task_id>
+uv --directory ./app run coding-agent-util --config ./ai-chat-util-config.yml status <task_id>
 ```
 
 ---

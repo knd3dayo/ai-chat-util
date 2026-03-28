@@ -199,3 +199,53 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     assert st.metadata.get("workspace_path") == f"{to_prefix}/e2e_sv_ws_1"
 
     assert Path(st.workspace_path).is_dir()
+
+
+def test_http_execute_normalizes_existing_file_workspace_path_to_parent(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    cfg_path.write_text("ai_chat_util_config: {}\ncoding_agent_util: {}\n", encoding="utf-8")
+    _reset_runtime(monkeypatch, cfg_path)
+
+    store: dict[str, TaskStatus] = {}
+    fake_service = _FakeTaskService(store=store)
+
+    from coding_agent_util.core import endpoint as endpoint_mod
+    from coding_agent_util.core import task_manager as tm_mod
+
+    monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
+
+    def _upsert(status: TaskStatus) -> None:
+        store[status.task_id] = status
+
+    async def _get_status(task_id: str, tail: int | None = 200) -> TaskStatus:
+        return store[task_id]
+
+    monkeypatch.setattr(tm_mod.TaskManager, "upsert_task", classmethod(lambda cls, status: _upsert(status)))
+    monkeypatch.setattr(
+        tm_mod.TaskManager, "get_status", classmethod(lambda cls, task_id, tail=200: _get_status(task_id, tail))
+    )
+
+    target_dir = tmp_path / "docs"
+    target_dir.mkdir()
+    target_file = target_dir / "02_コーディングエージェントのMCPサーバー化検証.md"
+    target_file.write_text("# heading\n", encoding="utf-8")
+
+    app = create_app(sync_mode=False)
+    client = TestClient(app)
+
+    res = client.post(
+        "/execute",
+        json={
+            "prompt": f"{target_file.as_posix()} を調査してください",
+            "workspace_path": target_file.as_posix(),
+            "timeout": 10,
+            "task_id": "t-file",
+        },
+    )
+    assert res.status_code == 200
+
+    st = store["t-file"]
+    assert Path(st.workspace_path).as_posix() == target_dir.as_posix()
+    assert st.metadata.get("requested_workspace_path") == target_file.as_posix()
+    assert st.metadata.get("workspace_path") == target_dir.as_posix()
+

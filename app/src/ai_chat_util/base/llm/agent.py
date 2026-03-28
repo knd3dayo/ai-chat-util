@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any
 
 from typing import Any, Mapping, Sequence, cast
 
@@ -7,6 +6,7 @@ import asyncio
 import copy
 import json
 import re
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
@@ -238,12 +238,91 @@ class ToolLimits(BaseModel):
         except Exception:
             return result
 
+    @staticmethod
+    def extract_followup_task_id(tool_name: str, args: Sequence[Any], kwargs: Mapping[str, Any]) -> str | None:
+        if not ToolLimits.is_followup_tool(tool_name):
+            return None
+
+        task_id = kwargs.get("task_id")
+        if isinstance(task_id, str) and task_id.strip():
+            return task_id.strip()
+
+        if args:
+            candidate = args[0]
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+
+        req = kwargs.get("req")
+        if isinstance(req, Mapping):
+            nested = req.get("task_id")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+
+        return None
+
+    @staticmethod
+    def extract_execute_task_id(result: Any) -> str | None:
+        if isinstance(result, Mapping):
+            task_id = result.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                return task_id.strip()
+
+        if hasattr(result, "task_id"):
+            task_id = getattr(result, "task_id", None)
+            if isinstance(task_id, str) and task_id.strip():
+                return task_id.strip()
+
+        if isinstance(result, tuple) and len(result) == 2:
+            text, artifact = result
+            if isinstance(artifact, Mapping):
+                task_id = artifact.get("task_id")
+                if isinstance(task_id, str) and task_id.strip():
+                    return task_id.strip()
+            if isinstance(text, Mapping):
+                task_id = text.get("task_id")
+                if isinstance(task_id, str) and task_id.strip():
+                    return task_id.strip()
+
+        return None
+
+    @staticmethod
+    def is_task_not_found_exception(err: BaseException) -> bool:
+        if isinstance(err, HTTPException) and int(getattr(err, "status_code", 0) or 0) == 404:
+            detail = getattr(err, "detail", None)
+            return isinstance(detail, str) and "task not found" in detail.strip().lower()
+
+        normalized = str(err).strip().lower()
+        return "404" in normalized and "task not found" in normalized
+
+    @staticmethod
+    def invalid_followup_task_text(tool_name: str, task_id: str, latest_task_id: str | None = None) -> str:
+        latest_text = ""
+        if isinstance(latest_task_id, str) and latest_task_id and latest_task_id != task_id:
+            latest_text = f" 最新の成功 execute task_id={latest_task_id} のみを追跡してください。"
+        return (
+            "ERROR: follow-up task_id is invalid. "
+            f"error=invalid_followup_task_id tool={tool_name} task_id={task_id}. "
+            "この task_id への status/get_result/workspace_path/cancel の再試行を中止してください。"
+            f"{latest_text}"
+        )
+
+    @classmethod
+    def remember_successful_execute_task_id(cls, tool_call_state: dict[str, Any], result: Any) -> None:
+        task_id = cls.extract_execute_task_id(result)
+        if not task_id:
+            return
+
+        tool_call_state["latest_execute_task_id"] = task_id
+        known = cast(list[str], tool_call_state.setdefault("successful_execute_task_ids", []))
+        if task_id not in known:
+            known.append(task_id)
+
     @classmethod
     def _resolve_budget_scope(
         cls,
         *,
         tool_name: str,
-        tool_call_state: dict[str, int],
+        tool_call_state: dict[str, Any],
         tool_call_limit_int: int,
     ) -> tuple[str, str, int, int]:
         if cls.is_followup_tool(tool_name):
@@ -268,7 +347,7 @@ class ToolLimits(BaseModel):
         cls,
         allowed_langchain_tools: Sequence[Any],
         *,
-        tool_call_state: dict[str, int],
+        tool_call_state: dict[str, Any],
         tool_call_limit_int: int,
         tool_timeout_seconds_f: float,
         tool_timeout_retries_int: int,
@@ -307,6 +386,22 @@ class ToolLimits(BaseModel):
                 if used < 0:
                     used = 0
                     tool_call_state["used"] = 0
+
+                followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
+                invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
+                latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+                if followup_task_id and followup_task_id in invalid_task_ids:
+                    logger.info("Skipping repeated invalid follow-up task_id (sync): tool=%s task_id=%s", tool_name, followup_task_id)
+                    return cls._guard_output(
+                        cls.invalid_followup_task_text(tool_name, followup_task_id, latest_execute_task_id),
+                        response_format=response_format,
+                        artifact={
+                            "error": "invalid_followup_task_id",
+                            "tool": tool_name,
+                            "task_id": followup_task_id,
+                            "latest_execute_task_id": latest_execute_task_id,
+                        },
+                    )
 
                 call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
                 cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
@@ -349,11 +444,27 @@ class ToolLimits(BaseModel):
                 tool_call_state[used_key] = scope_used + 1
                 try:
                     result = orig_func(*args, **kwargs)
+                    if (tool_name or "").strip().lower() == "execute":
+                        cls.remember_successful_execute_task_id(tool_call_state, result)
                     if cls.is_cacheable_tool_result(result):
                         cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
                     return result
                 except Exception as e:
                     logger.exception("Tool invocation failed (sync): tool=%s", tool_name)
+                    if followup_task_id and cls.is_task_not_found_exception(e):
+                        invalid_task_ids.add(followup_task_id)
+                        latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+                        return cls._guard_output(
+                            cls.invalid_followup_task_text(tool_name, followup_task_id, latest_execute_task_id),
+                            response_format=response_format,
+                            artifact={
+                                "error": "invalid_followup_task_id",
+                                "tool": tool_name,
+                                "task_id": followup_task_id,
+                                "latest_execute_task_id": latest_execute_task_id,
+                                "exception": type(e).__name__,
+                            },
+                        )
                     return cls._guard_output(
                         ToolLimits.tool_error_text(tool_name, e),
                         response_format=response_format,
@@ -429,7 +540,7 @@ class ToolLimits(BaseModel):
         tool_name: str,
         orig_coro: Any,
         response_format: str | None,
-        tool_call_state: dict[str, int],
+        tool_call_state: dict[str, Any],
         tool_call_limit_int: int,
         tool_timeout_seconds_f: float,
         tool_timeout_retries_int: int,
@@ -438,6 +549,22 @@ class ToolLimits(BaseModel):
     ) -> Any:
         attempts = tool_timeout_retries_int + 1
         last_err: BaseException | None = None
+        followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
+        invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
+        latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+        if followup_task_id and followup_task_id in invalid_task_ids:
+            logger.info("Skipping repeated invalid follow-up task_id: tool=%s task_id=%s", tool_name, followup_task_id)
+            return cls._guard_output(
+                cls.invalid_followup_task_text(tool_name, followup_task_id, latest_execute_task_id),
+                response_format=response_format,
+                artifact={
+                    "error": "invalid_followup_task_id",
+                    "tool": tool_name,
+                    "task_id": followup_task_id,
+                    "latest_execute_task_id": latest_execute_task_id,
+                },
+            )
+
         call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
         cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
         if call_cache_key in cached_results:
@@ -489,6 +616,8 @@ class ToolLimits(BaseModel):
                     result = await asyncio.wait_for(orig_coro(*args, **kwargs), timeout=timeout)
                 else:
                     result = await orig_coro(*args, **kwargs)
+                if (tool_name or "").strip().lower() == "execute":
+                    cls.remember_successful_execute_task_id(tool_call_state, result)
                 if cls.is_cacheable_tool_result(result):
                     cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
                 return result
@@ -512,6 +641,20 @@ class ToolLimits(BaseModel):
                     attempt,
                     attempts,
                 )
+                if followup_task_id and cls.is_task_not_found_exception(e):
+                    invalid_task_ids.add(followup_task_id)
+                    latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
+                    return cls._guard_output(
+                        cls.invalid_followup_task_text(tool_name, followup_task_id, latest_execute_task_id),
+                        response_format=response_format,
+                        artifact={
+                            "error": "invalid_followup_task_id",
+                            "tool": tool_name,
+                            "task_id": followup_task_id,
+                            "latest_execute_task_id": latest_execute_task_id,
+                            "exception": type(e).__name__,
+                        },
+                    )
                 return cls._guard_output(
                     ToolLimits.tool_error_text(tool_name, e),
                     response_format=response_format,
@@ -610,7 +753,7 @@ class AgentBuilder:
 
         # Shared tool call counter across all tools within this workflow.
         # Using a mutable container avoids invalid `nonlocal` usage across methods.
-        tool_call_state: dict[str, int] = {
+        tool_call_state: dict[str, Any] = {
             "used": 0,
             "general_used": 0,
             "followup_used": 0,

@@ -69,6 +69,16 @@ class EndPoint(CodingEndPointBase):
         if not p.is_absolute():
             raise HTTPException(status_code=400, detail="workspace_path must be an absolute path")
 
+        if p.exists() and p.is_file():
+            logger.info(
+                "workspace_path points to an existing file; using parent directory instead: requested=%s normalized=%s",
+                p.as_posix(),
+                p.parent.as_posix(),
+            )
+            p = p.parent
+        elif p.exists() and not p.is_dir():
+            raise HTTPException(status_code=400, detail="workspace_path must be a directory path")
+
         cfg = get_coding_runtime_config()
 
         # Security / safety guard: restrict workspace_path under an allowed root.

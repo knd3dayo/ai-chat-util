@@ -6,6 +6,7 @@ import types
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 fake_client_module = types.ModuleType("langchain_mcp_adapters.client")
 fake_client_module.MultiServerMCPClient = object
@@ -130,6 +131,20 @@ def test_async_tool_timeout_retries_then_succeeds() -> None:
     asyncio.run(_run())
 
 
+def test_tool_agent_prompt_requires_directory_workspace_and_task_id_before_followups() -> None:
+    prompt = CodingAgentPrompts().tool_agent_system_prompt(
+        hitl_policy_text="dummy policy",
+        agent_name="tool_agent_coding",
+        followup_poll_interval_seconds=10.0,
+        status_tail_lines=20,
+        result_tail_lines=80,
+    )
+
+    assert "workspace_path` には、必ず「作業用ディレクトリ」の絶対パス" in prompt
+    assert "対象が特定ファイルの場合は、そのファイルパスは prompt 側に含め" in prompt
+    assert "task_id を取得できなかった場合は、status/get_result/workspace_path を呼ばず" in prompt
+
+
 def test_followup_tools_use_separate_budget_from_general_tools() -> None:
     state: dict[str, int] = {
         "used": 0,
@@ -196,6 +211,61 @@ def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spe
     assert calls["n"] == 1
     assert state["general_used"] == 1
     assert state["used"] == 1
+
+
+def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+    }
+    status_calls = {"n": 0}
+
+    execute_tool = _FakeTool("execute", response_format="content", func=lambda: {"task_id": "task-valid"})
+
+    def _status(task_id: str) -> str:
+        status_calls["n"] += 1
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    status_tool = _FakeTool("status", response_format="content", func=_status)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [execute_tool, status_tool],
+        tool_call_state=state,
+        tool_call_limit_int=4,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    execute_result = execute_tool.func()
+    assert execute_result == {"task_id": "task-valid"}
+
+    out1 = status_tool.func("task-missing")
+    out2 = status_tool.func("task-missing")
+
+    assert isinstance(out1, str)
+    assert "invalid_followup_task_id" in out1
+    assert "task-missing" in out1
+    assert "task-valid" in out1
+    assert isinstance(out2, str)
+    assert "invalid_followup_task_id" in out2
+    assert status_calls["n"] == 1
+    assert state["followup_used"] == 1
+
+
+def test_tool_agent_prompt_instructs_latest_task_id_only_and_no_retry_after_404() -> None:
+    prompt = CodingAgentPrompts().tool_agent_system_prompt(
+        hitl_policy_text="dummy policy",
+        agent_name="tool_agent_coding",
+        followup_poll_interval_seconds=10.0,
+        status_tail_lines=20,
+        result_tail_lines=80,
+    )
+
+    assert "最後に成功した execute の戻り task_id" in prompt
+    assert "Task not found" in prompt
+    assert "同じ task_id での followup を二度と繰り返さないでください" in prompt
 
 
 def test_duplicate_error_result_is_not_cached_and_still_hits_budget() -> None:

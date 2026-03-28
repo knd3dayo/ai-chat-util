@@ -89,8 +89,13 @@ class CodingAgentPrompts(PromptsBase):
 - stderr は長くなりやすいので、原則として tail を指定して末尾のみ取得・貼り付けてください。
     形式は次を推奨します:
     [stdout]\n...\n[/stdout]\n[stderr_tail]\n...\n[/stderr_tail]
+- execute の `workspace_path` には、必ず「作業用ディレクトリ」の絶対パスを渡してください。ファイルの絶対パスを `workspace_path` に入れてはいけません。
+- 対象が特定ファイルの場合は、そのファイルパスは prompt 側に含め、`workspace_path` にはその親ディレクトリを指定してください。
+- execute を複数回呼んだ場合、followup に使ってよい task_id は「最後に成功した execute の戻り task_id」1件だけです。過去の task_id は追跡対象から外してください。
 - workspace_path は、ユーザー/スーパーバイザーから明示的に要求された場合のみ呼び出してください。
     呼び出す場合も、必ず execute の戻り task_id を使ってください（推測で task_id を作らない）。
+- execute が失敗した場合、または execute の戻り値から task_id を取得できなかった場合は、status/get_result/workspace_path を呼ばずに失敗内容だけを短くまとめて complete で終了してください。
+- status/get_result/workspace_path/cancel が `Task not found` や 404 を返した task_id は無効です。同じ task_id での followup を二度と繰り返さないでください。
 
 [実行優先]
 - ツールの引数スキーマに `req` がある場合は、原則として `{{"req": {{...}}}}` の形で呼び出してください（フラット引数は避ける）。
@@ -178,6 +183,11 @@ class CodingAgentPrompts(PromptsBase):
 - execute/status/get_result という「タスクIDで追跡する」ツール群がある場合、最終的なユーザー出力には get_result の stdout を“本文として”必ず含めてください（「確認しました」「問題ありません」等の要約だけで終えない）。
 - stderr は長くなりやすいので、原則として tail を指定して末尾のみを出力してください（例: tail=200）。
 - 出力は次のように区切って貼ってください:
+
+- execute の `workspace_path` はディレクトリ専用です。ファイルパスをそのまま渡さず、対象ファイルがある親ディレクトリを使ってください。
+- execute が失敗した場合や task_id が返っていない場合は、status/get_result/workspace_path を続けて呼ばせず、その失敗内容を踏まえて別の手順に切り替えるか、部分成功で収束させてください。
+- 複数の execute が走った場合は、最新の成功 execute task_id だけを採用し、それ以前の task_id への followup は止めてください。
+- status/get_result/workspace_path/cancel が 404/Task not found になった task_id は無効とみなし、同じ task_id への followup を再実行させないでください。
     [stdout]\n...\n[/stdout]\n[stderr_tail]\n...\n[/stderr_tail]
 - workspace_path は、明示的に必要な場合のみ使ってください。使う場合も execute の戻り task_id を必ず用いてください。
 

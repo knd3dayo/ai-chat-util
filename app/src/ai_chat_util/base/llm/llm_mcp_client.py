@@ -26,7 +26,7 @@ from .agent import ToolLimits
 class MCPClient(AbstractLLMClient):
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
-        self.message_factory = LLMMessageContentFactory()
+        self.message_factory = LLMMessageContentFactory(config=runtime_config)
 
 
     @staticmethod

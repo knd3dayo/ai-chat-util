@@ -187,7 +187,7 @@ class LLMClient(LLMClientBase):
 
         self.llm_config = llm_config
         self.use_mcp = use_mcp
-        self.message_factory = LLMMessageContentFactory()
+        self.message_factory = LLMMessageContentFactory(config=llm_config)
 
         # ai-chat-util-config.yml の non-secret 設定を既定値として採用
         try:

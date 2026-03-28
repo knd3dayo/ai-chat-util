@@ -72,10 +72,10 @@ uv sync
 
 ### 1) ai-chat-util-config.yml（必須）
 
-`config.example.yml` をコピーして `ai-chat-util-config.yml` を作成してください。
+同梱の `app/ai-chat-util-config.yml` をベースに、必要に応じて `ai-chat-util-config.yml` を用意してください。
 
 ```bash
-copy config.example.yml ai-chat-util-config.yml
+cp app/ai-chat-util-config.yml ./ai-chat-util-config.yml
 ```
 
 設定ファイルの探索順は以下です。
@@ -90,7 +90,7 @@ copy config.example.yml ai-chat-util-config.yml
 実際にどの設定ファイルが読まれたか確認したい場合は、CLI の `show_config`、API エンドポイント `/api/ai_chat_util/get_loaded_config_info`、または MCP ツール `get_loaded_config_info` を使ってください。
 
 ```bash
-uv --directory app run -m ai_chat_util.cli --config app/ai-chat-util-config.yml show_config
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml show_config
 ```
 
 この出力には、実際に読まれた設定ファイルのパスと、そのファイルの生の設定内容が含まれます。`os.environ/VAR_NAME` の参照は解決されないため、環境変数の実値は表示されません。
@@ -358,13 +358,13 @@ uv run ai-chat-util --help
 #### chat（テキストチャット）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml chat -p "こんにちは"
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは"
 ```
 
 内部MCPクライアントを使う場合:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml chat -p "こんにちは" --use_mcp
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは" --use_mcp
 ```
 
 HITL（pause/resume）が発生した場合:
@@ -378,7 +378,7 @@ Excel の各行（`content` / `file_path`）を読み込み、指定した `prom
 応答を `output` 列（既定）に書き込んだ Excel を出力します。
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml batch_chat \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml batch_chat \
   -i data/input.xlsx \
   -p "要約してください" \
   -o output.xlsx
@@ -387,7 +387,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.
 内部MCPクライアントを使う場合:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml batch_chat \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml batch_chat \
   -i data/input.xlsx \
   -p "要約してください" \
   -o output.xlsx \
@@ -414,7 +414,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.
 #### analyze_image_files（画像解析）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml analyze_image_files \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_image_files \
   -i a.png b.jpg \
   -p "内容を説明して" \
   --detail auto
@@ -423,7 +423,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.
 #### analyze_pdf_files（PDF解析）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml analyze_pdf_files \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_pdf_files \
   -i document.pdf \
   -p "このPDFの要約を作成して" \
   --detail auto
@@ -432,7 +432,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.
 #### analyze_office_files（Office解析：PDF化→解析）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml analyze_office_files \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_office_files \
   -i data.xlsx slide.pptx \
   -p "内容を要約して" \
   --detail auto
@@ -441,7 +441,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.
 #### analyze_files（複数形式まとめて解析）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./app/ai-chat-util-config.yml analyze_files \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
   -i note.txt a.png document.pdf data.xlsx \
   -p "これらをまとめて要約して" \
   --detail auto
@@ -650,6 +650,8 @@ ai_chat_util_config:
 LLM_API_KEY=xxxxxxxx
 ```
 
+`.env.example` も `LLM_API_KEY` を基準にしています。OpenAI / Azure OpenAI / Anthropic のいずれでも、まず `LLM_API_KEY` を設定し、プロバイダ固有の model / base_url / api_version は `ai-chat-util-config.yml` 側で設定してください。
+
 ---
 
 ## 使い方
@@ -659,13 +661,13 @@ LLM_API_KEY=xxxxxxxx
 起動:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding._api_.api_server --config ./app/ai-chat-util-config.yml --host 127.0.0.1 -p 7101
+uv --directory ./app run -m ai_chat_util.agent.coding._api_.api_server --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
 ```
 
 `--config` で明示する場合:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding._api_.api_server --config ./app/ai-chat-util-config.yml --host 127.0.0.1 -p 7101
+uv --directory ./app run -m ai_chat_util.agent.coding._api_.api_server --config ./ai-chat-util-config.yml --host 127.0.0.1 -p 7101
 ```
 
 実行（非同期）:
@@ -723,13 +725,13 @@ curl -sS -X DELETE http://127.0.0.1:7101/cancel/<task_id>
 起動（stdio）:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./app/ai-chat-util-config.yml --mode stdio
+uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./ai-chat-util-config.yml --mode stdio
 ```
 
 起動（HTTP）:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./app/ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
+uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
 ```
 
 > 注意: MCPサーバ（http/sse）の既定ポートは 7101 です。APIサーバ（既定 7101）と同時に動かす場合は、上記例のように `-p 7102` 等を指定してください。
@@ -737,7 +739,7 @@ uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./
 `--config` を使う場合:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./app/ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
+uv --directory ./app run -m ai_chat_util.agent.coding.mcp.mcp_server --config ./ai-chat-util-config.yml --mode http --host 127.0.0.1 -p 7102
 ```
 
 公開されるツール（代表）:
@@ -809,7 +811,7 @@ uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --help
 実行:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./app/ai-chat-util-config.yml run \
+uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./ai-chat-util-config.yml run \
   "Hello. Please respond with a single word and exit." \
   --wait
 ```
@@ -817,7 +819,7 @@ uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config
 非同期（task_id を返して終了）:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./app/ai-chat-util-config.yml run \
+uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./ai-chat-util-config.yml run \
   "Hello" \
   --no-wait
 ```
@@ -825,7 +827,7 @@ uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config
 状態確認:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./app/ai-chat-util-config.yml status <task_id>
+uv --directory ./app run -m ai_chat_util.agent.coding._cli_.docker_main --config ./ai-chat-util-config.yml status <task_id>
 ```
 
 ---

@@ -12,15 +12,17 @@ resolution-markers = [
 
 [[package]]
 name = "ai-chat-util"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "." }
 dependencies = [
+    { name = "aiofiles" },
     { name = "aiosqlite" },
     { name = "anthropic" },
+    { name = "beautifulsoup4" },
     { name = "boto3" },
+    { name = "chardet" },
     { name = "fastapi" },
     { name = "fastmcp" },
-    { name = "file-util" },
     { name = "google-generativeai" },
     { name = "langchain" },
     { name = "langchain-litellm" },
@@ -29,27 +31,37 @@ dependencies = [
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langgraph-supervisor" },
     { name = "litellm" },
+    { name = "magika" },
+    { name = "markdown" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "pandas" },
+    { name = "pdfminer-six" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "pymupdf" },
     { name = "pytest" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-on-whales" },
+    { name = "python-pptx" },
     { name = "pyyaml" },
+    { name = "pyzipper" },
+    { name = "smbprotocol" },
     { name = "tabulate" },
     { name = "tiktoken" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "aiofiles" },
     { name = "aiosqlite" },
     { name = "anthropic" },
+    { name = "beautifulsoup4" },
     { name = "boto3" },
+    { name = "chardet", specifier = "==5.2.0" },
     { name = "fastapi" },
     { name = "fastmcp" },
-    { name = "file-util", git = "https://github.com/knd3dayo/file-util.git?rev=main" },
     { name = "google-generativeai" },
     { name = "langchain" },
     { name = "langchain-litellm" },
@@ -58,15 +70,23 @@ requires-dist = [
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langgraph-supervisor" },
     { name = "litellm" },
+    { name = "magika" },
+    { name = "markdown" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "pandas" },
+    { name = "pdfminer-six" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "pymupdf" },
     { name = "pytest" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-on-whales" },
+    { name = "python-pptx" },
     { name = "pyyaml" },
+    { name = "pyzipper" },
+    { name = "smbprotocol" },
     { name = "tabulate" },
     { name = "tiktoken" },
 ]
@@ -712,29 +732,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/17/354d04951ce114bf4afc78e27a18cfbd6ee319ab1829c2d5fb5e94063ac6/fastuuid-0.14.0-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:1383fff584fa249b16329a059c68ad45d030d5a4b70fb7c73a08d98fd53bcdab", size = 450921, upload-time = "2025-10-19T22:31:02.151Z" },
     { url = "https://files.pythonhosted.org/packages/fb/be/d7be8670151d16d88f15bb121c5b66cdb5ea6a0c2a362d0dcf30276ade53/fastuuid-0.14.0-cp313-cp313-win32.whl", hash = "sha256:a0809f8cc5731c066c909047f9a314d5f536c871a7a22e815cc4967c110ac9ad", size = 154559, upload-time = "2025-10-19T22:36:36.011Z" },
     { url = "https://files.pythonhosted.org/packages/22/1d/5573ef3624ceb7abf4a46073d3554e37191c868abc3aecd5289a72f9810a/fastuuid-0.14.0-cp313-cp313-win_amd64.whl", hash = "sha256:0df14e92e7ad3276327631c9e7cec09e32572ce82089c55cb1bb8df71cf394ed", size = 156539, upload-time = "2025-10-19T22:33:35.898Z" },
-]
-
-[[package]]
-name = "file-util"
-version = "0.1.1"
-source = { git = "https://github.com/knd3dayo/file-util.git?rev=main#bf4ccad09118ee2c6114e41242426b490d9c79ac" }
-dependencies = [
-    { name = "aiofiles" },
-    { name = "beautifulsoup4" },
-    { name = "chardet" },
-    { name = "fastapi" },
-    { name = "fastmcp" },
-    { name = "magika" },
-    { name = "markdown" },
-    { name = "openpyxl" },
-    { name = "pdfminer-six" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "python-docx" },
-    { name = "python-dotenv" },
-    { name = "python-pptx" },
-    { name = "pyzipper" },
-    { name = "smbprotocol" },
 ]
 
 [[package]]

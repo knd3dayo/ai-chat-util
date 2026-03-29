@@ -5,6 +5,7 @@ from typing import Any, Mapping, Sequence, cast
 import asyncio
 import copy
 import json
+from pathlib import Path
 import re
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -167,6 +168,30 @@ class ToolLimits(BaseModel):
         return tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int
 
     @staticmethod
+    def effective_call_limits(
+        tool_call_limit_int: int,
+        followup_tool_call_limit_int: int,
+        explicit_user_file_paths: Sequence[str] | None = None,
+    ) -> tuple[int, int]:
+        normalized_paths = [
+            str(path).strip()
+            for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        if not normalized_paths:
+            return tool_call_limit_int, followup_tool_call_limit_int
+
+        effective_tool_limit = tool_call_limit_int
+        effective_followup_limit = followup_tool_call_limit_int
+
+        if effective_tool_limit > 0:
+            effective_tool_limit = max(effective_tool_limit, 6)
+        if effective_followup_limit > 0:
+            effective_followup_limit = max(effective_followup_limit, 12)
+
+        return effective_tool_limit, effective_followup_limit
+
+    @staticmethod
     def is_timeout_exception(err: BaseException) -> bool:
         if isinstance(err, asyncio.TimeoutError):
             return True
@@ -194,6 +219,11 @@ class ToolLimits(BaseModel):
     def is_followup_tool(tool_name: str) -> bool:
         normalized = (tool_name or "").strip().lower()
         return normalized in {"status", "get_result", "workspace_path", "cancel"}
+
+    @staticmethod
+    def is_reusable_followup_tool(tool_name: str) -> bool:
+        normalized = (tool_name or "").strip().lower()
+        return normalized in {"get_result", "workspace_path"}
 
     @staticmethod
     def _freeze_for_cache(value: Any) -> Any:
@@ -230,6 +260,106 @@ class ToolLimits(BaseModel):
             text = result[0]
             return not (isinstance(text, str) and text.lstrip().startswith("ERROR:"))
         return True
+
+    @classmethod
+    def should_cache_tool_result(cls, tool_name: str, result: Any) -> bool:
+        normalized = (tool_name or "").strip().lower()
+        if normalized == "execute":
+            return False
+        if cls.is_followup_tool(normalized) and not cls.is_reusable_followup_tool(normalized):
+            return False
+        return cls.is_cacheable_tool_result(result)
+
+    @staticmethod
+    def _extract_single_explicit_user_file_path(tool_call_state: Mapping[str, Any]) -> str | None:
+        candidates = tool_call_state.get("explicit_user_file_paths")
+        if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes, bytearray)):
+            return None
+
+        normalized = [str(value).strip() for value in candidates if isinstance(value, str) and str(value).strip()]
+        if len(normalized) != 1:
+            return None
+        return normalized[0]
+
+    @staticmethod
+    def _contains_explicit_file_path(text: str) -> bool:
+        if not text:
+            return False
+        return bool(re.search(r"(?:[A-Za-z]:[\\/]|/)[^\s'\"`]+", text))
+
+    @staticmethod
+    def _looks_like_heading_extraction_task(prompt: str) -> bool:
+        normalized = (prompt or "").lower()
+        if not normalized:
+            return False
+        return any(token in normalized for token in ("heading", "headings", "見出し", "markdown heading", "heading_line_exact"))
+
+    @classmethod
+    def normalize_execute_arguments(
+        cls,
+        tool_name: str,
+        tool_call_state: Mapping[str, Any],
+        args: Sequence[Any],
+        kwargs: Mapping[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if (tool_name or "").strip().lower() != "execute":
+            return tuple(args), dict(kwargs)
+
+        normalized_kwargs = dict(kwargs)
+        req = normalized_kwargs.get("req")
+        if isinstance(req, Mapping):
+            normalized_req = dict(req)
+        else:
+            normalized_req = {}
+
+        moved_top_level_fields = False
+        for field_name in ("prompt", "workspace_path", "timeout", "task_id", "trace_id"):
+            if field_name in normalized_kwargs:
+                top_level_value = normalized_kwargs.pop(field_name)
+                if field_name not in normalized_req:
+                    normalized_req[field_name] = top_level_value
+                moved_top_level_fields = True
+
+        if moved_top_level_fields or isinstance(req, Mapping):
+            normalized_kwargs["req"] = normalized_req
+
+        target_file_path = cls._extract_single_explicit_user_file_path(tool_call_state)
+        if not target_file_path:
+            return tuple(args), normalized_kwargs
+
+        if not normalized_req:
+            return tuple(args), normalized_kwargs
+
+        prompt = normalized_req.get("prompt")
+        workspace_path = normalized_req.get("workspace_path")
+        if not isinstance(prompt, str) or not prompt.strip() or target_file_path in prompt or cls._contains_explicit_file_path(prompt):
+            return tuple(args), normalized_kwargs
+        if not isinstance(workspace_path, str) or not workspace_path.strip():
+            return tuple(args), normalized_kwargs
+
+        try:
+            workspace_dir = Path(workspace_path).expanduser().resolve()
+            file_path = Path(target_file_path).expanduser().resolve()
+            file_path.relative_to(workspace_dir)
+        except Exception:
+            return tuple(args), normalized_kwargs
+
+        prompt_suffix_lines = [
+            f"Target file path: {file_path.as_posix()}",
+            "Use only this file as the source of truth for the requested extraction.",
+            "Do not infer headings or content from any other file.",
+        ]
+        if cls._looks_like_heading_extraction_task(prompt):
+            prompt_suffix_lines.extend(
+                [
+                    "Read the target file directly and output exact Markdown heading lines from that file.",
+                    "For each extracted heading line, print one line in the format: HEADING_LINE_EXACT: <exact heading line>",
+                ]
+            )
+
+        normalized_req["prompt"] = prompt.rstrip() + "\n\n" + "\n".join(prompt_suffix_lines)
+        normalized_kwargs["req"] = normalized_req
+        return tuple(args), normalized_kwargs
 
     @staticmethod
     def clone_cached_tool_result(result: Any) -> Any:
@@ -404,6 +534,7 @@ class ToolLimits(BaseModel):
             response_format: str | None,
         ) -> Any:
             def _wrapped_func(*args: Any, **kwargs: Any) -> Any:
+                args, kwargs = cls.normalize_execute_arguments(tool_name, tool_call_state, args, kwargs)
                 used = int(tool_call_state.get("used", 0) or 0)
                 if used < 0:
                     used = 0
@@ -444,7 +575,7 @@ class ToolLimits(BaseModel):
 
                 call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
                 cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
-                if call_cache_key in cached_results:
+                if (not cls.is_followup_tool(tool_name) or cls.is_reusable_followup_tool(tool_name)) and call_cache_key in cached_results:
                     logger.info("Reusing cached tool result (sync): tool=%s", tool_name)
                     return cls.clone_cached_tool_result(cached_results[call_cache_key])
 
@@ -485,7 +616,7 @@ class ToolLimits(BaseModel):
                     result = orig_func(*args, **kwargs)
                     if (tool_name or "").strip().lower() == "execute":
                         cls.remember_successful_execute_task_id(tool_call_state, result)
-                    if cls.is_cacheable_tool_result(result):
+                    if cls.should_cache_tool_result(tool_name, result):
                         cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
                     return result
                 except Exception as e:
@@ -588,6 +719,7 @@ class ToolLimits(BaseModel):
     ) -> Any:
         attempts = tool_timeout_retries_int + 1
         last_err: BaseException | None = None
+        args, kwargs = cls.normalize_execute_arguments(tool_name, tool_call_state, args, kwargs)
         followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
         invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
         latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
@@ -623,7 +755,7 @@ class ToolLimits(BaseModel):
 
         call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
         cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
-        if call_cache_key in cached_results:
+        if (not cls.is_followup_tool(tool_name) or cls.is_reusable_followup_tool(tool_name)) and call_cache_key in cached_results:
             logger.info("Reusing cached tool result: tool=%s", tool_name)
             return cls.clone_cached_tool_result(cached_results[call_cache_key])
 
@@ -674,7 +806,7 @@ class ToolLimits(BaseModel):
                     result = await orig_coro(*args, **kwargs)
                 if (tool_name or "").strip().lower() == "execute":
                     cls.remember_successful_execute_task_id(tool_call_state, result)
-                if cls.is_cacheable_tool_result(result):
+                if cls.should_cache_tool_result(tool_name, result):
                     cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
                 return result
             except asyncio.CancelledError:
@@ -798,6 +930,8 @@ class AgentBuilder:
             prompts: PromptsBase,
             tool_limits: ToolLimits | None,
             agent_name: str,
+            allowed_tool_names: Sequence[str] | None = None,
+            explicit_user_file_paths: Sequence[str] | None = None,
         ):
 
         # Safety valves: cap tool calls and hard-timeout tool execution.
@@ -807,13 +941,24 @@ class AgentBuilder:
         else:
             tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = (0, 0.0, 0)
 
+        effective_tool_call_limit_int, effective_followup_tool_call_limit_int = ToolLimits.effective_call_limits(
+            tool_call_limit_int,
+            int(tool_limits.followup_tool_call_limit) if tool_limits is not None else 0,
+            explicit_user_file_paths,
+        )
+
         # Shared tool call counter across all tools within this workflow.
         # Using a mutable container avoids invalid `nonlocal` usage across methods.
         tool_call_state: dict[str, Any] = {
             "used": 0,
             "general_used": 0,
             "followup_used": 0,
-            "followup_limit": int(tool_limits.followup_tool_call_limit) if tool_limits is not None else 0,
+            "followup_limit": effective_followup_tool_call_limit_int,
+            "explicit_user_file_paths": [
+                str(path).strip()
+                for path in (explicit_user_file_paths or [])
+                if isinstance(path, str) and str(path).strip()
+            ],
         }
 
         hitl_approval_tools = runtime_config.features.hitl_approval_tools or []
@@ -821,11 +966,16 @@ class AgentBuilder:
         agent_client = MultiServerMCPClient(mcp_config.to_langchain_config())
         # LangChainのツールリストを取得
         coding_agent_langchain_tools = await agent_client.get_tools()
+        if allowed_tool_names is not None:
+            allowed_names = {name for name in allowed_tool_names if isinstance(name, str) and name.strip()}
+            coding_agent_langchain_tools = [
+                tool for tool in coding_agent_langchain_tools if str(getattr(tool, "name", "")) in allowed_names
+            ]
 
         ToolLimits._apply_tool_execution_guards(
             coding_agent_langchain_tools,
             tool_call_state=tool_call_state,
-            tool_call_limit_int=tool_call_limit_int,
+            tool_call_limit_int=effective_tool_call_limit_int,
             tool_timeout_seconds_f=tool_timeout_seconds_f,
             tool_timeout_retries_int=tool_timeout_retries_int,
         )
@@ -868,6 +1018,8 @@ class AgentBuilder:
         prompts: PromptsBase,
         tool_limits: ToolLimits | None,
         include_general_agent: bool = True,
+        general_tool_allowlist: Sequence[str] | None = None,
+        explicit_user_file_paths: Sequence[str] | None = None,
     ) -> list[AgentBuilder]:
         logger.info("Creating sub-agents...")
 
@@ -904,6 +1056,7 @@ class AgentBuilder:
                     group_label="coding",
                     server_names=tuple(code_agent_mcp_config.servers.keys()),
                 ),
+                explicit_user_file_paths=explicit_user_file_paths,
             )
             agents.append(code_agent_builder)
 
@@ -921,8 +1074,11 @@ class AgentBuilder:
                     group_label="general",
                     server_names=tuple(normal_tools_mcp_config.servers.keys()),
                 ),
+                allowed_tool_names=general_tool_allowlist,
+                explicit_user_file_paths=explicit_user_file_paths,
             )
-            agents.append(normal_agent_builder)
+            if general_tool_allowlist is None or normal_agent_builder.langchain_tools:
+                agents.append(normal_agent_builder)
 
         # 他のサブエージェントも必要に応じてここで作成できます。
         return agents

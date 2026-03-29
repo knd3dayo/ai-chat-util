@@ -6,16 +6,18 @@ import ast
 import contextlib
 import json
 import re
+import sqlite3
 from pathlib import Path
 from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools.structured import StructuredTool
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from .prompts import PromptsBase
 from .agent import AgentBuilder, ToolLimits
 
@@ -36,6 +38,10 @@ logger = log_settings.getLogger(__name__)
 
 
 class MCPClientUtil:
+
+    _GENERAL_TOOLS_ALLOWED_WITH_EXPLICIT_CODING_AGENT: tuple[str, ...] = (
+        "get_loaded_config_info",
+    )
 
     _EXPLICIT_CODING_AGENT_PATTERNS: tuple[str, ...] = (
         r"\bcoding(?:[\s\-_]+agent)(?:\s+mcp)?\b",
@@ -72,6 +78,70 @@ class MCPClientUtil:
         return False
 
     @classmethod
+    def extract_explicit_user_file_paths(cls, messages: Sequence[Any]) -> list[str]:
+        candidates: list[str] = []
+        seen: set[str] = set()
+        patterns = (
+            r"(?P<path>/[^\s'\"`]+)",
+            r"(?P<path>[A-Za-z]:[\\/][^\s'\"`]+)",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            for pattern in patterns:
+                for match in re.finditer(pattern, text):
+                    raw_path = match.group("path").strip().rstrip(",.);:]>}")
+                    try:
+                        resolved = Path(raw_path).expanduser().resolve()
+                    except Exception:
+                        continue
+                    if not resolved.is_file():
+                        continue
+                    normalized = resolved.as_posix()
+                    if normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    candidates.append(normalized)
+
+        return candidates
+
+    @classmethod
+    def should_include_general_agent(
+        cls,
+        *,
+        force_coding_agent_route: bool,
+        explicit_user_file_paths: Sequence[str] | None = None,
+    ) -> bool:
+        normalized_paths = [
+            str(path).strip()
+            for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        if force_coding_agent_route and normalized_paths:
+            return False
+        return True
+
+    @classmethod
     async def collect_checkpoint_results(
         cls,
         *,
@@ -97,6 +167,65 @@ class MCPClientUtil:
                     results.append(values)
         except Exception:
             logger.debug("Failed to load graph state history for trace_id=%s", run_trace_id, exc_info=True)
+
+        return results
+
+    @classmethod
+    def collect_checkpoint_write_results(
+        cls,
+        *,
+        checkpoint_db_path: Path | None,
+        run_trace_id: str,
+        limit: int = 64,
+    ) -> list[Any]:
+        if checkpoint_db_path is None:
+            return []
+
+        try:
+            db_path = checkpoint_db_path.expanduser().resolve()
+        except Exception:
+            return []
+        if not db_path.is_file():
+            return []
+
+        results: list[Any] = []
+        serde = JsonPlusSerializer()
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    "select checkpoint_id, checkpoint_ns, task_id, idx, channel, type, value "
+                    "from writes where thread_id = ? order by rowid desc limit ?",
+                    (run_trace_id, int(limit)),
+                ).fetchall()
+        except Exception:
+            logger.debug("Failed to load checkpoint writes for trace_id=%s db_path=%s", run_trace_id, db_path, exc_info=True)
+            return []
+
+        for checkpoint_id, checkpoint_ns, task_id, idx, channel, value_type, value_blob in rows:
+            if str(channel) != "messages":
+                continue
+            try:
+                decoded = serde.loads_typed((value_type, value_blob))
+            except Exception:
+                logger.debug(
+                    "Failed to decode checkpoint write for trace_id=%s checkpoint_id=%s channel=%s",
+                    run_trace_id,
+                    checkpoint_id,
+                    channel,
+                    exc_info=True,
+                )
+                continue
+            results.append(
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "task_id": task_id,
+                    "idx": idx,
+                    "channel": channel,
+                    "messages": decoded if isinstance(decoded, Sequence) and not isinstance(decoded, (str, bytes, bytearray)) else [decoded],
+                }
+            )
 
         return results
 
@@ -154,6 +283,47 @@ class MCPClientUtil:
         return None
 
     @classmethod
+    def _read_text_if_exists(cls, path_value: Any) -> str | None:
+        if not isinstance(path_value, str) or not path_value.strip():
+            return None
+        try:
+            path = Path(path_value).expanduser().resolve()
+        except Exception:
+            return None
+        try:
+            if not path.is_file():
+                return None
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        text = text.strip()
+        return text or None
+
+    @classmethod
+    def _extract_stdout_from_artifact_paths(cls, candidate: Mapping[str, Any]) -> str | None:
+        metadata = candidate.get("metadata")
+        if isinstance(metadata, Mapping):
+            stdout_path = cls._read_text_if_exists(metadata.get("stdout_path"))
+            if stdout_path:
+                return stdout_path
+
+        workspace_path = candidate.get("workspace_path")
+        artifacts = candidate.get("artifacts")
+        if isinstance(workspace_path, str) and workspace_path.strip() and isinstance(artifacts, Sequence) and not isinstance(artifacts, (str, bytes, bytearray)):
+            for artifact_name in artifacts:
+                if str(artifact_name).strip() != "stdout.log":
+                    continue
+                try:
+                    artifact_path = Path(workspace_path).expanduser().resolve() / "stdout.log"
+                except Exception:
+                    continue
+                text = cls._read_text_if_exists(artifact_path.as_posix())
+                if text:
+                    return text
+
+        return None
+
+    @classmethod
     def extract_successful_tool_evidence(cls, results: Sequence[Any] | Any) -> dict[str, Any]:
         items = list(results) if isinstance(results, Sequence) and not isinstance(results, (str, bytes, bytearray, Mapping)) else [results]
 
@@ -166,24 +336,35 @@ class MCPClientUtil:
             for message in cls._iter_result_messages(result):
                 text = ""
                 artifact: Any | None = None
+                is_tool_message = False
 
-                if isinstance(message, AIMessage):
+                if isinstance(message, ToolMessage):
+                    text = cls._stringify_message_content(message.content)
+                    artifact = getattr(message, "artifact", None)
+                    is_tool_message = True
+                elif isinstance(message, AIMessage):
                     text = cls._stringify_message_content(message.content)
                     artifact = getattr(message, "artifact", None)
                 elif isinstance(message, Mapping):
                     text = cls._stringify_message_content(message.get("content"))
                     artifact = message.get("artifact")
+                    role = str(message.get("role") or "").lower()
+                    is_tool_message = role == "tool" or bool(message.get("tool_call_id"))
                 else:
                     text = cls._stringify_message_content(getattr(message, "content", None))
                     artifact = getattr(message, "artifact", None)
+                    is_tool_message = bool(getattr(message, "tool_call_id", None))
 
-                if text:
+                if text and is_tool_message:
                     raw_texts.append(text)
 
                 mapping_candidates: list[Mapping[str, Any]] = []
-                if isinstance(artifact, Mapping):
+                if is_tool_message and isinstance(artifact, Mapping):
                     mapping_candidates.append(artifact)
-                parsed_from_text = cls._extract_mapping_from_text(text)
+                    structured_content = artifact.get("structured_content")
+                    if isinstance(structured_content, Mapping):
+                        mapping_candidates.append(structured_content)
+                parsed_from_text = cls._extract_mapping_from_text(text) if is_tool_message else None
                 if parsed_from_text is not None:
                     mapping_candidates.append(parsed_from_text)
 
@@ -196,6 +377,11 @@ class MCPClientUtil:
                     stdout_value = candidate.get("stdout")
                     if isinstance(stdout_value, str) and stdout_value.strip() and not stdout_value.lstrip().startswith("ERROR:"):
                         stdout_blocks.append(stdout_value.strip())
+                        continue
+
+                    artifact_stdout = cls._extract_stdout_from_artifact_paths(candidate)
+                    if artifact_stdout and not artifact_stdout.lstrip().startswith("ERROR:"):
+                        stdout_blocks.append(artifact_stdout)
 
                 for stdout_match in re.findall(r"\[stdout\]\s*(.*?)\s*\[/stdout\]", text, flags=re.DOTALL | re.IGNORECASE):
                     value = stdout_match.strip()
@@ -301,6 +487,11 @@ class MCPClientUtil:
                 seen_stdout.add(stdout_text)
                 deduped_stdout.append(stdout_text)
 
+            if not config_path:
+                stdout_path = _extract_path_candidate(stdout_text)
+                if stdout_path:
+                    config_path = stdout_path
+
             candidates = _extract_heading_candidates(stdout_text)
             exact_values = _dedupe(candidates["exact"])
             markdown_values = _dedupe(candidates["markdown"])
@@ -372,6 +563,7 @@ class MCPClientUtil:
         app: Any,
         run_trace_id: str,
         workflow_results: Sequence[Any] | Any,
+        checkpoint_db_path: Path | None = None,
     ) -> list[Any]:
         items = list(workflow_results) if isinstance(workflow_results, Sequence) and not isinstance(workflow_results, (str, bytes, bytearray, Mapping)) else [workflow_results]
 
@@ -381,6 +573,13 @@ class MCPClientUtil:
         )
         if checkpoint_results:
             items.extend(checkpoint_results)
+
+        checkpoint_write_results = cls.collect_checkpoint_write_results(
+            checkpoint_db_path=checkpoint_db_path,
+            run_trace_id=run_trace_id,
+        )
+        if checkpoint_write_results:
+            items.extend(checkpoint_write_results)
         return items
 
     @classmethod
@@ -393,6 +592,27 @@ class MCPClientUtil:
         if not has_evidence:
             return False
 
+        headings = evidence.get("headings")
+        exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()] if isinstance(headings, Sequence) else []
+        if exact_headings:
+            final_heading_candidates: list[str] = []
+            for raw_line in (user_text or "").splitlines():
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                exact_line_match = re.match(r"^(?:[-*]\s+)?HEADING_LINE_EXACT\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+                if exact_line_match:
+                    value = exact_line_match.group(1).strip()
+                    if value:
+                        final_heading_candidates.append(value)
+                        continue
+                markdown_match = re.match(r"^(?:[-*]\s+)?(#{1,6}\s+.+)$", stripped)
+                if markdown_match:
+                    final_heading_candidates.append(markdown_match.group(1).strip())
+
+            if final_heading_candidates and final_heading_candidates[0] != exact_headings[0]:
+                return True
+
         negative_markers = (
             "取得できなかった",
             "確認できなかった",
@@ -400,7 +620,15 @@ class MCPClientUtil:
             "できませんでした",
             "わかりませんでした",
             "失敗しました",
+            "抽出に失敗",
             "取得することができませんでした",
+            "返ってきませんでした",
+            "不明です",
+            "問題が発生しました",
+            "追加の結果が必要",
+            "再度試行",
+            "手動で確認",
+            "他の手法での抽出が必要",
         )
         return any(marker in text for marker in negative_markers)
 
@@ -437,7 +665,7 @@ class MCPClientUtil:
             exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
             if exact_headings:
                 lines.append("文書内の重要な見出し:")
-                for heading in exact_headings[:3]:
+                for heading in exact_headings:
                     lines.append(heading)
 
         stdout_blocks = evidence.get("stdout_blocks")
@@ -450,6 +678,111 @@ class MCPClientUtil:
                 lines.append("[/stdout]")
 
         return "\n".join(lines).strip()
+
+    @classmethod
+    def extract_config_path_from_text(cls, text: str | None) -> str | None:
+        value = (text or "").strip()
+        if not value:
+            return None
+        match = re.search(r"((?:[A-Za-z]:[\\/]|/)[^\s'\"`]+\.ya?ml)", value)
+        if not match:
+            return None
+        return match.group(1).strip()
+
+    @classmethod
+    def get_loaded_runtime_config_path(cls) -> str | None:
+        try:
+            config_path = get_runtime_config_path().expanduser().resolve()
+        except Exception:
+            return None
+        if not config_path.is_file():
+            return None
+        return config_path.as_posix()
+
+    @classmethod
+    def extract_markdown_heading_lines_from_files(cls, file_paths: Sequence[str] | None) -> list[str]:
+        headings: list[str] = []
+        seen: set[str] = set()
+
+        for raw_path in file_paths or []:
+            try:
+                path = Path(str(raw_path)).expanduser().resolve()
+            except Exception:
+                continue
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".md", ".markdown"}:
+                continue
+            text = cls._read_text_if_exists(path.as_posix())
+            if not text:
+                continue
+            for line in text.splitlines():
+                normalized_line = line.rstrip("\r")
+                if not re.match(r"^#{1,6}\s+\S", normalized_line):
+                    continue
+                if normalized_line in seen:
+                    continue
+                seen.add(normalized_line)
+                headings.append(normalized_line)
+
+        return headings
+
+    @classmethod
+    def should_prefer_deterministic_evidence_response(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
+        headings = evidence.get("headings")
+        exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()] if isinstance(headings, Sequence) else []
+        if not exact_headings:
+            return False
+
+        if len(exact_headings) >= 3:
+            return True
+
+        text = (user_text or "").strip().lower()
+        if not text:
+            return True
+
+        if "見出し" in text or "heading" in text or "heading_line_exact" in text:
+            return True
+
+        for raw_line in (user_text or "").splitlines():
+            stripped = raw_line.strip()
+            if re.match(r"^(?:[-*]\s+)?HEADING_LINE_EXACT\s*:", stripped, flags=re.IGNORECASE):
+                return True
+            if re.match(r"^(?:[-*]\s+)?#{1,6}\s+.+$", stripped):
+                return True
+
+        return False
+
+    @classmethod
+    def augment_final_text_with_evidence(cls, user_text: str | None, evidence: Mapping[str, Any]) -> str:
+        base_text = (user_text or "").strip()
+        lines: list[str] = [base_text] if base_text else []
+
+        config_path = evidence.get("config_path")
+        if isinstance(config_path, str) and config_path.strip():
+            normalized_path = config_path.strip()
+            if normalized_path not in base_text:
+                lines.append(f"設定ファイルの場所: {normalized_path}")
+
+        headings = evidence.get("headings")
+        if isinstance(headings, Sequence):
+            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
+            missing_headings = [heading for heading in exact_headings[:3] if heading not in base_text]
+            if missing_headings:
+                if "文書内の重要な見出し:" not in base_text:
+                    lines.append("文書内の重要な見出し:")
+                lines.extend(missing_headings)
+
+        stdout_blocks = evidence.get("stdout_blocks")
+        if isinstance(stdout_blocks, Sequence):
+            stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
+            if stdout_values and not headings and "[stdout]" not in base_text:
+                lines.append("取得済みの coding-agent 実行結果:")
+                lines.append("[stdout]")
+                lines.append(stdout_values[-1])
+                lines.append("[/stdout]")
+
+        return "\n".join(line for line in lines if line).strip()
 
     @classmethod
     def build_recursion_limit_fallback_text(cls, error_text: str, evidence: Mapping[str, Any]) -> str:
@@ -929,6 +1262,7 @@ class MCPClientUtil:
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
         force_coding_agent_route: bool = False,
+        explicit_user_file_paths: Sequence[str] | None = None,
     ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
@@ -941,7 +1275,16 @@ class MCPClientUtil:
             runtime_config,
             mcp_config,
             llm, prompts, tool_limits, 
-            include_general_agent=not force_coding_agent_route,
+            include_general_agent=cls.should_include_general_agent(
+                force_coding_agent_route=force_coding_agent_route,
+                explicit_user_file_paths=explicit_user_file_paths,
+            ),
+            general_tool_allowlist=(
+                cls._GENERAL_TOOLS_ALLOWED_WITH_EXPLICIT_CODING_AGENT
+                if force_coding_agent_route
+                else None
+            ),
+            explicit_user_file_paths=explicit_user_file_paths,
             )
 
 

@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import sys
 import types
+from pathlib import Path
 from typing import Any
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from langchain_core.messages import ToolMessage
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.errors import GraphRecursionError
 
 fake_client_module = types.ModuleType("langchain_mcp_adapters.client")
-fake_client_module.MultiServerMCPClient = object
+fake_client_module.MultiServerMCPClient = object # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.client", fake_client_module)
 
 fake_sessions_module = types.ModuleType("langchain_mcp_adapters.sessions")
-fake_sessions_module.Connection = dict[str, Any]
+fake_sessions_module.Connection = dict[str, Any] # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
 import ai_chat_util.base.llm.agent as agent_mod
@@ -182,6 +186,19 @@ def test_followup_tools_use_separate_budget_from_general_tools() -> None:
     assert state["used"] == 3
 
 
+def test_effective_call_limits_keep_configured_limits_without_explicit_files() -> None:
+    assert ToolLimits.effective_call_limits(4, 8, None) == (4, 8)
+    assert ToolLimits.effective_call_limits(4, 8, []) == (4, 8)
+
+
+def test_effective_call_limits_raise_floor_for_explicit_files() -> None:
+    assert ToolLimits.effective_call_limits(4, 8, ["/tmp/work/doc.md"]) == (6, 12)
+
+
+def test_effective_call_limits_preserve_unlimited_values_for_explicit_files() -> None:
+    assert ToolLimits.effective_call_limits(0, 0, ["/tmp/work/doc.md"]) == (0, 0)
+
+
 def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spending_budget() -> None:
     state: dict[str, int] = {
         "used": 0,
@@ -213,6 +230,206 @@ def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spe
     assert calls["n"] == 1
     assert state["general_used"] == 1
     assert state["used"] == 1
+
+
+def test_followup_tool_does_not_reuse_cached_result() -> None:
+    state: dict[str, int] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+    }
+    calls = {"n": 0}
+
+    def _status(task_id: str) -> str:
+        calls["n"] += 1
+        return f"status:{task_id}:{calls['n']}"
+
+    tool = _FakeTool("status", response_format="content", func=_status)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=0,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out1 = tool.func("task-1")
+    out2 = tool.func("task-1")
+
+    assert out1 == "status:task-1:1"
+    assert out2 == "status:task-1:2"
+    assert calls["n"] == 2
+    assert state["followup_used"] == 2
+    assert state["used"] == 2
+
+
+def test_get_result_reuses_cached_result_for_same_task() -> None:
+    state: dict[str, int] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+    }
+    calls = {"n": 0}
+
+    def _get_result(task_id: str) -> dict[str, str]:
+        calls["n"] += 1
+        return {"stdout": f"done:{task_id}:{calls['n']}", "stderr": ""}
+
+    tool = _FakeTool("get_result", response_format="content", func=_get_result)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=0,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out1 = tool.func("task-1")
+    out2 = tool.func("task-1")
+
+    assert out1 == {"stdout": "done:task-1:1", "stderr": ""}
+    assert out2 == out1
+    assert calls["n"] == 1
+    assert state["followup_used"] == 1
+    assert state["used"] == 1
+
+
+def test_execute_prompt_is_augmented_with_single_explicit_user_file_path() -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+        "explicit_user_file_paths": ["/tmp/work/doc.md"],
+    }
+    captured: dict[str, Any] = {}
+
+    def _execute(*, req: dict[str, Any]) -> dict[str, str]:
+        captured["req"] = req
+        return {"task_id": "task-1"}
+
+    tool = _FakeTool("execute", response_format="content", func=_execute)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=4,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    out = tool.func(req={"prompt": "Extract all headings from the Markdown file as exact Markdown heading lines.", "workspace_path": "/tmp/work"})
+
+    assert out == {"task_id": "task-1"}
+    assert captured["req"]["workspace_path"] == "/tmp/work"
+    assert "Target file path: /tmp/work/doc.md" in captured["req"]["prompt"]
+    assert "Use only this file as the source of truth" in captured["req"]["prompt"]
+    assert "HEADING_LINE_EXACT:" in captured["req"]["prompt"]
+
+
+def test_execute_prompt_is_not_augmented_when_prompt_already_contains_path() -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+        "explicit_user_file_paths": ["/tmp/work/doc.md"],
+    }
+    captured: dict[str, Any] = {}
+
+    def _execute(*, req: dict[str, Any]) -> dict[str, str]:
+        captured["req"] = req
+        return {"task_id": "task-1"}
+
+    tool = _FakeTool("execute", response_format="content", func=_execute)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=4,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    original_prompt = "Read /tmp/work/doc.md and extract all headings as exact Markdown lines."
+    tool.func(req={"prompt": original_prompt, "workspace_path": "/tmp/work"})
+
+    assert captured["req"]["prompt"] == original_prompt
+
+    def test_execute_top_level_fields_are_moved_into_req() -> None:
+        state: dict[str, Any] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": 8,
+            "explicit_user_file_paths": ["/tmp/work/doc.md"],
+        }
+        captured: dict[str, Any] = {}
+
+        def _execute(**kwargs: Any) -> dict[str, str]:
+            captured["kwargs"] = kwargs
+            return {"task_id": "task-1"}
+
+        tool = _FakeTool("execute", response_format="content", func=_execute)
+
+        MCPClientUtil._apply_tool_execution_guards(
+            [tool],
+            tool_call_state=state,
+            tool_call_limit_int=4,
+            tool_timeout_seconds_f=0.0,
+            tool_timeout_retries_int=0,
+        )
+
+        out = tool.func(
+            prompt="Extract headings",
+            workspace_path="/tmp/work",
+            timeout=300,
+        )
+
+        assert out == {"task_id": "task-1"}
+        assert "timeout" not in captured["kwargs"]
+        assert captured["kwargs"]["req"]["timeout"] == 300
+        assert captured["kwargs"]["req"]["workspace_path"] == "/tmp/work"
+        assert captured["kwargs"]["req"]["prompt"].startswith("Extract headings")
+
+
+    def test_execute_top_level_fields_are_removed_when_req_already_contains_same_keys() -> None:
+        state: dict[str, Any] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": 8,
+            "explicit_user_file_paths": ["/tmp/work/doc.md"],
+        }
+        captured: dict[str, Any] = {}
+
+        def _execute(**kwargs: Any) -> dict[str, str]:
+            captured["kwargs"] = kwargs
+            return {"task_id": "task-1"}
+
+        tool = _FakeTool("execute", response_format="content", func=_execute)
+
+        MCPClientUtil._apply_tool_execution_guards(
+            [tool],
+            tool_call_state=state,
+            tool_call_limit_int=4,
+            tool_timeout_seconds_f=0.0,
+            tool_timeout_retries_int=0,
+        )
+
+        out = tool.func(
+            req={"prompt": "Extract headings", "workspace_path": "/tmp/work"},
+            workspace_path="/tmp/work",
+        )
+
+        assert out == {"task_id": "task-1"}
+        assert "workspace_path" not in captured["kwargs"]
+        assert captured["kwargs"]["req"]["workspace_path"] == "/tmp/work"
+
 
 
 def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
@@ -343,6 +560,13 @@ class _FakeMCPClient:
         return []
 
 
+class _NamedTool:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.description = f"tool:{name}"
+        self.args_schema = {"type": "object"}
+
+
 class _FakeLangGraphAgent:
     def __init__(self, name: str, system_prompt: str) -> None:
         self.name = name
@@ -390,13 +614,13 @@ def _build_runtime_config() -> AiChatUtilConfig:
     )
 
 
-def _patch_agent_creation(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
-    created: list[tuple[str, str]] = []
+def _patch_agent_creation(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, list[str]]]:
+    created: list[tuple[str, str, list[str]]] = []
 
     monkeypatch.setattr(agent_mod, "MultiServerMCPClient", _FakeMCPClient)
 
     def _fake_create_agent(_llm: Any, _tools: list[Any], *, system_prompt: str, name: str) -> _FakeLangGraphAgent:
-        created.append((name, system_prompt))
+        created.append((name, system_prompt, [str(getattr(tool, "name", "")) for tool in _tools]))
         return _FakeLangGraphAgent(name=name, system_prompt=system_prompt)
 
     monkeypatch.setattr(agent_mod, "create_agent", _fake_create_agent)
@@ -410,35 +634,51 @@ def test_create_sub_agents_assigns_unique_names_for_mixed_mcp_groups(monkeypatch
         AgentBuilder.create_sub_agents(
             runtime_config=_build_runtime_config(),
             mcp_config=_build_mcp_config("coding-agent", "general-tools"),
-            llm=object(),
+            llm=object(),  # type: ignore
             prompts=CodingAgentPrompts(),
             tool_limits=None,
         )
     )
 
-    assert [name for name, _ in created] == ["tool_agent_coding", "tool_agent_general"]
+    assert [name for name, _, _ in created] == ["tool_agent_coding", "tool_agent_general"]
     assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding", "tool_agent_general"]
     assert len({agent.get_agent().name for agent in agents}) == 2
     assert "tool_agent_coding" in created[0][1]
     assert "tool_agent_general" in created[1][1]
 
 
-def test_create_sub_agents_excludes_general_when_coding_agent_route_is_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_sub_agents_limits_general_tools_when_coding_agent_route_is_forced(monkeypatch: pytest.MonkeyPatch) -> None:
     created = _patch_agent_creation(monkeypatch)
+
+    class _FakeToolMCPClient:
+        def __init__(self, _config: Any) -> None:
+            self._config = _config
+
+        async def get_tools(self) -> list[Any]:
+            return [
+                _NamedTool("get_loaded_config_info"),
+                _NamedTool("analyze_files"),
+                _NamedTool("analyze_pdf_files"),
+            ]
+
+    monkeypatch.setattr(agent_mod, "MultiServerMCPClient", _FakeToolMCPClient)
 
     agents = asyncio.run(
         AgentBuilder.create_sub_agents(
             runtime_config=_build_runtime_config(),
             mcp_config=_build_mcp_config("coding-agent", "general-tools"),
-            llm=object(),
+            llm=object(), # type: ignore
             prompts=CodingAgentPrompts(),
             tool_limits=None,
-            include_general_agent=False,
+            include_general_agent=True,
+            general_tool_allowlist=["get_loaded_config_info"],
         )
     )
 
-    assert [name for name, _ in created] == ["tool_agent_coding"]
-    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding"]
+    assert [name for name, _, _ in created] == ["tool_agent_coding", "tool_agent_general"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding", "tool_agent_general"]
+    assert created[0][2] == ["get_loaded_config_info", "analyze_files", "analyze_pdf_files"]
+    assert created[1][2] == ["get_loaded_config_info"]
 
 
 def test_create_sub_agents_keeps_general_when_coding_agent_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,14 +688,14 @@ def test_create_sub_agents_keeps_general_when_coding_agent_is_missing(monkeypatc
         AgentBuilder.create_sub_agents(
             runtime_config=_build_runtime_config(),
             mcp_config=_build_mcp_config("general-tools"),
-            llm=object(),
+            llm=object(), # type: ignore
             prompts=CodingAgentPrompts(),
             tool_limits=None,
             include_general_agent=False,
         )
     )
 
-    assert [name for name, _ in created] == ["tool_agent_general"]
+    assert [name for name, _, _ in created] == ["tool_agent_general"]
     assert [agent.get_agent_name() for agent in agents] == ["tool_agent_general"]
 
 
@@ -477,13 +717,13 @@ def test_create_sub_agents_keeps_stable_name_for_single_group(
         AgentBuilder.create_sub_agents(
             runtime_config=_build_runtime_config(),
             mcp_config=_build_mcp_config(*server_names),
-            llm=object(),
+            llm=object(), # type: ignore
             prompts=CodingAgentPrompts(),
             tool_limits=None,
         )
     )
 
-    assert [name for name, _ in created] == [expected_name]
+    assert [name for name, _, _ in created] == [expected_name]
     assert [agent.get_agent_name() for agent in agents] == [expected_name]
 
 
@@ -617,7 +857,7 @@ def test_extract_successful_tool_evidence_uses_raw_text_when_stdout_is_absent() 
     result = {
         "messages": [
             {
-                "role": "assistant",
+                "role": "tool",
                 "content": (
                     "以下が指定された内容のまとめです:\n\n"
                     "1. **設定ファイルの場所**:\n"
@@ -645,7 +885,7 @@ def test_extract_successful_tool_evidence_ignores_descriptive_bullets_in_raw_tex
     result = {
         "messages": [
             {
-                "role": "assistant",
+                "role": "tool",
                 "content": (
                     "以下に示す内容は、指定された要求に基づいた結果です。\n\n"
                     "2. **文書からの重要な見出し**:\n"
@@ -667,6 +907,158 @@ def test_extract_successful_tool_evidence_ignores_descriptive_bullets_in_raw_tex
         "検証範囲と優先確認項目",
         "役割分担の考え方",
     ]
+
+
+def test_extract_successful_tool_evidence_reads_stdout_log_from_artifact_metadata(tmp_path: Path) -> None:
+    stdout_path = tmp_path / "stdout.log"
+    stdout_path.write_text(
+        "HEADING_LINE_EXACT: # コーディングエージェントのMCPサーバー化検証\n"
+        "HEADING_LINE_EXACT: ## 検証目的\n"
+        "HEADING_LINE_EXACT: ### 1. MCP サーバーとしての正常起動\n",
+        encoding="utf-8",
+    )
+
+    result = {
+        "messages": [
+            {
+                "role": "tool",
+                "content": '{"stdout": null, "stderr": "Read target.md"}',
+                "artifact": {
+                    "structured_content": {
+                        "stdout": None,
+                        "stderr": "Read target.md",
+                        "workspace_path": tmp_path.as_posix(),
+                        "metadata": {
+                            "stdout_path": stdout_path.as_posix(),
+                        },
+                    }
+                },
+            }
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["stdout_blocks"] == [
+        "HEADING_LINE_EXACT: # コーディングエージェントのMCPサーバー化検証\n"
+        "HEADING_LINE_EXACT: ## 検証目的\n"
+        "HEADING_LINE_EXACT: ### 1. MCP サーバーとしての正常起動"
+    ]
+    assert evidence["headings"] == [
+        "# コーディングエージェントのMCPサーバー化検証",
+        "## 検証目的",
+        "### 1. MCP サーバーとしての正常起動",
+    ]
+
+
+def test_extract_successful_tool_evidence_extracts_config_path_from_stdout_block() -> None:
+    result = {
+        "messages": [
+            {
+                "role": "tool",
+                "content": '{"stdout": "設定ファイルの場所: /tmp/ai-chat-util-config.yml\nHEADING_LINE_EXACT: ## 検証目的", "stderr": null}',
+            }
+        ]
+    }
+
+    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+
+    assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
+    assert evidence["headings"] == ["## 検証目的"]
+
+
+def test_collect_checkpoint_write_results_reads_tool_messages(tmp_path: Path) -> None:
+    db_path = tmp_path / "langgraph_checkpoints.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "create table writes ("
+        "thread_id text not null, "
+        "checkpoint_ns text not null default '', "
+        "checkpoint_id text not null, "
+        "task_id text not null, "
+        "idx integer not null, "
+        "channel text not null, "
+        "type text, "
+        "value blob)"
+    )
+    serde = JsonPlusSerializer()
+    payload = [ToolMessage(content='{"stdout": "HEADING_LINE_EXACT: ## 検証目的", "stderr": null}', tool_call_id="call-1")]
+    value_type, value_blob = serde.dumps_typed(payload)
+    conn.execute(
+        "insert into writes(thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value) values (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("trace-1", "tool_agent_coding:ns", "chk-1", "task-1", 0, "messages", value_type, value_blob),
+    )
+    conn.commit()
+    conn.close()
+
+    results = MCPClientUtil.collect_checkpoint_write_results(
+        checkpoint_db_path=db_path,
+        run_trace_id="trace-1",
+    )
+
+    assert len(results) == 1
+    messages = results[0]["messages"]
+    assert len(messages) == 1
+    assert isinstance(messages[0], ToolMessage)
+    assert MCPClientUtil.extract_successful_tool_evidence(results)["headings"] == ["## 検証目的"]
+
+
+def test_final_text_contradicts_evidence_for_stdout_missing_message() -> None:
+    evidence = {
+        "config_path": None,
+        "stdout_blocks": ["HEADING_LINE_EXACT: ## 検証目的"],
+        "headings": ["## 検証目的"],
+    }
+
+    assert MCPClientUtil.final_text_contradicts_evidence(
+        "stdout に明記された結果が返ってきませんでした。見出しの具体的な内容は不明です。",
+        evidence,
+    )
+
+
+def test_final_text_contradicts_evidence_for_failure_preface_with_real_headings() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["HEADING_LINE_EXACT: ## 検証目的"],
+        "headings": ["## 検証目的"],
+    }
+
+    assert MCPClientUtil.final_text_contradicts_evidence(
+        "指定された Markdown ファイルから見出しを抽出するプロセスで問題が発生しました。再度試行し、正確な見出しの抽出を行いたい場合は、具体的なエラー分析が必要です。",
+        evidence,
+    )
+
+
+def test_final_text_contradicts_evidence_when_leading_heading_differs_from_evidence() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["HEADING_LINE_EXACT: # コーディングエージェントのMCPサーバー化検証"],
+        "headings": [
+            "# コーディングエージェントのMCPサーバー化検証",
+            "## 検証目的",
+        ],
+    }
+
+    assert MCPClientUtil.final_text_contradicts_evidence(
+        "設定ファイルの場所は /tmp/ai-chat-util-config.yml です。\n- HEADING_LINE_EXACT: # 概要\n- HEADING_LINE_EXACT: ## 検証目的\n文書内の重要な見出し:\n# コーディングエージェントのMCPサーバー化検証\n## 検証目的",
+        evidence,
+    )
+
+
+def test_should_prefer_deterministic_evidence_response_for_complete_heading_set() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "headings": [
+            "# コーディングエージェントのMCPサーバー化検証",
+            "## 検証目的",
+            "### 1. MCP サーバーとしての正常起動",
+        ],
+    }
+
+    assert MCPClientUtil.should_prefer_deterministic_evidence_response(
+        "設定ファイルの場所は /tmp/ai-chat-util-config.yml です。",
+        evidence,
+    )
 
 
 def test_evidence_reflection_overrides_negative_final_text() -> None:
@@ -700,6 +1092,44 @@ def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings(
         "get_loaded_config_info を使って確認しました。重要な見出しは概要、設定、トラブルシュートです。",
         evidence,
     )
+
+
+def test_augment_final_text_with_evidence_preserves_text_and_adds_exact_values() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
+        "headings": ["# Overview", "## Setup", "## Troubleshooting"],
+    }
+
+    augmented = MCPClientUtil.augment_final_text_with_evidence(
+        "確認しました。重要な見出しを以下に示します。",
+        evidence,
+    )
+
+    assert "確認しました。重要な見出しを以下に示します。" in augmented
+    assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in augmented
+    assert "# Overview" in augmented
+    assert "## Setup" in augmented
+    assert "## Troubleshooting" in augmented
+    assert not MCPClientUtil.final_text_missing_concrete_evidence(augmented, evidence)
+
+
+def test_augment_final_text_with_evidence_does_not_duplicate_existing_values() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
+        "headings": ["# Overview", "## Setup", "## Troubleshooting"],
+    }
+
+    original = (
+        "設定ファイルの場所: /tmp/ai-chat-util-config.yml\n"
+        "文書内の重要な見出し:\n"
+        "# Overview\n"
+        "## Setup\n"
+        "## Troubleshooting"
+    )
+
+    assert MCPClientUtil.augment_final_text_with_evidence(original, evidence) == original
 
 
 def test_tool_agent_prompt_requires_verbatim_heading_output() -> None:
@@ -746,6 +1176,101 @@ def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:
             }
         ]
     )
+
+
+def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) -> None:
+    target = tmp_path / "doc.md"
+    target.write_text("# Title\n", encoding="utf-8")
+
+    paths = MCPClientUtil.extract_explicit_user_file_paths(
+        [{"role": "user", "content": f"Please inspect {target.as_posix()} and summarize headings."}]
+    )
+
+    assert paths == [target.resolve().as_posix()]
+
+
+def test_should_include_general_agent_forced_coding_route_with_explicit_file_is_false() -> None:
+    assert not MCPClientUtil.should_include_general_agent(
+        force_coding_agent_route=True,
+        explicit_user_file_paths=["/tmp/work/doc.md"],
+    )
+
+
+def test_should_include_general_agent_without_explicit_file_is_true() -> None:
+    assert MCPClientUtil.should_include_general_agent(
+        force_coding_agent_route=True,
+        explicit_user_file_paths=None,
+    )
+    assert MCPClientUtil.should_include_general_agent(
+        force_coding_agent_route=False,
+        explicit_user_file_paths=["/tmp/work/doc.md"],
+    )
+
+
+def test_get_loaded_runtime_config_path_returns_existing_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    config_file = tmp_path / "ai-chat-util-config.yml"
+    config_file.write_text("llm: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "ai_chat_util.base.llm.llm_mcp_client_util.get_runtime_config_path",
+        lambda: config_file,
+    )
+
+    assert MCPClientUtil.get_loaded_runtime_config_path() == config_file.resolve().as_posix()
+
+
+def test_get_loaded_runtime_config_path_returns_none_for_missing_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    missing = tmp_path / "missing.yml"
+    monkeypatch.setattr(
+        "ai_chat_util.base.llm.llm_mcp_client_util.get_runtime_config_path",
+        lambda: missing,
+    )
+
+    assert MCPClientUtil.get_loaded_runtime_config_path() is None
+
+
+def test_extract_markdown_heading_lines_from_files_reads_exact_heading_lines(tmp_path) -> None:
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "# Title\n"
+        "text\n"
+        "## Section\n"
+        "### 1. 単体起動\n",
+        encoding="utf-8",
+    )
+
+    assert MCPClientUtil.extract_markdown_heading_lines_from_files([doc.as_posix()]) == [
+        "# Title",
+        "## Section",
+        "### 1. 単体起動",
+    ]
+
+
+def test_extract_successful_tool_evidence_ignores_ai_only_heading_claims() -> None:
+    evidence = MCPClientUtil.extract_successful_tool_evidence(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "HEADING_LINE_EXACT: ### 1. はじめに\nHEADING_LINE_EXACT: ### 2. 準備",
+                    },
+                    {
+                        "role": "tool",
+                        "content": '{"path": "/tmp/ai-chat-util-config.yml"}',
+                    },
+                ]
+            }
+        ]
+    )
+
+    assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
+    assert evidence["headings"] == []
+
+
 
 
 def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
@@ -825,6 +1350,45 @@ def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
     assert "# Overview" in text
     assert "## Setup" in text
     assert "## Troubleshooting" in text
+
+
+def test_build_evidence_reflected_final_text_includes_all_headings() -> None:
+    fallback = MCPClientUtil.build_evidence_reflected_final_text(
+        {
+            "config_path": "/tmp/ai-chat-util-config.yml",
+            "headings": [
+                "# Overview",
+                "## Setup",
+                "## Troubleshooting",
+                "## Appendix",
+            ],
+            "stdout_blocks": [],
+        }
+    )
+
+    assert "# Overview" in fallback
+    assert "## Setup" in fallback
+    assert "## Troubleshooting" in fallback
+    assert "## Appendix" in fallback
+
+
+def test_should_prefer_deterministic_evidence_response_for_heading_report() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "headings": ["# Overview", "## Setup"],
+        "stdout_blocks": ["HEADING_LINE_EXACT: # Overview\nHEADING_LINE_EXACT: ## Setup"],
+    }
+
+    assert MCPClientUtil.should_prefer_deterministic_evidence_response(
+        "文書内の見出しは以下です。\n- HEADING_LINE_EXACT: # Wrong",
+        evidence,
+    )
+
+
+def test_extract_config_path_from_text_returns_yaml_path() -> None:
+    assert MCPClientUtil.extract_config_path_from_text(
+        "設定ファイルのパスは /tmp/ai-chat-util-config.yml です。"
+    ) == "/tmp/ai-chat-util-config.yml"
 
 
 def test_build_recursion_limit_fallback_text_without_evidence_returns_error() -> None:

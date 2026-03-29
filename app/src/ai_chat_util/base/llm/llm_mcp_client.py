@@ -98,12 +98,15 @@ class MCPClient(AbstractLLMClient):
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
+        pending_response: dict[str, Any] | None = None
+        pending_workflow_results: list[Any] = []
+        checkpoint_db_path = MCPClientUtil._default_checkpoint_db_path(self.runtime_config)
         
 
         async with contextlib.AsyncExitStack() as exit_stack:
 
             checkpointer = await MCPClientUtil._create_sqlite_checkpointer(
-                MCPClientUtil._default_checkpoint_db_path(self.runtime_config),
+                checkpoint_db_path,
                 exit_stack=exit_stack,
             )
 
@@ -119,12 +122,14 @@ class MCPClient(AbstractLLMClient):
                 raise ValueError("chat_request.chat_history.messages が空です。")
 
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
+            explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
                 prompts=prompts,
                 checkpointer=checkpointer,
                 tool_limits=tool_limits,
                 force_coding_agent_route=force_coding_agent_route,
+                explicit_user_file_paths=explicit_user_file_paths,
             )
 
             # 実行
@@ -273,12 +278,26 @@ class MCPClient(AbstractLLMClient):
                 app=app,
                 run_trace_id=run_trace_id,
                 workflow_results=workflow_results,
+                checkpoint_db_path=checkpoint_db_path,
             )
             evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
-            if (
-                MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
-                or MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
-            ):
+            contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
+            missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
+            if not contradicts_evidence and missing_concrete_evidence:
+                augmented_text = MCPClientUtil.augment_final_text_with_evidence(user_text, evidence)
+                if (
+                    augmented_text
+                    and not MCPClientUtil.final_text_contradicts_evidence(augmented_text, evidence)
+                    and not MCPClientUtil.final_text_missing_concrete_evidence(augmented_text, evidence)
+                ):
+                    logger.info(
+                        "Augmented supervisor final text with concrete tool evidence: trace_id=%s",
+                        run_trace_id,
+                    )
+                    user_text = augmented_text
+                    missing_concrete_evidence = False
+
+            if contradicts_evidence or missing_concrete_evidence:
                 logger.warning(
                     "Supervisor final text did not faithfully reflect successful tool evidence; applying evidence-based fallback: trace_id=%s",
                     run_trace_id,
@@ -313,19 +332,118 @@ class MCPClient(AbstractLLMClient):
                         source=("supervisor" + (f":{hitl_tool}" if hitl_tool else "")),
                     )
 
-            return ChatResponse(
-                status=cast(Any, status),
-                trace_id=run_trace_id,
-                hitl=hitl,
-                messages=[
+            pending_workflow_results = list(workflow_results)
+            pending_response = {
+                "status": cast(Any, status),
+                "trace_id": run_trace_id,
+                "hitl": hitl,
+                "messages": [
                     ChatMessage(
                         role="assistant",
                         content=[ChatContent(params={"type": "text", "text": user_text})],
                     )
                 ],
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+
+        if pending_response is None:
+            raise RuntimeError("MCP workflow finished without producing a response")
+
+        postclose_evidence_results: list[Any] = list(pending_workflow_results)
+        postclose_evidence: Mapping[str, Any] = {}
+        for attempt in range(15):
+            write_results = MCPClientUtil.collect_checkpoint_write_results(
+                checkpoint_db_path=checkpoint_db_path,
+                run_trace_id=run_trace_id,
             )
+            postclose_evidence_results = list(pending_workflow_results)
+            postclose_evidence_results.extend(write_results)
+            postclose_evidence = MCPClientUtil.extract_successful_tool_evidence(postclose_evidence_results)
+
+            headings = postclose_evidence.get("headings")
+            has_headings = isinstance(headings, Sequence) and any(isinstance(v, str) and str(v).strip() for v in headings)
+            has_config_path = isinstance(postclose_evidence.get("config_path"), str) and bool(str(postclose_evidence.get("config_path")).strip())
+            if has_headings and has_config_path:
+                break
+            if attempt == 14:
+                break
+            await asyncio.sleep(0.2)
+
+        response_message = pending_response["messages"][0]
+        response_text = ""
+        if response_message.content:
+            response_text = str(response_message.content[0].params.get("text") or "")
+
+        if not postclose_evidence.get("config_path"):
+            config_path_from_text = MCPClientUtil.extract_config_path_from_text(response_text)
+            if config_path_from_text:
+                postclose_evidence = dict(postclose_evidence)
+                postclose_evidence["config_path"] = config_path_from_text
+
+        if not postclose_evidence.get("config_path"):
+            runtime_config_path = MCPClientUtil.get_loaded_runtime_config_path()
+            if runtime_config_path:
+                postclose_evidence = dict(postclose_evidence)
+                postclose_evidence["config_path"] = runtime_config_path
+
+        exact_file_headings = MCPClientUtil.extract_markdown_heading_lines_from_files(explicit_user_file_paths)
+        if len(exact_file_headings) >= 3:
+            postclose_evidence = dict(postclose_evidence)
+            postclose_evidence["headings"] = exact_file_headings
+
+        contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
+        missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
+        logger.info(
+            "Post-close evidence check: trace_id=%s contradicts=%s missing=%s headings=%s config_path=%s",
+            run_trace_id,
+            contradicts_evidence,
+            missing_concrete_evidence,
+            len(postclose_evidence.get("headings") or []),
+            postclose_evidence.get("config_path"),
+        )
+
+        if MCPClientUtil.should_prefer_deterministic_evidence_response(response_text, postclose_evidence):
+            fallback_text = MCPClientUtil.build_evidence_reflected_final_text(postclose_evidence)
+            if fallback_text:
+                logger.info(
+                    "Using deterministic evidence response for heading extraction output: trace_id=%s",
+                    run_trace_id,
+                )
+                response_message.content[0].params["text"] = fallback_text
+                pending_response["status"] = cast(Any, "completed")
+                pending_response["hitl"] = None
+                response_text = fallback_text
+                contradicts_evidence = False
+                missing_concrete_evidence = False
+
+        if not contradicts_evidence and missing_concrete_evidence:
+            augmented_text = MCPClientUtil.augment_final_text_with_evidence(response_text, postclose_evidence)
+            if (
+                augmented_text
+                and not MCPClientUtil.final_text_contradicts_evidence(augmented_text, postclose_evidence)
+                and not MCPClientUtil.final_text_missing_concrete_evidence(augmented_text, postclose_evidence)
+            ):
+                logger.info(
+                    "Augmented final text with post-close checkpoint write evidence: trace_id=%s",
+                    run_trace_id,
+                )
+                response_message.content[0].params["text"] = augmented_text
+                missing_concrete_evidence = False
+                response_text = augmented_text
+
+        if contradicts_evidence or missing_concrete_evidence:
+            fallback_text = MCPClientUtil.build_evidence_reflected_final_text(postclose_evidence)
+            if fallback_text:
+                logger.warning(
+                    "Applied post-close evidence-based fallback from checkpoint writes: trace_id=%s",
+                    run_trace_id,
+                )
+                response_message.content[0].params["text"] = fallback_text
+                pending_response["status"] = cast(Any, "completed")
+                pending_response["hitl"] = None
+
+        return ChatResponse(**pending_response)
 
     def get_message_factory(self) -> LLMMessageContentFactoryBase:
         '''

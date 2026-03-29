@@ -17,6 +17,7 @@ from .abstract_llm_client import AbstractLLMClient
 from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts, PromptsBase
+from .supervisor_support import create_audit_context
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -98,6 +99,7 @@ class MCPClient(AbstractLLMClient):
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
+        audit_context = create_audit_context(self.runtime_config, run_trace_id)
         pending_response: dict[str, Any] | None = None
         pending_workflow_results: list[Any] = []
         checkpoint_db_path = MCPClientUtil._default_checkpoint_db_path(self.runtime_config)
@@ -121,9 +123,92 @@ class MCPClient(AbstractLLMClient):
             if not lc_messages:
                 raise ValueError("chat_request.chat_history.messages が空です。")
 
+            audit_context.emit(
+                "request_received",
+                payload={
+                    "message_count": len(lc_messages),
+                    "auto_approve": auto_approve,
+                },
+            )
+
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
             explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
             requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
+            workflow_messages = list(lc_messages)
+            config_preflight_payload: dict[str, Any] | None = None
+            routing_decision = await MCPClientUtil.decide_route(
+                runtime_config=self.runtime_config,
+                prompts=prompts,
+                messages=lc_messages,
+                force_coding_agent_route=force_coding_agent_route,
+                explicit_user_file_paths=explicit_user_file_paths,
+                available_tool_names=[
+                    "execute",
+                    "status",
+                    "get_result",
+                    "cancel",
+                    "workspace_path",
+                    "get_loaded_config_info",
+                ],
+                audit_context=audit_context,
+            )
+            audit_context.emit(
+                "route_decided",
+                route_name=routing_decision.selected_route,
+                reason_code=routing_decision.reason_code,
+                confidence=routing_decision.confidence,
+                payload={
+                    "candidate_routes": [candidate.model_dump(mode="json") for candidate in routing_decision.candidate_routes],
+                    "next_action": routing_decision.next_action,
+                    "explicit_user_file_paths": list(explicit_user_file_paths),
+                },
+            )
+            if routing_decision.requires_clarification and not auto_approve:
+                prompt_text = "\n".join(routing_decision.missing_information) if routing_decision.missing_information else (routing_decision.notes or "続行前に確認が必要です。")
+                hitl = HitlRequest(
+                    kind=cast(Any, "input"),
+                    prompt=prompt_text,
+                    action_id=str(uuid.uuid4()),
+                    source="routing",
+                )
+                audit_context.emit(
+                    "hitl_requested",
+                    reason_code="hitl.user_input_requested",
+                    route_name=routing_decision.selected_route,
+                    confidence=routing_decision.confidence,
+                    payload={"kind": "input", "source": "routing", "reason_code": routing_decision.reason_code},
+                    final_status="paused",
+                )
+                return ChatResponse(
+                    status=cast(Any, "paused"),
+                    trace_id=run_trace_id,
+                    hitl=hitl,
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": prompt_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
+                )
+            if routing_decision.selected_route == "coding_agent" and MCPClientUtil.should_run_config_preflight(lc_messages):
+                config_preflight_payload = await MCPClientUtil.run_config_preflight(
+                    runtime_config=self.runtime_config,
+                    tool_limits=tool_limits,
+                    audit_context=audit_context,
+                )
+                preflight_message = MCPClientUtil.build_config_preflight_message(config_preflight_payload or {})
+                if preflight_message:
+                    workflow_messages.append(SystemMessage(content=preflight_message))
+                    audit_context.emit(
+                        "preflight_applied",
+                        tool_name="get_loaded_config_info",
+                        payload={
+                            "success": bool((config_preflight_payload or {}).get("success", False)),
+                            "config_path": (config_preflight_payload or {}).get("config_path"),
+                        },
+                    )
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
                 prompts=prompts,
@@ -131,6 +216,8 @@ class MCPClient(AbstractLLMClient):
                 tool_limits=tool_limits,
                 force_coding_agent_route=force_coding_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
+                routing_decision=routing_decision,
+                audit_context=audit_context,
             )
 
             # 実行
@@ -138,7 +225,7 @@ class MCPClient(AbstractLLMClient):
 
             try:
                 result = await app.ainvoke(
-                    {"messages": lc_messages},
+                    {"messages": workflow_messages},
                     config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                 )
                 workflow_results.append(result)
@@ -150,6 +237,7 @@ class MCPClient(AbstractLLMClient):
                 )
                 workflow_results.extend(checkpoint_results)
                 evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
+                evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
                 msg = str(e).strip() or type(e).__name__
                 user_text = MCPClientUtil.build_recursion_limit_fallback_text(msg, evidence)
                 return ChatResponse(
@@ -282,11 +370,30 @@ class MCPClient(AbstractLLMClient):
                 checkpoint_db_path=checkpoint_db_path,
             )
             evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
+            evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
+            evidence_summary = MCPClientUtil.build_evidence_summary(evidence)
             if requested_heading_count is not None:
                 evidence = dict(evidence)
                 evidence["requested_heading_count"] = requested_heading_count
+            followup_task_error_detected = (
+                MCPClientUtil.contains_followup_task_error_signal(output_text)
+                or MCPClientUtil.contains_followup_task_error_signal(user_text)
+            )
             contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
             missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
+            if followup_task_error_detected:
+                fallback_text = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+                if fallback_text:
+                    logger.warning(
+                        "Supervisor output contained invalid/stale follow-up task signal; forcing evidence-based completion: trace_id=%s",
+                        run_trace_id,
+                    )
+                    user_text = fallback_text
+                    resp_type = "complete"
+                    hitl_kind = None
+                    hitl_tool = None
+                    contradicts_evidence = False
+                    missing_concrete_evidence = False
             if not contradicts_evidence and missing_concrete_evidence:
                 augmented_text = MCPClientUtil.augment_final_text_with_evidence(user_text, evidence)
                 if (
@@ -313,6 +420,20 @@ class MCPClient(AbstractLLMClient):
                     hitl_kind = None
                     hitl_tool = None
 
+            if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
+                sufficiency_decision = MCPClientUtil.judge_sufficiency(
+                    response_text=user_text,
+                    resp_type=resp_type,
+                    hitl_kind=hitl_kind,
+                    evidence_summary=evidence_summary,
+                )
+                audit_context.emit(
+                    "sufficiency_judged",
+                    reason_code=sufficiency_decision.reason_code,
+                    confidence=sufficiency_decision.confidence,
+                    payload=sufficiency_decision.model_dump(mode="json"),
+                )
+
             status: str = "completed"
             hitl: HitlRequest | None = None
             if resp_type == "question":
@@ -334,6 +455,12 @@ class MCPClient(AbstractLLMClient):
                         prompt=user_text,
                         action_id=str(uuid.uuid4()),
                         source=("supervisor" + (f":{hitl_tool}" if hitl_tool else "")),
+                    )
+                    audit_context.emit(
+                        "hitl_requested",
+                        reason_code=("hitl.tool_approval_requested" if kind == "approval" else "hitl.user_input_requested"),
+                        payload={"kind": kind, "source": hitl.source},
+                        final_status=status,
                     )
 
             pending_workflow_results = list(workflow_results)
@@ -458,6 +585,32 @@ class MCPClient(AbstractLLMClient):
                 response_message.content[0].params["text"] = fallback_text
                 pending_response["status"] = cast(Any, "completed")
                 pending_response["hitl"] = None
+
+        if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
+            postclose_summary = MCPClientUtil.build_evidence_summary(postclose_evidence)
+            final_sufficiency = MCPClientUtil.judge_sufficiency(
+                response_text=str(response_message.content[0].params.get("text") or ""),
+                resp_type="question" if pending_response.get("status") == "paused" else "complete",
+                hitl_kind=(getattr(pending_response.get("hitl"), "kind", None) if pending_response.get("hitl") is not None else None),
+                evidence_summary=postclose_summary,
+            )
+            audit_context.emit(
+                "final_answer_validated",
+                reason_code=final_sufficiency.reason_code,
+                confidence=final_sufficiency.confidence,
+                payload=final_sufficiency.model_dump(mode="json"),
+                final_status=cast(str | None, pending_response.get("status")),
+            )
+        else:
+            audit_context.emit(
+                "final_answer_validated",
+                reason_code="audit.validation_passed",
+                payload={
+                    "status": pending_response.get("status"),
+                    "has_hitl": pending_response.get("hitl") is not None,
+                },
+                final_status=cast(str | None, pending_response.get("status")),
+            )
 
         return ChatResponse(**pending_response)
 

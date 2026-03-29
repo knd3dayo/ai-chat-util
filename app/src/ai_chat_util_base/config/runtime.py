@@ -615,6 +615,28 @@ class FeaturesSection(BaseModel):
 
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
+    routing_mode: Literal["legacy", "structured", "hybrid"] = Field(
+        default="legacy",
+        description="Supervisor の routing 判定モード。legacy は従来挙動、structured/hybrid は RoutingDecision を併用します。",
+    )
+    routing_confidence_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="structured/hybrid routing で clarification へ切り替える信頼度しきい値。",
+    )
+    sufficiency_check_enabled: bool = Field(
+        default=False,
+        description="MCP 実行結果に対する SufficiencyDecision の構造化判定を有効化します。",
+    )
+    audit_log_enabled: bool = Field(
+        default=False,
+        description="Supervisor audit event の構造化ログを有効化します。",
+    )
+    audit_log_path: str | None = Field(
+        default=None,
+        description="Supervisor audit event を JSONL 形式で保存するパス。未指定時は work/supervisor_audit.jsonl を使います。",
+    )
     mcp_recursion_limit: int = Field(
         default=50,
         ge=1,

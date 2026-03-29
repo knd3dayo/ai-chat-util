@@ -34,7 +34,15 @@ class PromptsBase(ABC):
         pass
 
     @abstractmethod
-    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None) -> str:
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None, routing_guidance_text=None) -> str:
+        pass
+
+    @abstractmethod
+    def routing_system_prompt(self) -> str:
+        pass
+
+    @abstractmethod
+    def routing_user_prompt(self, *, user_request_text: str, available_routes_text: str, context_text: str) -> str:
         pass
 
     def create_tools_description(self, allowed_langchain_tools) -> str:
@@ -161,12 +169,14 @@ class CodingAgentPrompts(PromptsBase):
                 "- 承認が必要なら、<RESPONSE_TYPE>question</RESPONSE_TYPE> と <HITL_KIND>approval</HITL_KIND> と <HITL_TOOL>TOOL_NAME</HITL_TOOL> を含めて止めてください。\n"
             )
     
-    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None) -> str:
+    def supervisor_system_prompt(self, tools_description, supervisor_hitl_policy_text, tool_agent_names=None, routing_guidance_text=None) -> str:
         tool_agent_names = [name for name in (tool_agent_names or []) if isinstance(name, str) and name.strip()]
         tool_agent_names_text = ", ".join(tool_agent_names) if tool_agent_names else "tool_agent"
+        routing_guidance_block = f"\n[Routing Guidance]\n{routing_guidance_text}\n" if isinstance(routing_guidance_text, str) and routing_guidance_text.strip() else ""
         return f"""
 あなたはチームのスーパーバイザーです。ツール実行エージェント（{tool_agent_names_text}）と planner_agent（計画）の各エージェントを管理し、
 スーパーバイザーの目的を達成してください。
+{routing_guidance_block}
 [重要: 委譲の原則]
 - ユーザーがローカルファイルパス/URLの分析を求めている場合、あなた自身の推測で「アクセスできない」と断定しないでください。
     必ず最初にツール実行エージェントへ実行させてください（planner_agent ではありません）。
@@ -185,8 +195,14 @@ class CodingAgentPrompts(PromptsBase):
 
 [ループ抑制: 重要]
 - 同一のユーザー入力に対してツール実行エージェントへ不必要に何度も再委譲しないでください。結果を使って完了できる場合は完了させてください。
+- `get_loaded_config_info` は同一入力につき 1 回で十分です。設定ファイルの場所や設定内容を取得できたら、その後は同じツールを再度呼ばず、取得済みの path / config を使い回してください。
+- ユーザーが「まず get_loaded_config_info、その後 coding agent」と指示した場合は、その順序を守ってください。設定ファイルの場所が取得できた後は、同じ確認を繰り返さず coding-agent 系の調査へ進んでください。
 - ツール実行エージェントが失敗を返した場合のみ、planner_agent に原因切り分け（使うツール/引数の修正案）を出させたうえで、ツール実行エージェントに再実行を1回だけ許可します。
 - `tool_call_budget_exceeded` 相当の失敗を受けた場合は、追加のツール実行や planner_agent への再委譲を行わず、既に取得済みの結果だけで部分成功として回答を収束させてください。
+- `invalid_followup_task_id` または `stale_followup_task_id` を含む失敗を受けた場合も同様です。そのエラーが示す task_id への再追跡や、同じ目的の execute やり直しを指示せず、取得済みの結果だけで回答を収束させてください。
+- `error=execute_request_invalid` を含む失敗は入力不備です。同じ execute を同じ意図で繰り返さず、必要なら 1 回だけ引数修正を試み、それでも不足なら質問または部分成功で収束してください。
+- `error=tool_timeout` または `error=execute_backend_error` を含む失敗は一時的失敗の可能性があります。再試行や planner_agent での修正案は 1 回までとし、それ以上は取得済み結果だけで収束してください。
+- `error=execute_invocation_failed` または `error=tool_invocation_failed` を含む失敗は、同じ手順の無限再試行に入らず、既存の証拠で回答できる範囲を返してください。
 
 [重要: タスク系ツールの完了条件]
 - execute/status/get_result という「タスクIDで追跡する」ツール群がある場合、最終的なユーザー出力には get_result の stdout を“本文として”必ず含めてください（「確認しました」「問題ありません」等の要約だけで終えない）。
@@ -218,4 +234,54 @@ class CodingAgentPrompts(PromptsBase):
 [HITL承認ポリシー]
 
 {supervisor_hitl_policy_text}
+"""
+
+    def routing_system_prompt(self) -> str:
+        return """
+あなたは supervisor の前段で動く routing 判定器です。
+役割は、ユーザー要求を見て最初に進むべき経路を 1 つ選び、その根拠を JSON で返すことだけです。
+
+[重要なルール]
+- 必ず JSON オブジェクトだけを返してください。Markdown、コードフェンス、説明文は不要です。
+- `selected_route` は `coding_agent` / `general_tool_agent` / `planner_agent` / `direct_answer` / `reject` のいずれかにしてください。
+- ユーザーが `coding agent` / `coding-agent` / `コーディングエージェント` の利用を明示している場合は、原則 `coding_agent` を選んでください。
+- ローカルファイルパスが含まれており、通常ツールで対応できる調査なら `general_tool_agent` を優先して構いません。
+- 複数ステップ調査や executor 系ツールを使うべき作業は `coding_agent` を優先してください。
+- 情報不足で route を安全に確定できない場合は、`requires_clarification=true` とし、`next_action=ask_user` を返してください。
+- `confidence` は 0.0 から 1.0 の範囲で返してください。
+
+返却 JSON の例:
+{
+    "selected_route": "coding_agent",
+    "candidate_routes": [
+        {
+            "route_name": "coding_agent",
+            "score": 0.96,
+            "reason_code": "route.explicit_coding_agent_request",
+            "tool_hints": ["execute", "status", "get_result"],
+            "blocking_issues": []
+        }
+    ],
+    "reason_code": "route.explicit_coding_agent_request",
+    "confidence": 0.96,
+    "missing_information": [],
+    "next_action": "execute_selected_route",
+    "requires_hitl": false,
+    "requires_clarification": false,
+    "notes": "user explicitly requested coding-agent"
+}
+"""
+
+    def routing_user_prompt(self, *, user_request_text: str, available_routes_text: str, context_text: str) -> str:
+        return f"""
+[user_request]
+{user_request_text}
+
+[available_routes]
+{available_routes_text}
+
+[routing_context]
+{context_text}
+
+上記だけを根拠に、最初に取るべき route を 1 つ JSON で返してください。
 """

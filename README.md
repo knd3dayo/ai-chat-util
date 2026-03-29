@@ -413,6 +413,125 @@ features:
   mcp_tool_timeout_retries: 1
 ```
 
+### supervisor routing / audit 設定
+
+内部MCPクライアントでは、tool 選択と結果評価を観測しやすくするために、structured routing と audit log を有効化できます。
+
+```yml
+ai_chat_util_config:
+  features:
+    # legacy: 従来どおり deterministic routing のみ
+    # structured: routing 専用 LLM 判定を使う
+    # hybrid: deterministic routing と structured routing を併用するための拡張用
+    routing_mode: structured
+
+    # structured routing の confidence がこの値未満なら clarification/HITL に倒すための閾値
+    routing_confidence_threshold: 0.6
+
+    # MCP 実行後に SufficiencyDecision を評価し、追加照会か HITL かを分類する
+    sufficiency_check_enabled: true
+
+    # trace_id 単位の構造化監査ログを JSONL で残す
+    audit_log_enabled: true
+    audit_log_path: ./work/structured-routing-audit.jsonl
+```
+
+補足:
+
+- `routing_mode: legacy` の場合は従来どおり prompt ベースの supervisor routing を使います。
+- `routing_mode: structured` の場合は routing 専用 LLM 呼び出しを 1 回行い、`route_decision_model_output` と `route_decided` を audit log に残します。
+- `audit_log_enabled: true` にしても既存の自然文ログはそのまま残ります。比較検証には JSONL を優先してください。
+- explicit coding-agent 要求で、かつプロンプトが「まず get_loaded_config_info」と順序を指定している場合は、supervisor 実行前に `get_loaded_config_info` の preflight を 1 回実行し、`preflight_applied` を audit log に残します。
+
+### structured routing 検証手順
+
+supervisor が「どの route を選び、どのツールを呼び、最終的に回答十分と判断したか」を確認したい場合は、structured routing 用の設定を使って `chat --use_mcp` を実行します。
+
+設定例:
+
+```yml
+ai_chat_util_config:
+  mcp:
+    mcp_config_path: /path/to/mcp_servers.local.json
+    working_directory: /path/to/workspace
+    coding_agent_endpoint:
+      mcp_server_name: coding-agent
+
+  features:
+    routing_mode: structured
+    routing_confidence_threshold: 0.6
+    sufficiency_check_enabled: true
+    audit_log_enabled: true
+    audit_log_path: /path/to/work/structured-routing-audit.jsonl
+    hitl_approval_tools: []
+```
+
+explicit coding-agent 検証例:
+
+```bash
+PROMPT='まず get_loaded_config_info を使って現在の設定ファイルの場所を確認してください。その後 coding agent を使って /path/to/doc.md を調査し、文書内で重要な見出しを 3 点挙げてください。最後に、設定ファイルの場所と見出し 3 点をまとめて回答してください。'
+
+uv --directory ./app run -m ai_chat_util.cli \
+  --config ./work/ai-chat-util-config.structured-routing-test.yml \
+  --loglevel INFO \
+  --logfile ./work/structured-route-explicit.log \
+  chat --use_mcp -p "$PROMPT" > ./work/structured-route-explicit.out
+```
+
+通常ツール寄りの検証例:
+
+```bash
+PROMPT='現在読み込まれている設定ファイルの場所を確認し、主要なLLM設定を簡潔に要約してください。'
+
+uv --directory ./app run -m ai_chat_util.cli \
+  --config ./work/ai-chat-util-config.structured-routing-test.yml \
+  --loglevel INFO \
+  --logfile ./work/structured-route-general.log \
+  chat --use_mcp -p "$PROMPT" > ./work/structured-route-general.out
+```
+
+期待される観測ポイント:
+
+- `structured-route-explicit.out` には設定ファイルの場所と見出し 3 点が含まれる
+- `structured-route-general.out` には設定ファイルの場所と LLM 設定要約が含まれる
+- `structured-routing-audit.jsonl` には少なくとも次の event が trace_id 単位で並ぶ
+
+  - `request_received`
+  - `route_decided`
+  - `preflight_applied`（順序指定つき explicit coding-agent ケースのみ）
+  - `tool_selected`
+  - `tool_result_received`
+  - `sufficiency_judged`
+  - `final_answer_validated`
+
+- `routing_mode: structured` かつ deterministic rule で確定しないケースでは、追加で `route_decision_model_output` が出る
+
+explicit coding-agent のケースでは、`route_decided.reason_code=route.explicit_coding_agent_request` が残りつつ、順序指定がある場合は `tool_agent_general` の `get_loaded_config_info` が先に 1 回だけ実行され、`preflight_applied` に確定した config path が記録されます。その後に `tool_agent_coding` の `execute/status/get_result` が続くのが期待動作です。
+
+監査ログ上の stable error code:
+
+- `error=invalid_followup_task_id`: 既に無効と判定された task_id への followup。再追跡せず、取得済み結果で収束するべきケース。
+- `error=stale_followup_task_id`: 最新ではない execute task_id への followup。古い task_id を追わず、最新 task_id または取得済み結果で収束するべきケース。
+- `error=execute_request_invalid`: execute の入力不備。引数修正は 1 回までに留め、同じ意図の execute を繰り返さない。
+- `error=tool_timeout`: 一時的なタイムアウト。再試行は 1 回までを目安にし、それ以上は収束する。
+- `error=execute_backend_error`: execute バックエンド側の一時失敗。再試行や planner 補助は 1 回まで。
+- `error=execute_invocation_failed`: execute の恒常的失敗。無限再試行せず、既存証拠で回答する。
+- `error=tool_request_invalid` / `error=tool_backend_error` / `error=tool_invocation_failed`: 一般ツール側の入力不備・一時失敗・恒常失敗を区別するためのコード。
+
+実運用メモ:
+
+- OpenAI / LiteLLM 側の quota 超過時は supervisor 本体が途中停止しても、preflight までの audit event は残ります。
+- quota 超過時は `structured-route-explicit.out` がエラー終了でも、`structured-routing-audit.jsonl` の先頭で `route_decided` → `tool_selected(get_loaded_config_info)` → `tool_result_received` → `preflight_applied` の順序を確認できます。
+
+共有すると比較しやすい情報:
+
+- 入力プロンプト
+- 利用可能ツール一覧
+- `route_decided` と `route_decision_model_output` の payload
+- 実際に実行された `tool_selected` / `tool_result_received`
+- `sufficiency_judged` と `final_answer_validated`
+- 最終回答 (`*.out`)
+
 ---
 
 ## HITL（Human-in-the-Loop：一時停止/再開）

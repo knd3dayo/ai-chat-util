@@ -23,6 +23,7 @@ fake_sessions_module.Connection = dict[str, Any] # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
 import ai_chat_util.base.llm.agent as agent_mod
+import ai_chat_util.base.llm.llm_mcp_client_util as llm_mcp_client_util_mod
 from ai_chat_util.base.llm.agent import AgentBuilder, ToolLimits
 from ai_chat_util.base.llm.prompts import CodingAgentPrompts
 from ai_chat_util.base.llm.llm_mcp_client_util import MCPClientUtil
@@ -53,6 +54,18 @@ class _FakeTool:
             self.coroutine = coroutine
         if func is not None:
             self.func = func
+
+    async def ainvoke(self, payload: Any) -> Any:
+        if hasattr(self, "coroutine"):
+            return await self.coroutine(**payload)
+        if hasattr(self, "func"):
+            return self.func(**payload)
+        raise AssertionError("No callable configured")
+
+    def invoke(self, payload: Any) -> Any:
+        if hasattr(self, "func"):
+            return self.func(**payload)
+        raise AssertionError("No callable configured")
 
 
 def test_sync_tool_budget_exceeded_returns_guard_output() -> None:
@@ -100,10 +113,18 @@ def test_sync_tool_exception_is_converted_to_normal_output() -> None:
     text, artifact = out
     assert isinstance(text, str)
     assert "ERROR: tool=sync_error failed" in text
+    assert "error=tool_request_invalid" in text
     assert isinstance(artifact, dict)
-    assert artifact.get("error") == "tool_invocation_failed"
+    assert artifact.get("error") == "tool_request_invalid"
     assert artifact.get("tool") == "sync_error"
     assert state["used"] == 1
+
+
+def test_classify_tool_error_for_execute_timeout_and_backend_cases() -> None:
+    assert ToolLimits.classify_tool_error("execute", asyncio.TimeoutError()) == "tool_timeout"
+    assert ToolLimits.classify_tool_error("execute", HTTPException(status_code=400, detail="bad request")) == "execute_request_invalid"
+    assert ToolLimits.classify_tool_error("execute", HTTPException(status_code=502, detail="gateway")) == "execute_backend_error"
+    assert ToolLimits.classify_tool_error("execute", RuntimeError("boom")) == "execute_invocation_failed"
 
 
 def test_async_tool_timeout_retries_then_succeeds() -> None:
@@ -1220,6 +1241,20 @@ def test_supervisor_prompt_requires_coding_agent_when_explicitly_requested() -> 
 
     assert "`coding agent` / `coding-agent` / `コーディングエージェント`" in prompt
     assert "通常ツール（例: analyze_files）へ置き換えてはいけません" in prompt
+    assert "invalid_followup_task_id" in prompt
+    assert "同じ目的の execute やり直しを指示せず" in prompt
+    assert "error=execute_request_invalid" in prompt
+    assert "error=tool_timeout" in prompt
+
+
+def test_contains_followup_task_error_signal_detects_guard_errors() -> None:
+    assert MCPClientUtil.contains_followup_task_error_signal(
+        "ERROR: follow-up task_id is invalid. error=invalid_followup_task_id tool=status task_id=abc"
+    )
+    assert MCPClientUtil.contains_followup_task_error_signal(
+        "ERROR: follow-up task_id is stale. error=stale_followup_task_id tool=get_result task_id=old latest_task_id=new"
+    )
+    assert not MCPClientUtil.contains_followup_task_error_signal("ERROR: tool_call_budget_exceeded")
 
 
 def test_explicitly_requests_coding_agent_detects_user_instruction() -> None:
@@ -1231,6 +1266,97 @@ def test_explicitly_requests_coding_agent_detects_user_instruction() -> None:
             }
         ]
     )
+
+
+def test_should_run_config_preflight_detects_ordered_request() -> None:
+    assert MCPClientUtil.should_run_config_preflight(
+        [
+            {
+                "role": "user",
+                "content": "まず get_loaded_config_info を呼んでから、coding-agent を使って確認してください。",
+            }
+        ]
+    )
+
+
+def test_should_run_config_preflight_ignores_unordered_mentions() -> None:
+    assert not MCPClientUtil.should_run_config_preflight(
+        [
+            {
+                "role": "user",
+                "content": "get_loaded_config_info というツール名は知っていますが、今は別件です。",
+            }
+        ]
+    )
+
+
+def test_invalid_followup_task_text_discourages_execute_rerun() -> None:
+    text = ToolLimits.invalid_followup_task_text("status", "task-1", None)
+
+    assert "取得済みの stdout/stderr" in text
+    assert "execute をやり直さないでください" in text
+
+
+def test_stale_followup_task_text_discourages_new_execute() -> None:
+    text = ToolLimits.stale_followup_task_text("get_result", "task-1", "task-2")
+
+    assert "新しい execute を追加で起こさず" in text
+
+
+def test_build_config_preflight_message_contains_reuse_instruction() -> None:
+    message = MCPClientUtil.build_config_preflight_message(
+        {
+            "config_path": "/tmp/ai-chat-util-config.yml",
+            "text": "{'path': '/tmp/ai-chat-util-config.yml'}",
+            "success": True,
+        }
+    )
+
+    assert message is not None
+    assert "path=/tmp/ai-chat-util-config.yml" in message
+    assert "再実行しないでください" in message
+
+
+def test_run_config_preflight_invokes_general_tool_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class _FakeToolClient:
+        def __init__(self, _config: Any) -> None:
+            self._config = _config
+
+        async def get_tools(self) -> list[Any]:
+            async def _tool_call() -> dict[str, str]:
+                calls.append("get_loaded_config_info")
+                return {"path": "/tmp/ai-chat-util-config.yml"}
+
+            return [
+                _FakeTool(
+                    "get_loaded_config_info",
+                    response_format="content",
+                    coroutine=_tool_call,
+                )
+            ]
+
+    monkeypatch.setattr(llm_mcp_client_util_mod, "MultiServerMCPClient", _FakeToolClient)
+
+    runtime_config = _build_runtime_config()
+    runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "coding-agent"
+    runtime_config.mcp.working_directory = "/tmp"
+    runtime_config.mcp.mcp_config_path = None
+    runtime_config.features.audit_log_enabled = False
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
+
+    payload = asyncio.run(
+        MCPClientUtil.run_config_preflight(
+            runtime_config=runtime_config,
+            tool_limits=None,
+            audit_context=None,
+        )
+    )
+
+    assert calls == ["get_loaded_config_info"]
+    assert payload is not None
+    assert payload["config_path"] == "/tmp/ai-chat-util-config.yml"
 
 
 def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:

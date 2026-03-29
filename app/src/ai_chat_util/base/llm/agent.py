@@ -13,6 +13,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
 from langchain.chat_models import BaseChatModel
 from .prompts import CodingAgentPrompts, PromptsBase
+from .supervisor_support import AuditContext
 try:
     # Async checkpointer for LangGraph when using app.ainvoke()/astream()
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -201,11 +202,29 @@ class ToolLimits(BaseModel):
 
     @staticmethod
     def tool_error_text(tool_name: str, err: BaseException) -> str:
+        error_code = ToolLimits.classify_tool_error(tool_name, err)
         err_type = type(err).__name__
         msg = str(err).strip()
         if msg:
-            return f"ERROR: tool={tool_name} failed ({err_type}): {msg}"
-        return f"ERROR: tool={tool_name} failed ({err_type})"
+            return f"ERROR: tool={tool_name} failed ({err_type}). error={error_code}: {msg}"
+        return f"ERROR: tool={tool_name} failed ({err_type}). error={error_code}"
+
+    @staticmethod
+    def classify_tool_error(tool_name: str, err: BaseException) -> str:
+        normalized_tool = (tool_name or "").strip().lower()
+        if ToolLimits.is_timeout_exception(err):
+            return "tool_timeout"
+        if isinstance(err, HTTPException):
+            status_code = int(getattr(err, "status_code", 0) or 0)
+            if 400 <= status_code < 500:
+                return "execute_request_invalid" if normalized_tool == "execute" else "tool_request_invalid"
+            if status_code >= 500:
+                return "execute_backend_error" if normalized_tool == "execute" else "tool_backend_error"
+        if isinstance(err, ValueError):
+            return "execute_request_invalid" if normalized_tool == "execute" else "tool_request_invalid"
+        if normalized_tool == "execute":
+            return "execute_invocation_failed"
+        return "tool_invocation_failed"
 
     @staticmethod
     def tool_budget_exceeded_text(tool_name: str, *, limit: int, used: int) -> str:
@@ -433,6 +452,8 @@ class ToolLimits(BaseModel):
             "ERROR: follow-up task_id is invalid. "
             f"error=invalid_followup_task_id tool={tool_name} task_id={task_id}. "
             "この task_id への status/get_result/workspace_path/cancel の再試行を中止してください。"
+            " 取得済みの stdout/stderr や既存の証拠で回答できるなら、その内容で完了してください。"
+            " このエラーを理由に同じ目的の execute をやり直さないでください。"
             f"{latest_text}"
         )
 
@@ -442,6 +463,7 @@ class ToolLimits(BaseModel):
             "ERROR: follow-up task_id is stale. "
             f"error=stale_followup_task_id tool={tool_name} task_id={task_id} latest_task_id={latest_task_id}. "
             "status/get_result/workspace_path/cancel は最新の成功 execute task_id 1件だけを追跡してください。"
+            " 古い task_id を補うために新しい execute を追加で起こさず、最新 task_id か取得済み結果で収束してください。"
         )
 
     @staticmethod
@@ -527,6 +549,24 @@ class ToolLimits(BaseModel):
         if not needs_guards:
             return
 
+        def _emit_tool_event(
+            event_type: str,
+            *,
+            tool_name: str,
+            payload: Mapping[str, Any] | None = None,
+            reason_code: str | None = None,
+        ) -> None:
+            audit_context = tool_call_state.get("audit_context")
+            if not isinstance(audit_context, AuditContext):
+                return
+            audit_context.emit(
+                event_type,
+                agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                tool_name=tool_name,
+                reason_code=reason_code,
+                payload=dict(payload or {}),
+            )
+
         def _wrap_sync(
             *,
             tool_name: str,
@@ -577,7 +617,18 @@ class ToolLimits(BaseModel):
                 cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
                 if (not cls.is_followup_tool(tool_name) or cls.is_reusable_followup_tool(tool_name)) and call_cache_key in cached_results:
                     logger.info("Reusing cached tool result (sync): tool=%s", tool_name)
+                    _emit_tool_event(
+                        "tool_result_received",
+                        tool_name=tool_name,
+                        payload={"success": True, "cached": True},
+                    )
                     return cls.clone_cached_tool_result(cached_results[call_cache_key])
+
+                _emit_tool_event(
+                    "tool_selected",
+                    tool_name=tool_name,
+                    payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
+                )
 
                 budget_scope, used_key, scope_limit, scope_used = cls._resolve_budget_scope(
                     tool_name=tool_name,
@@ -618,6 +669,11 @@ class ToolLimits(BaseModel):
                         cls.remember_successful_execute_task_id(tool_call_state, result)
                     if cls.should_cache_tool_result(tool_name, result):
                         cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
+                    _emit_tool_event(
+                        "tool_result_received",
+                        tool_name=tool_name,
+                        payload={"success": True, "cached": False},
+                    )
                     return result
                 except Exception as e:
                     if followup_task_id and cls.is_task_not_found_exception(e):
@@ -640,11 +696,18 @@ class ToolLimits(BaseModel):
                             },
                         )
                     logger.exception("Tool invocation failed (sync): tool=%s", tool_name)
+                    error_code = cls.classify_tool_error(tool_name, e)
+                    _emit_tool_event(
+                        "tool_result_received",
+                        tool_name=tool_name,
+                        reason_code="sufficiency.tool_result_error_only",
+                        payload={"success": False, "exception": type(e).__name__, "error": error_code},
+                    )
                     return cls._guard_output(
                         ToolLimits.tool_error_text(tool_name, e),
                         response_format=response_format,
                         artifact={
-                            "error": "tool_invocation_failed",
+                            "error": error_code,
                             "tool": tool_name,
                             "exception": type(e).__name__,
                         },
@@ -760,9 +823,24 @@ class ToolLimits(BaseModel):
 
         call_cache_key = cls.build_call_cache_key(tool_name, args, kwargs)
         cached_results = cast(dict[str, Any], tool_call_state.setdefault("successful_results", {}))
+        audit_context = tool_call_state.get("audit_context")
         if (not cls.is_followup_tool(tool_name) or cls.is_reusable_followup_tool(tool_name)) and call_cache_key in cached_results:
             logger.info("Reusing cached tool result: tool=%s", tool_name)
+            if isinstance(audit_context, AuditContext):
+                audit_context.emit(
+                    "tool_result_received",
+                    agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                    tool_name=tool_name,
+                    payload={"success": True, "cached": True},
+                )
             return cls.clone_cached_tool_result(cached_results[call_cache_key])
+        if isinstance(audit_context, AuditContext):
+            audit_context.emit(
+                "tool_selected",
+                agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                tool_name=tool_name,
+                payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
+            )
 
         used = int(tool_call_state.get("used", 0) or 0)
         if used < 0:
@@ -813,6 +891,13 @@ class ToolLimits(BaseModel):
                     cls.remember_successful_execute_task_id(tool_call_state, result)
                 if cls.should_cache_tool_result(tool_name, result):
                     cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
+                if isinstance(audit_context, AuditContext):
+                    audit_context.emit(
+                        "tool_result_received",
+                        agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                        tool_name=tool_name,
+                        payload={"success": True, "cached": False},
+                    )
                 return result
             except asyncio.CancelledError:
                 raise
@@ -853,17 +938,27 @@ class ToolLimits(BaseModel):
                     attempt,
                     attempts,
                 )
+                error_code = cls.classify_tool_error(tool_name, e)
+                if isinstance(audit_context, AuditContext):
+                    audit_context.emit(
+                        "tool_result_received",
+                        agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                        tool_name=tool_name,
+                        reason_code="sufficiency.tool_result_error_only",
+                        payload={"success": False, "exception": type(e).__name__, "error": error_code},
+                    )
                 return cls._guard_output(
                     ToolLimits.tool_error_text(tool_name, e),
                     response_format=response_format,
-                    artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(e).__name__},
+                    artifact={"error": error_code, "tool": tool_name, "exception": type(e).__name__},
                 )
 
         if last_err is not None:
+            error_code = cls.classify_tool_error(tool_name, last_err)
             return cls._guard_output(
                 ToolLimits.tool_error_text(tool_name, last_err),
                 response_format=response_format,
-                artifact={"error": "tool_invocation_failed", "tool": tool_name, "exception": type(last_err).__name__},
+                artifact={"error": error_code, "tool": tool_name, "exception": type(last_err).__name__},
             )
         return cls._guard_output(
             f"ERROR: tool={tool_name} failed (unknown error)",
@@ -942,6 +1037,7 @@ class AgentBuilder:
             agent_name: str,
             allowed_tool_names: Sequence[str] | None = None,
             explicit_user_file_paths: Sequence[str] | None = None,
+            audit_context: AuditContext | None = None,
         ):
 
         # Safety valves: cap tool calls and hard-timeout tool execution.
@@ -964,6 +1060,8 @@ class AgentBuilder:
             "general_used": 0,
             "followup_used": 0,
             "followup_limit": effective_followup_tool_call_limit_int,
+            "agent_name": agent_name,
+            "audit_context": audit_context,
             "explicit_user_file_paths": [
                 str(path).strip()
                 for path in (explicit_user_file_paths or [])
@@ -1030,6 +1128,7 @@ class AgentBuilder:
         include_general_agent: bool = True,
         general_tool_allowlist: Sequence[str] | None = None,
         explicit_user_file_paths: Sequence[str] | None = None,
+        audit_context: AuditContext | None = None,
     ) -> list[AgentBuilder]:
         logger.info("Creating sub-agents...")
 
@@ -1067,10 +1166,15 @@ class AgentBuilder:
                     server_names=tuple(code_agent_mcp_config.servers.keys()),
                 ),
                 explicit_user_file_paths=explicit_user_file_paths,
+                audit_context=audit_context,
             )
             agents.append(code_agent_builder)
 
-        should_create_general_agent = include_general_agent or len(code_agent_mcp_config.servers) == 0
+        should_create_general_agent = (
+            include_general_agent
+            or len(code_agent_mcp_config.servers) == 0
+            or (general_tool_allowlist is not None and len([name for name in general_tool_allowlist if isinstance(name, str) and name.strip()]) > 0)
+        )
         if should_create_general_agent and len(normal_tools_mcp_config.servers) > 0:
             logger.info("Creating normal agent for MCP server '%s'...", ", ".join(normal_tools_mcp_config.servers.keys()))
             normal_agent_builder = AgentBuilder()
@@ -1086,6 +1190,7 @@ class AgentBuilder:
                 ),
                 allowed_tool_names=general_tool_allowlist,
                 explicit_user_file_paths=explicit_user_file_paths,
+                audit_context=audit_context,
             )
             if general_tool_allowlist is None or normal_agent_builder.langchain_tools:
                 agents.append(normal_agent_builder)

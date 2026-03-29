@@ -10,9 +10,10 @@ import sqlite3
 from pathlib import Path
 from langchain_litellm import ChatLiteLLMRouter
 from litellm.router import Router
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools.structured import StructuredTool
 from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
@@ -20,6 +21,7 @@ from langchain.chat_models import BaseChatModel
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from .prompts import PromptsBase
 from .agent import AgentBuilder, ToolLimits
+from .supervisor_support import AuditContext, EvidenceSummary, RoutingDecision, RouteCandidate, SufficiencyDecision
 
 try:
     # Async checkpointer for LangGraph when using app.ainvoke()/astream()
@@ -46,6 +48,18 @@ class MCPClientUtil:
     _EXPLICIT_CODING_AGENT_PATTERNS: tuple[str, ...] = (
         r"\bcoding(?:[\s\-_]+agent)(?:\s+mcp)?\b",
         r"コーディング[\s\-]*エージェント",
+    )
+
+    _ALLOWED_ROUTE_REASON_CODES: tuple[str, ...] = (
+        "route.explicit_coding_agent_request",
+        "route.explicit_file_path_request",
+        "route.general_tool_sufficient",
+        "route.multi_step_investigation_needed",
+        "route.tool_not_available",
+        "route.missing_required_argument",
+        "route.low_confidence_route",
+        "route.direct_answer_possible",
+        "route.reject_unsupported_request",
     )
 
     @classmethod
@@ -726,6 +740,18 @@ class MCPClientUtil:
         return False
 
     @staticmethod
+    def contains_followup_task_error_signal(text: str | None) -> bool:
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            return False
+        return (
+            "invalid_followup_task_id" in normalized
+            or "stale_followup_task_id" in normalized
+            or "follow-up task_id is invalid" in normalized
+            or "follow-up task_id is stale" in normalized
+        )
+
+    @staticmethod
     def _heading_level(heading: str) -> int | None:
         match = re.match(r"^(#{1,6})\s+.+$", heading or "")
         if not match:
@@ -827,6 +853,147 @@ class MCPClientUtil:
         if cls._looks_like_glob_path(candidate):
             return None
         return candidate
+
+    @classmethod
+    def should_run_config_preflight(cls, messages: Sequence[Any]) -> bool:
+        for message in messages:
+            text = ""
+            if isinstance(message, HumanMessage):
+                text = cls._stringify_message_content(message.content)
+            elif isinstance(message, Mapping) and str(message.get("role") or "").lower() in {"user", "human"}:
+                text = cls._stringify_message_content(message.get("content"))
+
+            normalized = text.strip().lower()
+            if not normalized or "get_loaded_config_info" not in normalized:
+                continue
+            if any(token in text for token in ("まず", "最初", "先に")):
+                return True
+            if re.search(r"\b(first|before)\b", normalized):
+                return True
+        return False
+
+    @classmethod
+    def _extract_config_preflight_payload(cls, result: Any) -> dict[str, Any]:
+        text_value: str | None = None
+        config_path: str | None = None
+        artifact_value: Any | None = None
+
+        if isinstance(result, tuple) and len(result) == 2:
+            text_value = cls._stringify_message_content(result[0])
+            artifact_value = result[1]
+        elif isinstance(result, Mapping):
+            artifact_value = dict(result)
+            text_value = cls._stringify_message_content(result)
+        else:
+            text_value = cls._stringify_message_content(result)
+
+        if isinstance(artifact_value, Mapping):
+            path_value = artifact_value.get("path")
+            if isinstance(path_value, str) and path_value.strip():
+                config_path = path_value.strip()
+
+        if not config_path:
+            config_path = cls.extract_config_path_from_text(text_value)
+
+        return {
+            "text": text_value,
+            "config_path": config_path,
+            "artifact": artifact_value,
+            "success": not (isinstance(text_value, str) and text_value.lstrip().startswith("ERROR:")),
+        }
+
+    @classmethod
+    async def run_config_preflight(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+        tool_limits: ToolLimits | None,
+        audit_context: AuditContext | None,
+    ) -> dict[str, Any] | None:
+        mcp_config = runtime_config.get_mcp_server_config()
+        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        general_mcp_config = mcp_config.filter(exclude_name=coding_agent_server_name)
+        if len(general_mcp_config.servers) == 0:
+            return None
+
+        tool_client = MultiServerMCPClient(general_mcp_config.to_langchain_config())
+        tools = [
+            cls._maybe_wrap_req_nested_tool(tool)
+            for tool in await tool_client.get_tools()
+            if str(getattr(tool, "name", "")).strip() == "get_loaded_config_info"
+        ]
+        if not tools:
+            return None
+
+        if tool_limits is not None:
+            tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = tool_limits.guard_params()
+        else:
+            tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = (0, 0.0, 0)
+
+        tool_state: dict[str, Any] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": 0,
+            "agent_name": "tool_agent_general",
+            "audit_context": audit_context,
+            "explicit_user_file_paths": [],
+        }
+        ToolLimits._apply_tool_execution_guards(
+            tools,
+            tool_call_state=tool_state,
+            tool_call_limit_int=tool_call_limit_int,
+            tool_timeout_seconds_f=tool_timeout_seconds_f,
+            tool_timeout_retries_int=tool_timeout_retries_int,
+        )
+
+        tool = tools[0]
+        if getattr(tool, "coroutine", None) is not None or hasattr(tool, "ainvoke"):
+            result = await tool.ainvoke({})
+        elif getattr(tool, "func", None) is not None:
+            result = tool.func()
+        else:
+            return None
+
+        return cls._extract_config_preflight_payload(result)
+
+    @classmethod
+    def build_config_preflight_message(cls, preflight_payload: Mapping[str, Any]) -> str | None:
+        config_path = preflight_payload.get("config_path")
+        text_value = preflight_payload.get("text")
+        success = bool(preflight_payload.get("success", False))
+
+        lines = ["[Config Preflight]"]
+        if isinstance(config_path, str) and config_path.strip():
+            lines.append(f"- get_loaded_config_info 実行済み: path={config_path.strip()}")
+            lines.append("- 以後は取得済みの path/config を使い回し、get_loaded_config_info を再実行しないでください。")
+        elif isinstance(text_value, str) and text_value.strip():
+            status_text = "成功" if success else "失敗"
+            lines.append(f"- get_loaded_config_info 実行済み ({status_text})")
+            lines.append(f"- result: {text_value.strip()}")
+            lines.append("- この preflight は既に実行済みです。同じ確認を繰り返さず、取得済み情報だけで次の手順へ進んでください。")
+        else:
+            return None
+        return "\n".join(lines)
+
+    @classmethod
+    def merge_preflight_evidence(cls, evidence: Mapping[str, Any], preflight_payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        merged = dict(evidence)
+        if not isinstance(preflight_payload, Mapping):
+            return merged
+
+        config_path = preflight_payload.get("config_path")
+        if isinstance(config_path, str) and config_path.strip():
+            merged["config_path"] = cls._choose_better_config_path(cast(str | None, merged.get("config_path")), config_path.strip())
+
+        text_value = preflight_payload.get("text")
+        if isinstance(text_value, str) and text_value.strip() and not text_value.lstrip().startswith("ERROR:"):
+            stdout_blocks = list(cast(Sequence[Any], merged.get("stdout_blocks") or []))
+            if text_value.strip() not in [str(item).strip() for item in stdout_blocks if isinstance(item, str)]:
+                stdout_blocks.insert(0, text_value.strip())
+                merged["stdout_blocks"] = stdout_blocks
+
+        return merged
 
     @classmethod
     def get_loaded_runtime_config_path(cls) -> str | None:
@@ -1401,6 +1568,8 @@ class MCPClientUtil:
         tool_limits: ToolLimits | None = None,
         force_coding_agent_route: bool = False,
         explicit_user_file_paths: Sequence[str] | None = None,
+        routing_decision: RoutingDecision | None = None,
+        audit_context: AuditContext | None = None,
     ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
@@ -1413,16 +1582,21 @@ class MCPClientUtil:
             runtime_config,
             mcp_config,
             llm, prompts, tool_limits, 
-            include_general_agent=cls.should_include_general_agent(
-                force_coding_agent_route=force_coding_agent_route,
-                explicit_user_file_paths=explicit_user_file_paths,
+            include_general_agent=(
+                routing_decision.selected_route != "coding_agent"
+                if routing_decision is not None
+                else cls.should_include_general_agent(
+                    force_coding_agent_route=force_coding_agent_route,
+                    explicit_user_file_paths=explicit_user_file_paths,
+                )
             ),
             general_tool_allowlist=(
                 cls._GENERAL_TOOLS_ALLOWED_WITH_EXPLICIT_CODING_AGENT
-                if force_coding_agent_route
+                if force_coding_agent_route or (routing_decision is not None and routing_decision.selected_route == "coding_agent")
                 else None
             ),
             explicit_user_file_paths=explicit_user_file_paths,
+            audit_context=audit_context,
             )
 
 
@@ -1439,6 +1613,11 @@ class MCPClientUtil:
             tools_description,
             supervisor_hitl_policy_text,
             tool_agent_names=[agent.get_agent_name() for agent in sub_agents],
+            routing_guidance_text=cls._build_supervisor_routing_guidance_text(
+                routing_decision=routing_decision,
+                force_coding_agent_route=force_coding_agent_route,
+                explicit_user_file_paths=explicit_user_file_paths,
+            ),
         )
 
         # Prefer tool execution agent first to reduce accidental planner-only loops.
@@ -1459,3 +1638,443 @@ class MCPClientUtil:
             graph = workflow.compile(name="mcp_supervisor")
 
         return graph
+
+    @classmethod
+    def _build_default_routing_decision(
+        cls,
+        *,
+        force_coding_agent_route: bool,
+        explicit_user_file_paths: Sequence[str] | None = None,
+        available_tool_names: Sequence[str] | None = None,
+    ) -> RoutingDecision:
+        normalized_tools = [
+            str(tool_name).strip()
+            for tool_name in (available_tool_names or [])
+            if isinstance(tool_name, str) and str(tool_name).strip()
+        ]
+        has_coding_agent_tools = any(name in {"execute", "status", "get_result", "cancel", "workspace_path"} for name in normalized_tools)
+        normalized_paths = [
+            str(path).strip()
+            for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+
+        if force_coding_agent_route and has_coding_agent_tools:
+            candidate = RouteCandidate(
+                route_name="coding_agent",
+                score=1.0,
+                reason_code="route.explicit_coding_agent_request",
+                tool_hints=[name for name in normalized_tools if name in {"execute", "status", "get_result"}],
+            )
+            return RoutingDecision(
+                selected_route="coding_agent",
+                candidate_routes=[candidate],
+                reason_code="route.explicit_coding_agent_request",
+                confidence=1.0,
+                next_action="execute_selected_route",
+                notes="explicit coding-agent request detected",
+            )
+
+        if normalized_paths:
+            candidate = RouteCandidate(
+                route_name="general_tool_agent",
+                score=0.8,
+                reason_code="route.explicit_file_path_request",
+                tool_hints=normalized_tools[:5],
+            )
+            return RoutingDecision(
+                selected_route="general_tool_agent",
+                candidate_routes=[candidate],
+                reason_code="route.explicit_file_path_request",
+                confidence=0.8,
+                next_action="execute_selected_route",
+                notes="explicit file path detected",
+            )
+
+        candidate = RouteCandidate(
+            route_name="general_tool_agent",
+            score=0.6,
+            reason_code="route.general_tool_sufficient",
+            tool_hints=normalized_tools[:5],
+        )
+        return RoutingDecision(
+            selected_route="general_tool_agent",
+            candidate_routes=[candidate],
+            reason_code="route.general_tool_sufficient",
+            confidence=0.6,
+            next_action="execute_selected_route",
+            notes="default route selected",
+        )
+
+    @classmethod
+    def _build_available_routes_text(
+        cls,
+        *,
+        has_coding_agent: bool,
+        has_general_agent: bool,
+    ) -> str:
+        lines: list[str] = []
+        if has_coding_agent:
+            lines.append("- coding_agent: execute/status/get_result を使う複数ステップ調査向け")
+        if has_general_agent:
+            lines.append("- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け")
+        lines.append("- planner_agent: 実行前に計画整理が必要な場合のみ")
+        lines.append("- direct_answer: ツール不要で即答できる場合のみ")
+        lines.append("- reject: サポート範囲外または route を決めても安全に進めない場合")
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_routing_context_text(
+        cls,
+        *,
+        force_coding_agent_route: bool,
+        explicit_user_file_paths: Sequence[str] | None,
+        routing_mode: str,
+    ) -> str:
+        normalized_paths = [
+            str(path).strip()
+            for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        return "\n".join(
+            [
+                f"routing_mode={routing_mode}",
+                f"force_coding_agent_route={str(force_coding_agent_route).lower()}",
+                "explicit_user_file_paths=" + (", ".join(normalized_paths) if normalized_paths else "(none)"),
+            ]
+        )
+
+    @classmethod
+    def _build_supervisor_routing_guidance_text(
+        cls,
+        *,
+        routing_decision: RoutingDecision | None,
+        force_coding_agent_route: bool,
+        explicit_user_file_paths: Sequence[str] | None,
+    ) -> str | None:
+        normalized_paths = [
+            str(path).strip()
+            for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        decision = routing_decision
+        if decision is None and not force_coding_agent_route and not normalized_paths:
+            return None
+
+        lines: list[str] = []
+        selected_route = decision.selected_route if decision is not None else "coding_agent"
+        if selected_route == "coding_agent":
+            lines.append("- 初手は coding_agent ルートを優先してください。general_tool_agent へ広げるのは `get_loaded_config_info` のような事前確認が必要な場合だけです。")
+            lines.append("- `get_loaded_config_info` を使う場合でも 1 回だけ実行し、取得した path / config を以後の委譲で再利用してください。")
+            lines.append("- 設定確認が済んだら、以降は coding-agent 系の execute/status/get_result に進み、同じ設定確認を繰り返さないでください。")
+        elif selected_route == "general_tool_agent":
+            lines.append("- 初手は general_tool_agent で完結するかを優先確認してください。")
+            lines.append("- 一般ツールで必要情報を取得できた後は、同じツールを同じ引数で繰り返し呼ばないでください。")
+        elif selected_route == "direct_answer":
+            lines.append("- 現時点ではツール不要の即答を優先してください。不足が見つかった場合のみ route を見直してください。")
+        elif selected_route == "reject":
+            lines.append("- サポート範囲外または安全に進めない要求として扱ってください。")
+
+        if normalized_paths:
+            lines.append(f"- ユーザーが明示した対象パス: {', '.join(normalized_paths)}")
+        if decision is not None and decision.reason_code:
+            lines.append(f"- route_reason_code: {decision.reason_code}")
+        if decision is not None and decision.notes:
+            lines.append(f"- route_notes: {decision.notes}")
+
+        return "\n".join(lines) if lines else None
+
+    @classmethod
+    def _extract_user_request_text(cls, messages: Sequence[Any]) -> str:
+        chunks: list[str] = []
+        for message in messages:
+            if isinstance(message, HumanMessage):
+                text = cls._stringify_message_content(message.content)
+                if text.strip():
+                    chunks.append(text.strip())
+                continue
+            if isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    text = cls._stringify_message_content(message.get("content"))
+                    if text.strip():
+                        chunks.append(text.strip())
+        return "\n\n".join(chunks)
+
+    @classmethod
+    def _coerce_route_candidate(cls, value: Any) -> RouteCandidate | None:
+        if not isinstance(value, Mapping):
+            return None
+        route_name = str(value.get("route_name") or "").strip()
+        reason_code = cls.normalize_route_reason_code(
+            str(value.get("reason_code") or "route.general_tool_sufficient").strip(),
+            route_name=route_name,
+        )
+        if not route_name:
+            return None
+        try:
+            score = float(value.get("score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        score = max(0.0, min(1.0, score))
+        tool_hints = [str(item).strip() for item in cast(Sequence[Any], value.get("tool_hints") or []) if str(item).strip()]
+        blocking_issues = [str(item).strip() for item in cast(Sequence[Any], value.get("blocking_issues") or []) if str(item).strip()]
+        return RouteCandidate(
+            route_name=route_name,
+            score=score,
+            reason_code=reason_code,
+            tool_hints=tool_hints,
+            blocking_issues=blocking_issues,
+        )
+
+    @classmethod
+    def normalize_route_reason_code(cls, reason_code: str | None, *, route_name: str | None = None) -> str:
+        normalized = str(reason_code or "").strip()
+        if normalized in cls._ALLOWED_ROUTE_REASON_CODES:
+            return normalized
+
+        route = str(route_name or "").strip().lower()
+        if route == "coding_agent":
+            return "route.multi_step_investigation_needed"
+        if route == "general_tool_agent":
+            return "route.general_tool_sufficient"
+        if route == "direct_answer":
+            return "route.direct_answer_possible"
+        if route == "reject":
+            return "route.reject_unsupported_request"
+        return "route.low_confidence_route"
+
+    @classmethod
+    def _parse_routing_decision_payload(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        confidence_threshold: float,
+    ) -> RoutingDecision | None:
+        selected_route = str(payload.get("selected_route") or "").strip()
+        if not selected_route:
+            return None
+        try:
+            confidence = float(payload.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        reason_code = cls.normalize_route_reason_code(
+            str(payload.get("reason_code") or "route.low_confidence_route").strip() or "route.low_confidence_route",
+            route_name=selected_route,
+        )
+        missing_information = [
+            str(item).strip()
+            for item in cast(Sequence[Any], payload.get("missing_information") or [])
+            if str(item).strip()
+        ]
+        candidate_routes = [
+            candidate
+            for candidate in (
+                cls._coerce_route_candidate(item)
+                for item in cast(Sequence[Any], payload.get("candidate_routes") or [])
+            )
+            if candidate is not None
+        ]
+        next_action = str(payload.get("next_action") or "execute_selected_route").strip() or "execute_selected_route"
+        requires_hitl = bool(payload.get("requires_hitl", False))
+        requires_clarification = bool(payload.get("requires_clarification", False))
+        notes = str(payload.get("notes") or "").strip() or None
+
+        if confidence < confidence_threshold and next_action == "execute_selected_route":
+            next_action = "ask_user"
+            requires_clarification = True
+            requires_hitl = True
+            reason_code = "route.low_confidence_route"
+
+        return RoutingDecision(
+            selected_route=selected_route,
+            candidate_routes=candidate_routes,
+            reason_code=reason_code,
+            confidence=confidence,
+            missing_information=missing_information,
+            next_action=next_action,
+            requires_hitl=requires_hitl,
+            requires_clarification=requires_clarification,
+            notes=notes,
+        )
+
+    @classmethod
+    async def decide_route(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+        prompts: PromptsBase,
+        messages: Sequence[Any],
+        force_coding_agent_route: bool,
+        explicit_user_file_paths: Sequence[str] | None = None,
+        available_tool_names: Sequence[str] | None = None,
+        audit_context: AuditContext | None = None,
+    ) -> RoutingDecision:
+        default_decision = cls._build_default_routing_decision(
+            force_coding_agent_route=force_coding_agent_route,
+            explicit_user_file_paths=explicit_user_file_paths,
+            available_tool_names=available_tool_names,
+        )
+
+        routing_mode = str(getattr(runtime_config.features, "routing_mode", "legacy") or "legacy").strip().lower()
+        if routing_mode == "legacy" or default_decision.reason_code == "route.explicit_coding_agent_request":
+            return default_decision
+
+        mcp_config = runtime_config.get_mcp_server_config()
+        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        has_coding_agent = len(mcp_config.filter(include_name=coding_agent_server_name).servers) > 0
+        has_general_agent = len(mcp_config.filter(exclude_name=coding_agent_server_name).servers) > 0
+        if not has_coding_agent and not has_general_agent:
+            return default_decision
+
+        llm = cls.create_llm(runtime_config)
+        user_request_text = cls._extract_user_request_text(messages)
+        available_routes_text = cls._build_available_routes_text(
+            has_coding_agent=has_coding_agent,
+            has_general_agent=has_general_agent,
+        )
+        context_text = cls._build_routing_context_text(
+            force_coding_agent_route=force_coding_agent_route,
+            explicit_user_file_paths=explicit_user_file_paths,
+            routing_mode=routing_mode,
+        )
+
+        try:
+            result = await llm.ainvoke(
+                [
+                    SystemMessage(content=prompts.routing_system_prompt()),
+                    HumanMessage(
+                        content=prompts.routing_user_prompt(
+                            user_request_text=user_request_text,
+                            available_routes_text=available_routes_text,
+                            context_text=context_text,
+                        )
+                    ),
+                ]
+            )
+            output_text = cls._stringify_message_content(getattr(result, "content", result))
+            payload = cls._extract_mapping_from_text(output_text)
+            confidence_threshold = float(getattr(runtime_config.features, "routing_confidence_threshold", 0.6) or 0.6)
+            if payload is not None:
+                parsed_decision = cls._parse_routing_decision_payload(
+                    payload,
+                    confidence_threshold=confidence_threshold,
+                )
+                if parsed_decision is not None:
+                    if audit_context is not None:
+                        audit_context.emit(
+                            "route_decision_model_output",
+                            route_name=parsed_decision.selected_route,
+                            reason_code=parsed_decision.reason_code,
+                            confidence=parsed_decision.confidence,
+                            payload={"raw_output": output_text},
+                        )
+                    return parsed_decision
+        except Exception:
+            logger.debug("Structured routing decision failed; falling back to default routing", exc_info=True)
+
+        return default_decision
+
+    @classmethod
+    def build_evidence_summary(cls, evidence: Mapping[str, Any]) -> EvidenceSummary:
+        headings = [
+            str(value).strip()
+            for value in cast(Sequence[Any], evidence.get("headings") or [])
+            if isinstance(value, str) and str(value).strip()
+        ]
+        stdout_blocks = [
+            str(value).strip()
+            for value in cast(Sequence[Any], evidence.get("stdout_blocks") or [])
+            if isinstance(value, str) and str(value).strip()
+        ]
+        raw_texts = [
+            str(value).strip()
+            for value in cast(Sequence[Any], evidence.get("raw_texts") or [])
+            if isinstance(value, str) and str(value).strip()
+        ]
+        tool_errors = [
+            text for text in raw_texts if text.lstrip().startswith("ERROR:")
+        ]
+        successful_tools = [
+            "get_loaded_config_info" if isinstance(evidence.get("config_path"), str) and str(evidence.get("config_path")).strip() else "",
+            "heading_extraction" if headings else "",
+        ]
+        successful_tools = [tool_name for tool_name in successful_tools if tool_name]
+        latest_task_id = evidence.get("latest_task_id")
+        return EvidenceSummary(
+            config_path=cast(str | None, evidence.get("config_path")),
+            headings=headings,
+            stdout_blocks=stdout_blocks,
+            raw_texts=raw_texts,
+            tool_errors=tool_errors,
+            successful_tools=successful_tools,
+            latest_task_id=latest_task_id if isinstance(latest_task_id, str) and latest_task_id.strip() else None,
+            has_actionable_evidence=bool(headings or stdout_blocks or evidence.get("config_path")),
+        )
+
+    @classmethod
+    def judge_sufficiency(
+        cls,
+        *,
+        response_text: str,
+        resp_type: str | None,
+        hitl_kind: str | None,
+        evidence_summary: EvidenceSummary,
+    ) -> SufficiencyDecision:
+        if resp_type == "question" and hitl_kind == "approval":
+            return SufficiencyDecision(
+                decision="needs_approval",
+                reason_code="sufficiency.approval_required",
+                confidence=1.0,
+                missing_facts=[],
+                recommended_next_action="request_approval",
+                requires_hitl=True,
+                requires_approval=True,
+                evidence_summary=evidence_summary,
+                user_prompt_hint=response_text or None,
+            )
+        if resp_type == "question":
+            return SufficiencyDecision(
+                decision="needs_user_input",
+                reason_code="sufficiency.missing_user_context",
+                confidence=0.9,
+                missing_facts=[response_text] if response_text else [],
+                recommended_next_action="ask_user",
+                requires_hitl=True,
+                requires_approval=False,
+                evidence_summary=evidence_summary,
+                user_prompt_hint=response_text or None,
+            )
+        if evidence_summary.tool_errors and not evidence_summary.has_actionable_evidence:
+            return SufficiencyDecision(
+                decision="needs_more_tool_calls",
+                reason_code="sufficiency.tool_result_error_only",
+                confidence=0.7,
+                missing_facts=["successful tool evidence is unavailable"],
+                recommended_next_action="call_more_tools",
+                requires_hitl=False,
+                requires_approval=False,
+                evidence_summary=evidence_summary,
+            )
+        if evidence_summary.has_actionable_evidence or (response_text or "").strip():
+            return SufficiencyDecision(
+                decision="answerable",
+                reason_code="sufficiency.answer_supported_by_evidence",
+                confidence=0.8,
+                missing_facts=[],
+                recommended_next_action="finalize_answer",
+                requires_hitl=False,
+                requires_approval=False,
+                evidence_summary=evidence_summary,
+            )
+        return SufficiencyDecision(
+            decision="needs_more_tool_calls",
+            reason_code="sufficiency.insufficient_tool_evidence",
+            confidence=0.6,
+            missing_facts=["tool evidence is missing"],
+            recommended_next_action="call_more_tools",
+            requires_hitl=False,
+            requires_approval=False,
+            evidence_summary=evidence_summary,
+        )

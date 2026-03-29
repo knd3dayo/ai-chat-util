@@ -101,6 +101,11 @@ ai_chat_util_config:
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false
+    routing_mode: legacy
+    routing_confidence_threshold: 0.6
+    sufficiency_check_enabled: false
+    audit_log_enabled: false
+    audit_log_path: null
 
     # HITL（Human in the loop）: 承認が必要なツール名リスト
     # 例: ["analyze_files", "analyze_pdf_files"]

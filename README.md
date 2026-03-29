@@ -227,6 +227,75 @@ ai_chat_util_config:
         x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
 ```
 
+#### file_server 設定
+
+ファイルサーバー一覧 API / MCP ツールは `ai_chat_util_config.file_server` で制御します。
+
+- `enabled`: 機能全体の有効化
+- `allowed_roots`: API から参照可能なルート一覧
+- `default_root`: `root_name` 未指定時に使うルート名
+- `max_depth`, `max_entries`: 再帰列挙の上限
+- `include_hidden_default`, `follow_symlinks`, `include_mime_default`: 既定の列挙挙動
+- `smb`: SMB/CIFS 利用時の接続設定。秘密情報は `.env` / 環境変数参照で管理
+
+例:
+
+```yml
+ai_chat_util_config:
+  llm:
+    provider: openai
+    completion_model: gpt-5
+    api_key: os.environ/LLM_API_KEY
+
+  file_server:
+    enabled: true
+    default_root: workspace
+    max_depth: 3
+    max_entries: 1000
+    allowed_roots:
+      - name: workspace
+        provider: local
+        path: ./work
+        description: local working directory
+      - name: smb-workspace
+        provider: smb
+        path: ""
+        description: SMB share root directory
+    smb:
+      enabled: true
+      server: 192.168.35.89
+      share: workspace
+      port: 445
+      domain: null
+      username: os.environ/FILE_SERVER_SMB_USERNAME
+      password: os.environ/FILE_SERVER_SMB_PASSWORD
+```
+
+SMB 共有直下全体を公開する場合は、`allowed_roots[].path` を空文字にします。`default_root` は既存のローカル用のままにして、SMB は `root_name=smb-workspace` を明示して利用する構成を推奨します。
+
+注意:
+- `follow_symlinks` はローカル provider 向けの設定です。SMB には適用されません。
+- `include_mime_default` は SMB では実質無効です。
+- `max_entries` を超えるとページングではなくエラーで打ち切ります。最初は `recursive=false` で確認してください。
+
+HTTP API:
+
+- `GET /api/file_util/list_file_server_roots`: 設定済みルート一覧を返す
+- `GET /api/file_util/list_file_server_entries`: 指定ルート配下のディレクトリ一覧を返す
+
+例:
+
+```bash
+curl "http://localhost:8000/api/file_util/list_file_server_roots"
+curl "http://localhost:8000/api/file_util/list_file_server_entries?root_name=workspace&path=.&recursive=true&max_depth=2"
+curl "http://localhost:8000/api/file_util/list_file_server_entries?root_name=smb-workspace&path=.&recursive=false"
+```
+
+MCP ツール:
+
+- `list_file_server_roots`
+- `list_file_server_entries`
+
 #### `--config` を渡せない起動（例: `uvicorn ...:app`）
 
 環境変数 `AI_CHAT_UTIL_CONFIG` で `ai-chat-util-config.yml` の場所を指定してください。
@@ -239,6 +308,13 @@ uvicorn ai_chat_util.api.api_server:app
 ### 2) .env（任意・秘密のみ）
 
 `.env.example` をコピーして `.env` を作成し、利用するプロバイダの API キー等を設定してください。
+
+SMB パスワードも `.env` で管理できます。
+
+```dotenv
+FILE_SERVER_SMB_USERNAME=user1
+FILE_SERVER_SMB_PASSWORD=user1
+```
 
 ```bash
 copy .env.example .env

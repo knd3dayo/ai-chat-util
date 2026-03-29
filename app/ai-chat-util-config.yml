@@ -68,6 +68,36 @@ ai_chat_util_config:
       # MCPサーバー名（ai_chat_util_config.mcp.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
       mcp_server_name: coding-agent
 
+  file_server:
+    enabled: true
+    default_provider: local
+    default_root: workspace
+    max_depth: 3
+    max_entries: 1000
+    include_hidden_default: false
+    follow_symlinks: false
+    include_mime_default: false
+
+    # 参照可能なルートの定義。API からはこの配下のみ参照できます。
+    allowed_roots:
+      - name: workspace
+        provider: local
+        path: ../work
+        description: local work directory under this repository
+      - name: smb-workspace
+        provider: smb
+        path: ""
+        description: root directory inside the configured SMB share
+
+    smb:
+      enabled: true
+      server: 192.168.35.89
+      share: workspace
+      port: 445
+      domain: null
+      username: os.environ/FILE_SERVER_SMB_USERNAME
+      password: os.environ/FILE_SERVER_SMB_PASSWORD
+
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false

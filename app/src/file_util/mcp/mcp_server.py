@@ -2,7 +2,10 @@ import asyncio
 from dotenv import load_dotenv
 import argparse
 from fastmcp import FastMCP
+from ai_chat_util_base.config.runtime import init_runtime
 from file_util.core.app import (
+    list_file_server_roots,
+    list_file_server_entries,
     get_document_type,
     get_mime_type,
     get_sheet_names,
@@ -20,6 +23,7 @@ mcp = FastMCP("file_util") #type :ignore
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode and APP_DATA_PATH.")
+    parser.add_argument("--config", type=str, default="", help="Path to ai-chat-util-config.yml")
     # -m オプションを追加
     parser.add_argument("-m", "--mode", choices=["sse", "stdio", "http"], default="stdio", help="Mode to run the server in: 'sse' for Server-Sent Events, 'stdio' for standard input/output.")
     # -t tools オプションを追加 toolsはカンマ区切りの文字列. search_wikipedia_ja_mcp, vector_search, etc. 指定されていない場合は空文字を設定
@@ -36,6 +40,7 @@ async def main():
     load_dotenv()
     # 引数を解析
     args = parse_args()
+    init_runtime(args.config or None)
     mode = args.mode
 
     # tools オプションが指定されている場合は、ツールを登録
@@ -61,6 +66,8 @@ async def main():
         mcp.tool()(extract_base64_to_text)
         mcp.tool()(export_data_to_excel)
         mcp.tool()(import_data_from_excel)
+        mcp.tool()(list_file_server_roots)
+        mcp.tool()(list_file_server_entries)
 
     if mode == "stdio":
         await mcp.run_async()

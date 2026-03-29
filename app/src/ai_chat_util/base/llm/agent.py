@@ -620,8 +620,12 @@ class ToolLimits(BaseModel):
                         cached_results[call_cache_key] = cls.clone_cached_tool_result(result)
                     return result
                 except Exception as e:
-                    logger.exception("Tool invocation failed (sync): tool=%s", tool_name)
                     if followup_task_id and cls.is_task_not_found_exception(e):
+                        logger.info(
+                            "Marking follow-up task_id invalid after task-not-found (sync): tool=%s task_id=%s",
+                            tool_name,
+                            followup_task_id,
+                        )
                         invalid_task_ids.add(followup_task_id)
                         latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
                         return cls._guard_output(
@@ -635,6 +639,7 @@ class ToolLimits(BaseModel):
                                 "exception": type(e).__name__,
                             },
                         )
+                    logger.exception("Tool invocation failed (sync): tool=%s", tool_name)
                     return cls._guard_output(
                         ToolLimits.tool_error_text(tool_name, e),
                         response_format=response_format,
@@ -822,14 +827,12 @@ class ToolLimits(BaseModel):
                     )
                     continue
 
-                # Convert tool exceptions into normal tool output to avoid retry loops.
-                logger.exception(
-                    "Tool invocation failed: tool=%s attempt=%s/%s",
-                    tool_name,
-                    attempt,
-                    attempts,
-                )
                 if followup_task_id and cls.is_task_not_found_exception(e):
+                    logger.info(
+                        "Marking follow-up task_id invalid after task-not-found: tool=%s task_id=%s",
+                        tool_name,
+                        followup_task_id,
+                    )
                     invalid_task_ids.add(followup_task_id)
                     latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))
                     return cls._guard_output(
@@ -843,6 +846,13 @@ class ToolLimits(BaseModel):
                             "exception": type(e).__name__,
                         },
                     )
+                # Convert tool exceptions into normal tool output to avoid retry loops.
+                logger.exception(
+                    "Tool invocation failed: tool=%s attempt=%s/%s",
+                    tool_name,
+                    attempt,
+                    attempts,
+                )
                 return cls._guard_output(
                     ToolLimits.tool_error_text(tool_name, e),
                     response_format=response_format,

@@ -199,4 +199,56 @@ class FileUtilDocument(BaseModel):
     def is_unsupported(self) -> bool:
         """Check if the document type is unsupported based on its MIME type."""
         return not (self.is_text() or self.is_pdf() or self.is_office_document() or self.is_image())
+
+
+class FileServerProvider(StrEnum):
+    LOCAL = "local"
+    SMB = "smb"
+
+
+class FileServerEntryType(StrEnum):
+    FILE = "file"
+    DIRECTORY = "directory"
+
+
+class FileServerEntry(BaseModel):
+    name: str = Field(..., description="Entry name")
+    path: str = Field(..., description="Path relative to the configured root")
+    entry_type: FileServerEntryType = Field(..., description="Entry type")
+    size: int | None = Field(default=None, description="File size in bytes")
+    modified_at: str | None = Field(default=None, description="Last modified time in ISO-8601")
+    mime_type: str | None = Field(default=None, description="Detected MIME type when requested")
+    document_type: FileUtilDocumentType | None = Field(default=None, description="Detected document type when requested")
+    is_hidden: bool = Field(default=False, description="Whether the entry is hidden")
+    is_symlink: bool = Field(default=False, description="Whether the entry is a symbolic link")
+    children: list["FileServerEntry"] | None = Field(default=None, description="Nested entries when recursive listing is enabled")
+
+
+class FileServerListResponse(BaseModel):
+    provider: FileServerProvider = Field(..., description="Backend provider")
+    root_name: str = Field(..., description="Configured root name")
+    root_path: str = Field(..., description="Resolved root path or logical SMB root")
+    path: str = Field(..., description="Requested path relative to the root")
+    recursive: bool = Field(..., description="Whether nested directories were traversed")
+    max_depth: int = Field(..., description="Effective recursion depth")
+    total_entries: int = Field(..., description="Number of entries returned")
+    entries: list[FileServerEntry] = Field(default_factory=list, description="Listed entries")
+
+
+class FileServerRootInfo(BaseModel):
+    name: str = Field(..., description="Configured root name")
+    provider: FileServerProvider = Field(..., description="Backend provider")
+    path: str = Field(..., description="Configured root path or logical subpath")
+    description: str | None = Field(default=None, description="Optional description")
+    is_default: bool = Field(default=False, description="Whether this root is the default")
+
+
+class FileServerRootListResponse(BaseModel):
+    enabled: bool = Field(..., description="Whether file server feature is enabled")
+    default_provider: FileServerProvider = Field(..., description="Default provider")
+    default_root: str | None = Field(default=None, description="Default root name")
+    roots: list[FileServerRootInfo] = Field(default_factory=list, description="Configured roots")
+
+
+FileServerEntry.model_rebuild()
     

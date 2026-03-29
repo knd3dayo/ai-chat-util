@@ -467,6 +467,72 @@ def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
     assert state["followup_used"] == 1
 
 
+def test_invalid_followup_task_id_404_does_not_log_stack_trace_sync(caplog: pytest.LogCaptureFixture) -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 8,
+    }
+
+    def _status(task_id: str) -> str:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    status_tool = _FakeTool("status", response_format="content", func=_status)
+
+    MCPClientUtil._apply_tool_execution_guards(
+        [status_tool],
+        tool_call_state=state,
+        tool_call_limit_int=4,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    with caplog.at_level("INFO"):
+        out = status_tool.func("task-missing")
+
+    assert isinstance(out, str)
+    assert "invalid_followup_task_id" in out
+    assert "Marking follow-up task_id invalid after task-not-found (sync)" in caplog.text
+    assert "Tool invocation failed (sync)" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+def test_invalid_followup_task_id_404_does_not_log_stack_trace_async(caplog: pytest.LogCaptureFixture) -> None:
+    async def _run() -> None:
+        state: dict[str, Any] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": 8,
+        }
+
+        async def _status(task_id: str) -> str:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        status_tool = _FakeTool("status", response_format="content", coroutine=_status)
+
+        MCPClientUtil._apply_tool_execution_guards(
+            [status_tool],
+            tool_call_state=state,
+            tool_call_limit_int=4,
+            tool_timeout_seconds_f=0.0,
+            tool_timeout_retries_int=1,
+        )
+
+        with caplog.at_level("INFO"):
+            out = await status_tool.coroutine("task-missing")
+
+        assert isinstance(out, str)
+        assert "invalid_followup_task_id" in out
+
+    asyncio.run(_run())
+
+    assert "Marking follow-up task_id invalid after task-not-found: tool=status task_id=task-missing" in caplog.text
+    assert "Tool invocation failed: tool=status" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
 def test_followup_with_stale_task_id_is_blocked_before_invocation() -> None:
     state: dict[str, Any] = {
         "used": 0,
@@ -1189,6 +1255,85 @@ def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) 
     assert paths == [target.resolve().as_posix()]
 
 
+def test_extract_requested_heading_count_detects_user_constraint() -> None:
+    assert MCPClientUtil.extract_requested_heading_count(
+        [
+            {
+                "role": "user",
+                "content": "文書内で重要な見出しを 3 点挙げてください。",
+            }
+        ]
+    ) == 3
+
+
+def test_select_headings_for_response_prefers_numbered_heading_block() -> None:
+    evidence = {
+        "headings": [
+            "# コーディングエージェントのMCPサーバー化検証",
+            "## 検証目的",
+            "### 1. MCP サーバーとしての正常起動",
+            "### 2. スーパーバイザーからの接続成立",
+            "### 3. 委譲と統合の正常系",
+            "## 役割分担の考え方",
+        ],
+        "requested_heading_count": 3,
+    }
+
+    assert MCPClientUtil.select_headings_for_response(evidence) == [
+        "### 1. MCP サーバーとしての正常起動",
+        "### 2. スーパーバイザーからの接続成立",
+        "### 3. 委譲と統合の正常系",
+    ]
+
+
+def test_build_evidence_reflected_final_text_respects_requested_heading_count() -> None:
+    fallback = MCPClientUtil.build_evidence_reflected_final_text(
+        {
+            "config_path": "/tmp/ai-chat-util-config.yml",
+            "headings": [
+                "# コーディングエージェントのMCPサーバー化検証",
+                "## 検証目的",
+                "### 1. MCP サーバーとしての正常起動",
+                "### 2. スーパーバイザーからの接続成立",
+                "### 3. 委譲と統合の正常系",
+                "## 役割分担の考え方",
+            ],
+            "requested_heading_count": 3,
+        }
+    )
+
+    assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
+    assert "### 1. MCP サーバーとしての正常起動" in fallback
+    assert "### 2. スーパーバイザーからの接続成立" in fallback
+    assert "### 3. 委譲と統合の正常系" in fallback
+    assert "# コーディングエージェントのMCPサーバー化検証" not in fallback
+    assert "## 役割分担の考え方" not in fallback
+
+
+def test_final_text_missing_concrete_evidence_uses_requested_heading_subset() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "headings": [
+            "# コーディングエージェントのMCPサーバー化検証",
+            "## 検証目的",
+            "### 1. MCP サーバーとしての正常起動",
+            "### 2. スーパーバイザーからの接続成立",
+            "### 3. 委譲と統合の正常系",
+            "## 役割分担の考え方",
+        ],
+        "requested_heading_count": 3,
+    }
+
+    assert not MCPClientUtil.final_text_missing_concrete_evidence(
+        "設定ファイルの場所: /tmp/ai-chat-util-config.yml\n"
+        "文書内の重要な見出し:\n"
+        "### 1. MCP サーバーとしての正常起動\n"
+        "### 2. スーパーバイザーからの接続成立\n"
+        "### 3. 委譲と統合の正常系",
+        evidence,
+    )
+
+
 def test_should_include_general_agent_forced_coding_route_with_explicit_file_is_false() -> None:
     assert not MCPClientUtil.should_include_general_agent(
         force_coding_agent_route=True,
@@ -1230,6 +1375,37 @@ def test_get_loaded_runtime_config_path_returns_none_for_missing_config(
     )
 
     assert MCPClientUtil.get_loaded_runtime_config_path() is None
+
+
+def test_choose_better_config_path_prefers_concrete_file_over_glob(tmp_path) -> None:
+    config_file = tmp_path / "ai-chat-util-config.poc.yml"
+    config_file.write_text("llm: {}\n", encoding="utf-8")
+
+    assert MCPClientUtil._choose_better_config_path(
+        f"{tmp_path.as_posix()}/*.yml",
+        config_file.as_posix(),
+    ) == config_file.as_posix()
+
+
+def test_extract_config_path_from_text_ignores_glob_path() -> None:
+    assert MCPClientUtil.extract_config_path_from_text(
+        "設定ファイルの場所: /tmp/example/*.yml"
+    ) is None
+
+
+def test_extract_successful_tool_evidence_prefers_concrete_path_over_glob() -> None:
+    evidence = MCPClientUtil.extract_successful_tool_evidence(
+        [
+            {
+                "messages": [
+                    {"role": "tool", "content": '{"path": "/tmp/example/*.yml"}'},
+                    {"role": "tool", "content": '{"path": "/tmp/example/ai-chat-util-config.poc.yml"}'},
+                ]
+            }
+        ]
+    )
+
+    assert evidence["config_path"] == "/tmp/example/ai-chat-util-config.poc.yml"
 
 
 def test_extract_markdown_heading_lines_from_files_reads_exact_heading_lines(tmp_path) -> None:

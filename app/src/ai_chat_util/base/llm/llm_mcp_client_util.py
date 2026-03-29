@@ -142,6 +142,51 @@ class MCPClientUtil:
         return True
 
     @classmethod
+    def extract_requested_heading_count(cls, messages: Sequence[Any]) -> int | None:
+        patterns = (
+            r"見出し(?:を|は)?\s*(\d+)\s*点",
+            r"重要な見出し(?:を|は)?\s*(\d+)\s*点",
+            r"(\d+)\s*点(?:の見出し|挙げて)",
+            r"(\d+)\s*つ(?:の見出し)?",
+            r"(\d+)\s*個(?:の見出し)?",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if not match:
+                    continue
+                try:
+                    count = int(match.group(1))
+                except (TypeError, ValueError):
+                    continue
+                if count > 0:
+                    return count
+
+        return None
+
+    @classmethod
     async def collect_checkpoint_results(
         cls,
         *,
@@ -299,6 +344,39 @@ class MCPClientUtil:
         text = text.strip()
         return text or None
 
+    @staticmethod
+    def _looks_like_glob_path(path_value: str) -> bool:
+        normalized = (path_value or "").strip()
+        if not normalized:
+            return False
+        return any(token in normalized for token in ("*", "?", "[", "]", "{" , "}"))
+
+    @classmethod
+    def _choose_better_config_path(cls, current_path: str | None, candidate_path: str | None) -> str | None:
+        def _score(path_value: str | None) -> tuple[int, int]:
+            if not isinstance(path_value, str):
+                return (0, 0)
+            normalized = path_value.strip()
+            if not normalized:
+                return (0, 0)
+            if cls._looks_like_glob_path(normalized):
+                return (1, len(normalized))
+            try:
+                resolved = Path(normalized).expanduser().resolve()
+            except Exception:
+                return (2, len(normalized))
+            if resolved.is_file():
+                return (4, len(normalized))
+            return (3, len(normalized))
+
+        candidate = candidate_path.strip() if isinstance(candidate_path, str) else ""
+        current = current_path.strip() if isinstance(current_path, str) else ""
+        if not candidate:
+            return current or None
+        if not current:
+            return candidate
+        return candidate if _score(candidate) > _score(current) else current
+
     @classmethod
     def _extract_stdout_from_artifact_paths(cls, candidate: Mapping[str, Any]) -> str | None:
         metadata = candidate.get("metadata")
@@ -369,10 +447,9 @@ class MCPClientUtil:
                     mapping_candidates.append(parsed_from_text)
 
                 for candidate in mapping_candidates:
-                    if not config_path:
-                        path_value = candidate.get("path")
-                        if isinstance(path_value, str) and path_value.strip():
-                            config_path = path_value.strip()
+                    path_value = candidate.get("path")
+                    if isinstance(path_value, str) and path_value.strip():
+                        config_path = cls._choose_better_config_path(config_path, path_value)
 
                     stdout_value = candidate.get("stdout")
                     if isinstance(stdout_value, str) and stdout_value.strip() and not stdout_value.lstrip().startswith("ERROR:"):
@@ -490,7 +567,7 @@ class MCPClientUtil:
             if not config_path:
                 stdout_path = _extract_path_candidate(stdout_text)
                 if stdout_path:
-                    config_path = stdout_path
+                    config_path = cls._choose_better_config_path(config_path, stdout_path)
 
             candidates = _extract_heading_candidates(stdout_text)
             exact_values = _dedupe(candidates["exact"])
@@ -523,10 +600,9 @@ class MCPClientUtil:
             raw_fallback_blocks: list[list[str]] = []
 
             for raw_text in raw_texts:
-                if not config_path:
-                    raw_path = _extract_path_candidate(raw_text)
-                    if raw_path:
-                        config_path = raw_path
+                raw_path = _extract_path_candidate(raw_text)
+                if raw_path:
+                    config_path = cls._choose_better_config_path(config_path, raw_path)
 
                 candidates = _extract_heading_candidates(raw_text)
                 exact_values = _dedupe(candidates["exact"])
@@ -592,8 +668,7 @@ class MCPClientUtil:
         if not has_evidence:
             return False
 
-        headings = evidence.get("headings")
-        exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()] if isinstance(headings, Sequence) else []
+        exact_headings = cls.select_headings_for_response(evidence)
         if exact_headings:
             final_heading_candidates: list[str] = []
             for raw_line in (user_text or "").splitlines():
@@ -642,15 +717,78 @@ class MCPClientUtil:
         if isinstance(config_path, str) and config_path.strip() and config_path.strip() not in text:
             return True
 
-        headings = evidence.get("headings")
-        if isinstance(headings, Sequence):
-            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
-            if exact_headings:
-                matched = sum(1 for heading in exact_headings[:3] if heading in text)
-                if matched < min(3, len(exact_headings)):
-                    return True
+        exact_headings = cls.select_headings_for_response(evidence)
+        if exact_headings:
+            matched = sum(1 for heading in exact_headings if heading in text)
+            if matched < len(exact_headings):
+                return True
 
         return False
+
+    @staticmethod
+    def _heading_level(heading: str) -> int | None:
+        match = re.match(r"^(#{1,6})\s+.+$", heading or "")
+        if not match:
+            return None
+        return len(match.group(1))
+
+    @staticmethod
+    def _is_numbered_heading(heading: str) -> bool:
+        match = re.match(r"^#{1,6}\s+(.+)$", heading or "")
+        if not match:
+            return False
+        return bool(re.match(r"^\d+[\.．\)]\s*.+$", match.group(1).strip()))
+
+    @classmethod
+    def _select_numbered_heading_block(cls, headings: Sequence[str], requested_count: int) -> list[str]:
+        for start_index, heading in enumerate(headings):
+            if not cls._is_numbered_heading(heading):
+                continue
+            level = cls._heading_level(heading)
+            if level is None:
+                continue
+
+            block = [heading]
+            for candidate in headings[start_index + 1 :]:
+                candidate_level = cls._heading_level(candidate)
+                if candidate_level is None:
+                    continue
+                if candidate_level < level:
+                    break
+                if candidate_level == level and cls._is_numbered_heading(candidate):
+                    block.append(candidate)
+                    if len(block) >= requested_count:
+                        return block[:requested_count]
+                    continue
+                if candidate_level == level:
+                    break
+
+            if len(block) >= requested_count:
+                return block[:requested_count]
+
+        return []
+
+    @classmethod
+    def select_headings_for_response(cls, evidence: Mapping[str, Any]) -> list[str]:
+        headings = evidence.get("headings")
+        exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()] if isinstance(headings, Sequence) else []
+        if not exact_headings:
+            return []
+
+        requested_count_raw = evidence.get("requested_heading_count")
+        try:
+            requested_count = int(requested_count_raw) if requested_count_raw is not None else 0
+        except (TypeError, ValueError):
+            requested_count = 0
+
+        if requested_count <= 0 or requested_count >= len(exact_headings):
+            return exact_headings
+
+        numbered_block = cls._select_numbered_heading_block(exact_headings, requested_count)
+        if numbered_block:
+            return numbered_block
+
+        return exact_headings[:requested_count]
 
     @classmethod
     def build_evidence_reflected_final_text(cls, evidence: Mapping[str, Any]) -> str:
@@ -660,18 +798,16 @@ class MCPClientUtil:
         if isinstance(config_path, str) and config_path.strip():
             lines.append(f"設定ファイルの場所: {config_path.strip()}")
 
-        headings = evidence.get("headings")
-        if isinstance(headings, Sequence):
-            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
-            if exact_headings:
-                lines.append("文書内の重要な見出し:")
-                for heading in exact_headings:
-                    lines.append(heading)
+        exact_headings = cls.select_headings_for_response(evidence)
+        if exact_headings:
+            lines.append("文書内の重要な見出し:")
+            for heading in exact_headings:
+                lines.append(heading)
 
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):
             stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
-            if stdout_values and not headings:
+            if stdout_values and not exact_headings:
                 lines.append("取得済みの coding-agent 実行結果:")
                 lines.append("[stdout]")
                 lines.append(stdout_values[-1])
@@ -687,7 +823,10 @@ class MCPClientUtil:
         match = re.search(r"((?:[A-Za-z]:[\\/]|/)[^\s'\"`]+\.ya?ml)", value)
         if not match:
             return None
-        return match.group(1).strip()
+        candidate = match.group(1).strip()
+        if cls._looks_like_glob_path(candidate):
+            return None
+        return candidate
 
     @classmethod
     def get_loaded_runtime_config_path(cls) -> str | None:
@@ -764,10 +903,9 @@ class MCPClientUtil:
             if normalized_path not in base_text:
                 lines.append(f"設定ファイルの場所: {normalized_path}")
 
-        headings = evidence.get("headings")
-        if isinstance(headings, Sequence):
-            exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()]
-            missing_headings = [heading for heading in exact_headings[:3] if heading not in base_text]
+        exact_headings = cls.select_headings_for_response(evidence)
+        if exact_headings:
+            missing_headings = [heading for heading in exact_headings if heading not in base_text]
             if missing_headings:
                 if "文書内の重要な見出し:" not in base_text:
                     lines.append("文書内の重要な見出し:")
@@ -776,7 +914,7 @@ class MCPClientUtil:
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):
             stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
-            if stdout_values and not headings and "[stdout]" not in base_text:
+            if stdout_values and not exact_headings and "[stdout]" not in base_text:
                 lines.append("取得済みの coding-agent 実行結果:")
                 lines.append("[stdout]")
                 lines.append(stdout_values[-1])

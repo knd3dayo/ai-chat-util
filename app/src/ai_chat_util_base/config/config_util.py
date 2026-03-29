@@ -264,12 +264,14 @@ def apply_secret_overrides_from_yaml(
 
     llm = raw.get("llm")
     mcp = raw.get("mcp")
+    file_server = raw.get("file_server")
 
     copied_llm = dict(llm) if isinstance(llm, dict) else None
     copied_mcp = dict(mcp) if isinstance(mcp, dict) else None
+    copied_file_server = dict(file_server) if isinstance(file_server, dict) else None
     changed = False
 
-    if copied_llm is None and copied_mcp is None:
+    if copied_llm is None and copied_mcp is None and copied_file_server is None:
         return raw
 
     if copied_llm is not None and "api_key" in copied_llm:
@@ -338,6 +340,37 @@ def apply_secret_overrides_from_yaml(
             copied_mcp["extra_headers"] = resolved_headers
             changed = True
 
+    if copied_file_server is not None and "smb" in copied_file_server:
+        smb_value = copied_file_server.get("smb")
+        if smb_value is not None:
+            if not isinstance(smb_value, dict):
+                raise ConfigError(
+                    f"file_server.smb は mapping(dict) である必要があります: {config_path} ({field_prefix}file_server.smb)"
+                )
+            copied_smb = dict(smb_value)
+            smb_changed = False
+            if bool(copied_smb.get("enabled", False)):
+                for secret_key in ("username", "password"):
+                    if secret_key not in copied_smb:
+                        continue
+                    secret_value = copied_smb.get(secret_key)
+                    if secret_value is None:
+                        continue
+                    if not isinstance(secret_value, str):
+                        raise ConfigError(
+                            f"file_server.smb.{secret_key} は文字列である必要があります: {config_path} ({field_prefix}file_server.smb.{secret_key})"
+                        )
+                    copied_smb[secret_key] = resolve_env_ref(
+                        secret_value,
+                        config_path=config_path,
+                        field_path=f"{field_prefix}file_server.smb.{secret_key}",
+                    )
+                    smb_changed = True
+
+            if smb_changed:
+                copied_file_server["smb"] = copied_smb
+                changed = True
+
     if not changed:
         return raw
 
@@ -346,6 +379,8 @@ def apply_secret_overrides_from_yaml(
         copied["llm"] = copied_llm
     if copied_mcp is not None:
         copied["mcp"] = copied_mcp
+    if copied_file_server is not None:
+        copied["file_server"] = copied_file_server
     return copied
 
 def resolve_env_ref(value: str, *, config_path: Path, field_path: str) -> str:

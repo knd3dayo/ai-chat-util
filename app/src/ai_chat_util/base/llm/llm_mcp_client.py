@@ -123,6 +123,7 @@ class MCPClient(AbstractLLMClient):
 
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
             explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
+            requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
             app = await MCPClientUtil.create_workflow(
                 self.runtime_config,
                 prompts=prompts,
@@ -281,6 +282,9 @@ class MCPClient(AbstractLLMClient):
                 checkpoint_db_path=checkpoint_db_path,
             )
             evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
+            if requested_heading_count is not None:
+                evidence = dict(evidence)
+                evidence["requested_heading_count"] = requested_heading_count
             contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
             missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
             if not contradicts_evidence and missing_concrete_evidence:
@@ -386,11 +390,23 @@ class MCPClient(AbstractLLMClient):
             if runtime_config_path:
                 postclose_evidence = dict(postclose_evidence)
                 postclose_evidence["config_path"] = runtime_config_path
+        else:
+            runtime_config_path = MCPClientUtil.get_loaded_runtime_config_path()
+            better_config_path = MCPClientUtil._choose_better_config_path(
+                cast(str | None, postclose_evidence.get("config_path")),
+                runtime_config_path,
+            )
+            if better_config_path and better_config_path != postclose_evidence.get("config_path"):
+                postclose_evidence = dict(postclose_evidence)
+                postclose_evidence["config_path"] = better_config_path
 
         exact_file_headings = MCPClientUtil.extract_markdown_heading_lines_from_files(explicit_user_file_paths)
         if len(exact_file_headings) >= 3:
             postclose_evidence = dict(postclose_evidence)
             postclose_evidence["headings"] = exact_file_headings
+        if requested_heading_count is not None:
+            postclose_evidence = dict(postclose_evidence)
+            postclose_evidence["requested_heading_count"] = requested_heading_count
 
         contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
         missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)

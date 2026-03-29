@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 from .ai_chat_util_mcp_config import MCPServerConfigEntry, MCPServerConfig
@@ -194,6 +194,14 @@ def _configure_python_logging(config: AiChatUtilConfig | CodingAgentUtilConfig) 
         "httpcore": logging.WARNING,
         "aiohttp": logging.WARNING,
         "urllib3": logging.WARNING,
+        # pysmb can log authentication details such as username at INFO
+        "SMB": logging.WARNING,
+        "SMB.SMB": logging.WARNING,
+        "SMB.SMBConnection": logging.WARNING,
+        "SMB.SMBProtocol": logging.WARNING,
+        "SMB.SMBFactory": logging.WARNING,
+        "SMB.SMBMessage": logging.WARNING,
+        "SMB.SMB2Message": logging.WARNING,
         # event loop chatter
         "asyncio": logging.WARNING,
         # sse_starlette.sse
@@ -525,6 +533,83 @@ class MCPSection(BaseModel):
 
         return self
 
+
+class FileServerSMBSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False)
+    server: str | None = Field(default=None)
+    share: str | None = Field(default=None)
+    port: int = Field(default=445)
+    domain: str | None = Field(default=None)
+    username: str | None = Field(default=None)
+    password: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_port(self) -> "FileServerSMBSection":
+        if self.port <= 0:
+            raise ValueError("file_server.smb.port は 1 以上である必要があります")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_credentials(self) -> "FileServerSMBSection":
+        if self.enabled and self.username and not self.password:
+            raise ValueError("file_server.smb.password を設定してください")
+        if self.enabled and self.password and not self.username:
+            raise ValueError("file_server.smb.username を設定してください")
+        return self
+
+
+class FileServerAllowedRoot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    provider: Literal["local", "smb"] = Field(default="local")
+    path: str = Field(default=".")
+    description: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_name(self) -> "FileServerAllowedRoot":
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("file_server.allowed_roots[].name は空文字にできません")
+        return self
+
+
+class FileServerSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False)
+    default_provider: Literal["local", "smb"] = Field(default="local")
+    default_root: str | None = Field(default=None)
+    allowed_roots: list[FileServerAllowedRoot] = Field(default_factory=list)
+    max_depth: int = Field(default=3)
+    max_entries: int = Field(default=1000)
+    include_hidden_default: bool = Field(default=False)
+    follow_symlinks: bool = Field(default=False)
+    include_mime_default: bool = Field(default=False)
+    smb: FileServerSMBSection = Field(default_factory=FileServerSMBSection)
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> "FileServerSection":
+        if self.max_depth < 0:
+            raise ValueError("file_server.max_depth は 0 以上である必要があります")
+        if self.max_entries <= 0:
+            raise ValueError("file_server.max_entries は 1 以上である必要があります")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_roots(self) -> "FileServerSection":
+        names: set[str] = set()
+        for root in self.allowed_roots:
+            if root.name in names:
+                raise ValueError(f"file_server.allowed_roots の name が重複しています: {root.name}")
+            names.add(root.name)
+
+        if self.default_root and self.default_root not in names:
+            raise ValueError("file_server.default_root は allowed_roots の name と一致する必要があります")
+        return self
+
 class FeaturesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -755,6 +840,7 @@ class AiChatUtilConfig(BaseModel):
 
     llm: LLMSection = Field(default_factory=LLMSection)
     mcp: MCPSection = Field(default_factory=MCPSection)
+    file_server: FileServerSection = Field(default_factory=FileServerSection)
     features: FeaturesSection = Field(default_factory=FeaturesSection)
     logging: LoggingSection = Field(default_factory=LoggingSection)
     network: NetworkSection = Field(default_factory=NetworkSection)

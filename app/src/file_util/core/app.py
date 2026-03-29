@@ -1,8 +1,20 @@
-from typing import Annotated, Optional, Literal
+from pathlib import Path
+from typing import Annotated, Optional
+
 from pydantic import Field
+
+from ai_chat_util_base.config.runtime import get_runtime_config, get_runtime_config_path
 from file_util.util.file_util import FileUtil
-from file_util.model import FileUtilDocumentType, FileUtilDocument
+from file_util.model import (
+    FileServerListResponse,
+    FileServerProvider,
+    FileServerRootInfo,
+    FileServerRootListResponse,
+    FileUtilDocument,
+    FileUtilDocumentType,
+)
 from file_util.util.excel_util import ExcelUtil
+from file_util.util.file_server_util import FileServerUtil
 from file_util.util.zip_util import ZipUtil
 
 
@@ -122,3 +134,119 @@ async def import_data_from_excel(
     """
     data = ExcelUtil.import_data_from_excel(input_file, sheet_name)
     return data
+
+
+def _resolve_file_server_root_path(root_path: str) -> Path:
+    candidate = Path(root_path).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    config_dir = get_runtime_config_path().parent
+    resolved_from_config_dir = (config_dir / candidate).resolve()
+    if resolved_from_config_dir.exists():
+        return resolved_from_config_dir
+
+    resolved_from_cwd = (Path.cwd() / candidate).resolve()
+    if resolved_from_cwd.exists():
+        return resolved_from_cwd
+
+    return resolved_from_config_dir
+
+
+def _select_file_server_root(*, provider: FileServerProvider | None, root_name: str | None):
+    runtime_config = get_runtime_config()
+    file_server = runtime_config.file_server
+
+    if not file_server.enabled:
+        raise ValueError("file_server.enabled が false のため、この機能は利用できません")
+    if not file_server.allowed_roots:
+        raise ValueError("file_server.allowed_roots が未設定です")
+
+    selected_root = None
+    if root_name:
+        for allowed_root in file_server.allowed_roots:
+            if allowed_root.name == root_name:
+                selected_root = allowed_root
+                break
+        if selected_root is None:
+            raise ValueError(f"指定された root_name が見つかりません: {root_name}")
+    elif provider is not None:
+        for allowed_root in file_server.allowed_roots:
+            if allowed_root.provider == provider.value:
+                selected_root = allowed_root
+                break
+    elif file_server.default_root:
+        for allowed_root in file_server.allowed_roots:
+            if allowed_root.name == file_server.default_root:
+                selected_root = allowed_root
+                break
+    else:
+        selected_root = file_server.allowed_roots[0]
+
+    if selected_root is None:
+        provider_name = provider.value if provider is not None else file_server.default_provider
+        raise ValueError(f"利用可能な {provider_name} ルートが設定されていません")
+    if provider is not None and selected_root.provider != provider.value:
+        raise ValueError("provider と root_name の組み合わせが一致しません")
+    return selected_root, file_server
+
+
+async def list_file_server_entries(
+    provider: Annotated[Optional[FileServerProvider], Field(description="Storage provider to use. Omit to use default_root")] = None,
+    root_name: Annotated[Optional[str], Field(description="Configured root name to browse")] = None,
+    path: Annotated[str, Field(description="Path relative to the configured root")] = ".",
+    recursive: Annotated[bool, Field(description="Whether to return child directories recursively")] = False,
+    max_depth: Annotated[Optional[int], Field(description="Maximum child depth when recursive is true")] = None,
+    include_hidden: Annotated[Optional[bool], Field(description="Whether to include dotfiles and hidden entries")] = None,
+    include_mime: Annotated[Optional[bool], Field(description="Whether to detect MIME type for files")] = None,
+) -> FileServerListResponse:
+    selected_root, file_server = _select_file_server_root(provider=provider, root_name=root_name)
+
+    effective_max_depth = file_server.max_depth if max_depth is None else max_depth
+    if effective_max_depth < 0:
+        raise ValueError("max_depth は 0 以上である必要があります")
+    effective_include_hidden = file_server.include_hidden_default if include_hidden is None else include_hidden
+    effective_include_mime = file_server.include_mime_default if include_mime is None else include_mime
+
+    if selected_root.provider == FileServerProvider.LOCAL.value:
+        return FileServerUtil.list_local_entries(
+            root=selected_root,
+            root_path=_resolve_file_server_root_path(selected_root.path),
+            relative_path=path,
+            recursive=recursive,
+            max_depth=effective_max_depth,
+            max_entries=file_server.max_entries,
+            include_hidden=effective_include_hidden,
+            include_mime=effective_include_mime,
+            follow_symlinks=file_server.follow_symlinks,
+        )
+
+    return FileServerUtil.list_smb_entries(
+        root=selected_root,
+        smb=file_server.smb,
+        relative_path=path,
+        recursive=recursive,
+        max_depth=effective_max_depth,
+        max_entries=file_server.max_entries,
+        include_hidden=effective_include_hidden,
+    )
+
+
+async def list_file_server_roots() -> FileServerRootListResponse:
+    runtime_config = get_runtime_config()
+    file_server = runtime_config.file_server
+    return FileServerRootListResponse(
+        enabled=file_server.enabled,
+        default_provider=FileServerProvider(file_server.default_provider),
+        default_root=file_server.default_root,
+        roots=[
+            FileServerRootInfo(
+                name=root.name,
+                provider=FileServerProvider(root.provider),
+                path=root.path,
+                description=root.description,
+                is_default=root.name == file_server.default_root,
+            )
+            for root in file_server.allowed_roots
+        ],
+    )

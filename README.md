@@ -490,14 +490,28 @@ uv --directory ./app run -m ai_chat_util.cli \
   chat --use_mcp -p "$PROMPT" > ./work/structured-route-general.out
 ```
 
+判断系で「見出し抽出は不要」を明示する検証例:
+
+```bash
+PROMPT='現在の設定ファイルと /path/to/doc.md を踏まえて、この情報だけで本番投入判断に足りるか評価してください。足りない場合は、不足情報と追加確認事項を列挙してください。見出し抽出は不要です。'
+
+uv --directory ./app run -m ai_chat_util.cli \
+  --config ./work/ai-chat-util-config.structured-routing-test.yml \
+  --loglevel INFO \
+  --logfile ./work/structured-route-judgment.log \
+  chat --use_mcp -p "$PROMPT" > ./work/structured-route-judgment.out
+```
+
 期待される観測ポイント:
 
 - `structured-route-explicit.out` には設定ファイルの場所と見出し 3 点が含まれる
 - `structured-route-general.out` には設定ファイルの場所と LLM 設定要約が含まれる
+- `structured-route-judgment.out` には見出し列挙ではなく、「足りている情報」「不足している情報」「追加確認項目」のような判断結果が含まれる
 - `structured-routing-audit.jsonl` には少なくとも次の event が trace_id 単位で並ぶ
 
   - `request_received`
   - `route_decided`
+  - `tool_catalog_resolved`
   - `preflight_applied`（順序指定つき explicit coding-agent ケースのみ）
   - `tool_selected`
   - `tool_result_received`
@@ -505,8 +519,12 @@ uv --directory ./app run -m ai_chat_util.cli \
   - `final_answer_validated`
 
 - `routing_mode: structured` かつ deterministic rule で確定しないケースでは、追加で `route_decision_model_output` が出る
+- `tool_catalog_resolved` には、その run で supervisor が前提にした tool agent 名と tool 名一覧が安定して記録される
+- 判断系プロンプトで「見出し抽出は不要」を明示した場合は、`route_decided=general_tool_agent` を維持したまま最終回答が評価文になり、`final_answer_validated.payload.evidence_summary.successful_tools` に `heading_extraction` が入らないのが期待動作です
 
 explicit coding-agent のケースでは、`route_decided.reason_code=route.explicit_coding_agent_request` が残りつつ、順序指定がある場合は `tool_agent_general` の `get_loaded_config_info` が先に 1 回だけ実行され、`preflight_applied` に確定した config path が記録されます。その後に `tool_agent_coding` の `execute/status/get_result` が続くのが期待動作です。
+
+判断系のケースでは、`tool_catalog_resolved` で supervisor が見ていた利用可能ツール一覧を確認したうえで、`tool_selected(get_loaded_config_info)` と `tool_selected(analyze_files)` が 1 回ずつ成功し、最終回答がその証拠を踏まえた評価文に収束するのが基準です。`見出し抽出は不要` を含むにもかかわらず見出し列挙へフォールバックした場合は、intent 判定または evidence fallback の回帰を疑ってください。
 
 監査ログ上の stable error code:
 
@@ -528,6 +546,7 @@ explicit coding-agent のケースでは、`route_decided.reason_code=route.expl
 - 入力プロンプト
 - 利用可能ツール一覧
 - `route_decided` と `route_decision_model_output` の payload
+- `tool_catalog_resolved` の payload
 - 実際に実行された `tool_selected` / `tool_result_received`
 - `sufficiency_judged` と `final_answer_validated`
 - 最終回答 (`*.out`)

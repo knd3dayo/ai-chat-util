@@ -134,6 +134,8 @@ class MCPClient(AbstractLLMClient):
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
             explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
             requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
+            expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
+            expects_evaluation_response = MCPClientUtil.requests_evaluation_response(lc_messages)
             workflow_messages = list(lc_messages)
             config_preflight_payload: dict[str, Any] | None = None
             routing_decision = await MCPClientUtil.decide_route(
@@ -218,6 +220,8 @@ class MCPClient(AbstractLLMClient):
                 explicit_user_file_paths=explicit_user_file_paths,
                 routing_decision=routing_decision,
                 audit_context=audit_context,
+                expects_heading_response=expects_heading_response,
+                expects_evaluation_response=expects_evaluation_response,
             )
 
             # 実行
@@ -371,9 +375,10 @@ class MCPClient(AbstractLLMClient):
             )
             evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
             evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
+            evidence = dict(evidence)
+            evidence["expects_heading_response"] = expects_heading_response
             evidence_summary = MCPClientUtil.build_evidence_summary(evidence)
             if requested_heading_count is not None:
-                evidence = dict(evidence)
                 evidence["requested_heading_count"] = requested_heading_count
             followup_task_error_detected = (
                 MCPClientUtil.contains_followup_task_error_signal(output_text)
@@ -528,12 +533,14 @@ class MCPClient(AbstractLLMClient):
                 postclose_evidence["config_path"] = better_config_path
 
         exact_file_headings = MCPClientUtil.extract_markdown_heading_lines_from_files(explicit_user_file_paths)
-        if len(exact_file_headings) >= 3:
+        if expects_heading_response and len(exact_file_headings) >= 3:
             postclose_evidence = dict(postclose_evidence)
             postclose_evidence["headings"] = exact_file_headings
         if requested_heading_count is not None:
             postclose_evidence = dict(postclose_evidence)
             postclose_evidence["requested_heading_count"] = requested_heading_count
+        postclose_evidence = dict(postclose_evidence)
+        postclose_evidence["expects_heading_response"] = expects_heading_response
 
         contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
         missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
@@ -550,7 +557,7 @@ class MCPClient(AbstractLLMClient):
             fallback_text = MCPClientUtil.build_evidence_reflected_final_text(postclose_evidence)
             if fallback_text:
                 logger.info(
-                    "Using deterministic evidence response for heading extraction output: trace_id=%s",
+                    "Using deterministic evidence response from post-close evidence: trace_id=%s",
                     run_trace_id,
                 )
                 response_message.content[0].params["text"] = fallback_text

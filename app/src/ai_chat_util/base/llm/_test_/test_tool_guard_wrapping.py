@@ -1119,6 +1119,7 @@ def test_final_text_contradicts_evidence_for_failure_preface_with_real_headings(
 def test_final_text_contradicts_evidence_when_leading_heading_differs_from_evidence() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "stdout_blocks": ["HEADING_LINE_EXACT: # コーディングエージェントのMCPサーバー化検証"],
         "headings": [
             "# コーディングエージェントのMCPサーバー化検証",
@@ -1135,6 +1136,7 @@ def test_final_text_contradicts_evidence_when_leading_heading_differs_from_evide
 def test_should_prefer_deterministic_evidence_response_for_complete_heading_set() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "headings": [
             "# コーディングエージェントのMCPサーバー化検証",
             "## 検証目的",
@@ -1151,6 +1153,7 @@ def test_should_prefer_deterministic_evidence_response_for_complete_heading_set(
 def test_evidence_reflection_overrides_negative_final_text() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
@@ -1171,6 +1174,7 @@ def test_evidence_reflection_overrides_negative_final_text() -> None:
 def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
@@ -1184,6 +1188,7 @@ def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings(
 def test_augment_final_text_with_evidence_preserves_text_and_adds_exact_values() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
@@ -1204,9 +1209,25 @@ def test_augment_final_text_with_evidence_preserves_text_and_adds_exact_values()
 def test_augment_final_text_with_evidence_does_not_duplicate_existing_values() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
+
+
+def test_build_evidence_reflected_final_text_for_judgment_prompt_does_not_dump_headings() -> None:
+    evidence = {
+        "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": False,
+        "stdout_blocks": ["判断に必要な追加確認事項: 監視設計、ロールバック手順、運用体制"],
+        "headings": ["# Overview", "## Setup", "## Troubleshooting"],
+    }
+
+    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+
+    assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
+    assert "判断に必要な追加確認事項" in fallback
+    assert "# Overview" not in fallback
 
     original = (
         "設定ファイルの場所: /tmp/ai-chat-util-config.yml\n"
@@ -1216,7 +1237,9 @@ def test_augment_final_text_with_evidence_does_not_duplicate_existing_values() -
         "## Troubleshooting"
     )
 
-    assert MCPClientUtil.augment_final_text_with_evidence(original, evidence) == original
+    augmented = MCPClientUtil.augment_final_text_with_evidence(original, evidence)
+    assert "判断に必要な追加確認事項" in augmented
+    assert augmented.count("# Overview") == 1
 
 
 def test_tool_agent_prompt_requires_verbatim_heading_output() -> None:
@@ -1370,6 +1393,17 @@ def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:
     )
 
 
+def test_explicitly_requests_coding_agent_ignores_path_only_match() -> None:
+    assert not MCPClientUtil.explicitly_requests_coding_agent(
+        [
+            {
+                "role": "user",
+                "content": "この設定と /home/user/docs/02_コーディングエージェントのMCPサーバー化検証.md を踏まえて評価してください。",
+            }
+        ]
+    )
+
+
 def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) -> None:
     target = tmp_path / "doc.md"
     target.write_text("# Title\n", encoding="utf-8")
@@ -1390,6 +1424,39 @@ def test_extract_requested_heading_count_detects_user_constraint() -> None:
             }
         ]
     ) == 3
+
+
+def test_requests_heading_response_detects_heading_intent() -> None:
+    assert MCPClientUtil.requests_heading_response(
+        [
+            {
+                "role": "user",
+                "content": "文書内の見出しを抽出してください。",
+            }
+        ]
+    )
+
+
+def test_requests_heading_response_ignores_judgment_prompt() -> None:
+    assert not MCPClientUtil.requests_heading_response(
+        [
+            {
+                "role": "user",
+                "content": "この設定と文書だけで本番投入判断に足りるか評価し、不足情報を列挙してください。",
+            }
+        ]
+    )
+
+
+def test_requests_heading_response_ignores_negative_heading_instruction() -> None:
+    assert not MCPClientUtil.requests_heading_response(
+        [
+            {
+                "role": "user",
+                "content": "この設定と文書で本番投入判断を評価してください。見出し抽出は不要です。",
+            }
+        ]
+    )
 
 
 def test_select_headings_for_response_prefers_numbered_heading_block() -> None:
@@ -1416,6 +1483,7 @@ def test_build_evidence_reflected_final_text_respects_requested_heading_count() 
     fallback = MCPClientUtil.build_evidence_reflected_final_text(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
+            "expects_heading_response": True,
             "headings": [
                 "# コーディングエージェントのMCPサーバー化検証",
                 "## 検証目的",
@@ -1439,6 +1507,7 @@ def test_build_evidence_reflected_final_text_respects_requested_heading_count() 
 def test_final_text_missing_concrete_evidence_uses_requested_heading_subset() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "headings": [
             "# コーディングエージェントのMCPサーバー化検証",
             "## 検証目的",
@@ -1642,6 +1711,7 @@ def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
         "Recursion limit of 50 reached without hitting a stop condition",
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
+            "expects_heading_response": True,
             "stdout_blocks": ["# Overview\n## Setup\n## Troubleshooting"],
             "headings": ["# Overview", "## Setup", "## Troubleshooting"],
         },
@@ -1658,6 +1728,7 @@ def test_build_evidence_reflected_final_text_includes_all_headings() -> None:
     fallback = MCPClientUtil.build_evidence_reflected_final_text(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
+            "expects_heading_response": True,
             "headings": [
                 "# Overview",
                 "## Setup",
@@ -1677,6 +1748,7 @@ def test_build_evidence_reflected_final_text_includes_all_headings() -> None:
 def test_should_prefer_deterministic_evidence_response_for_heading_report() -> None:
     evidence = {
         "config_path": "/tmp/ai-chat-util-config.yml",
+        "expects_heading_response": True,
         "headings": ["# Overview", "## Setup"],
         "stdout_blocks": ["HEADING_LINE_EXACT: # Overview\nHEADING_LINE_EXACT: ## Setup"],
     }
@@ -1685,6 +1757,20 @@ def test_should_prefer_deterministic_evidence_response_for_heading_report() -> N
         "文書内の見出しは以下です。\n- HEADING_LINE_EXACT: # Wrong",
         evidence,
     )
+
+
+def test_build_evidence_summary_does_not_mark_heading_extraction_for_evaluation_prompt() -> None:
+    summary = MCPClientUtil.build_evidence_summary(
+        {
+            "config_path": "/tmp/ai-chat-util-config.yml",
+            "expects_heading_response": False,
+            "headings": ["# Overview", "## Setup"],
+            "stdout_blocks": ["判断に必要な追加確認事項: 監視設計"],
+        }
+    )
+
+    assert "get_loaded_config_info" in summary.successful_tools
+    assert "heading_extraction" not in summary.successful_tools
 
 
 def test_extract_config_path_from_text_returns_yaml_path() -> None:

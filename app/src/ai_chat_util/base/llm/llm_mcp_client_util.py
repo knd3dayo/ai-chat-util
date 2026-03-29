@@ -50,6 +50,10 @@ class MCPClientUtil:
         r"コーディング[\s\-]*エージェント",
     )
 
+    _PATH_LIKE_PATTERNS: tuple[str, ...] = (
+        r"(?:[A-Za-z]:[\\/]|/)[^\s'\"`]+",
+    )
+
     _ALLOWED_ROUTE_REASON_CODES: tuple[str, ...] = (
         "route.explicit_coding_agent_request",
         "route.explicit_file_path_request",
@@ -86,7 +90,11 @@ class MCPClientUtil:
             if not text:
                 continue
 
-            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in cls._EXPLICIT_CODING_AGENT_PATTERNS):
+            normalized_text = text
+            for pattern in cls._PATH_LIKE_PATTERNS:
+                normalized_text = re.sub(pattern, " ", normalized_text)
+
+            if any(re.search(pattern, normalized_text, flags=re.IGNORECASE) for pattern in cls._EXPLICIT_CODING_AGENT_PATTERNS):
                 return True
 
         return False
@@ -199,6 +207,98 @@ class MCPClientUtil:
                     return count
 
         return None
+
+    @classmethod
+    def requests_heading_response(cls, messages: Sequence[Any]) -> bool:
+        patterns = (
+            r"見出し",
+            r"heading",
+            r"heading_line_exact",
+            r"markdown\s+heading",
+            r"節名",
+            r"タイトルを抽出",
+        )
+        negative_patterns = (
+            r"見出し(?:抽出)?は不要",
+            r"見出し(?:抽出)?はいらない",
+            r"見出し(?:抽出)?は不要です",
+            r"heading(?:\s+extraction)?\s+(?:is\s+)?not\s+needed",
+            r"no\s+heading(?:\s+extraction)?",
+            r"不要な見出し抽出",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in negative_patterns):
+                continue
+
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
+                return True
+
+        return False
+
+    @classmethod
+    def requests_evaluation_response(cls, messages: Sequence[Any]) -> bool:
+        patterns = (
+            r"本番投入",
+            r"投入判断",
+            r"可否",
+            r"足りるか",
+            r"不足情報",
+            r"追加確認",
+            r"確認事項",
+            r"評価してください",
+            r"judge",
+            r"evaluate",
+            r"readiness",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
+                return True
+
+        return False
 
     @classmethod
     async def collect_checkpoint_results(
@@ -682,7 +782,7 @@ class MCPClientUtil:
         if not has_evidence:
             return False
 
-        exact_headings = cls.select_headings_for_response(evidence)
+        exact_headings = cls.select_headings_for_response(evidence) if cls.expects_heading_response(evidence) else []
         if exact_headings:
             final_heading_candidates: list[str] = []
             for raw_line in (user_text or "").splitlines():
@@ -725,13 +825,15 @@ class MCPClientUtil:
     def final_text_missing_concrete_evidence(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
         text = (user_text or "").strip()
         if not text:
-            return bool(evidence.get("config_path") or evidence.get("headings"))
+            if cls.expects_heading_response(evidence):
+                return bool(evidence.get("config_path") or evidence.get("headings"))
+            return bool(evidence.get("config_path") or evidence.get("stdout_blocks"))
 
         config_path = evidence.get("config_path")
         if isinstance(config_path, str) and config_path.strip() and config_path.strip() not in text:
             return True
 
-        exact_headings = cls.select_headings_for_response(evidence)
+        exact_headings = cls.select_headings_for_response(evidence) if cls.expects_heading_response(evidence) else []
         if exact_headings:
             matched = sum(1 for heading in exact_headings if heading in text)
             if matched < len(exact_headings):
@@ -750,6 +852,19 @@ class MCPClientUtil:
             or "follow-up task_id is invalid" in normalized
             or "follow-up task_id is stale" in normalized
         )
+
+    @classmethod
+    def expects_heading_response(cls, evidence: Mapping[str, Any]) -> bool:
+        explicit = evidence.get("expects_heading_response")
+        if isinstance(explicit, bool):
+            return explicit
+
+        requested_count_raw = evidence.get("requested_heading_count")
+        try:
+            requested_count = int(requested_count_raw) if requested_count_raw is not None else 0
+        except (TypeError, ValueError):
+            requested_count = 0
+        return requested_count > 0
 
     @staticmethod
     def _heading_level(heading: str) -> int | None:
@@ -824,7 +939,7 @@ class MCPClientUtil:
         if isinstance(config_path, str) and config_path.strip():
             lines.append(f"設定ファイルの場所: {config_path.strip()}")
 
-        exact_headings = cls.select_headings_for_response(evidence)
+        exact_headings = cls.select_headings_for_response(evidence) if cls.expects_heading_response(evidence) else []
         if exact_headings:
             lines.append("文書内の重要な見出し:")
             for heading in exact_headings:
@@ -1035,6 +1150,8 @@ class MCPClientUtil:
 
     @classmethod
     def should_prefer_deterministic_evidence_response(cls, user_text: str | None, evidence: Mapping[str, Any]) -> bool:
+        if not cls.expects_heading_response(evidence):
+            return False
         headings = evidence.get("headings")
         exact_headings = [str(v).strip() for v in headings if isinstance(v, str) and str(v).strip()] if isinstance(headings, Sequence) else []
         if not exact_headings:
@@ -1070,7 +1187,7 @@ class MCPClientUtil:
             if normalized_path not in base_text:
                 lines.append(f"設定ファイルの場所: {normalized_path}")
 
-        exact_headings = cls.select_headings_for_response(evidence)
+        exact_headings = cls.select_headings_for_response(evidence) if cls.expects_heading_response(evidence) else []
         if exact_headings:
             missing_headings = [heading for heading in exact_headings if heading not in base_text]
             if missing_headings:
@@ -1570,6 +1687,8 @@ class MCPClientUtil:
         explicit_user_file_paths: Sequence[str] | None = None,
         routing_decision: RoutingDecision | None = None,
         audit_context: AuditContext | None = None,
+        expects_heading_response: bool = False,
+        expects_evaluation_response: bool = False,
     ) -> CompiledStateGraph:
 
         # LLM + MCP ツールでエージェントを作成
@@ -1603,6 +1722,20 @@ class MCPClientUtil:
         approval_tools_text = runtime_config.features.get_hitl_approval_tools_text()
         tools_description = AgentBuilder.get_tools_description_all(sub_agents)
         logger.info("Allowed tools:\n%s", tools_description)
+        if audit_context is not None:
+            audit_context.emit(
+                "tool_catalog_resolved",
+                payload={
+                    "tool_agent_names": [agent.get_agent_name() for agent in sub_agents],
+                    "tool_catalog": [
+                        {
+                            "agent_name": agent.get_agent_name(),
+                            "tool_names": [str(getattr(tool, "name", "")) for tool in agent.get_tools()],
+                        }
+                        for agent in sub_agents
+                    ],
+                },
+            )
 
         if tool_limits is not None and tool_limits.auto_approve:
             supervisor_hitl_policy_text = prompts.supervisor_hitl_policy_text(approval_tools_text)
@@ -1617,6 +1750,8 @@ class MCPClientUtil:
                 routing_decision=routing_decision,
                 force_coding_agent_route=force_coding_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
+                expects_heading_response=expects_heading_response,
+                expects_evaluation_response=expects_evaluation_response,
             ),
         )
 
@@ -1751,6 +1886,8 @@ class MCPClientUtil:
         routing_decision: RoutingDecision | None,
         force_coding_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None,
+        expects_heading_response: bool = False,
+        expects_evaluation_response: bool = False,
     ) -> str | None:
         normalized_paths = [
             str(path).strip()
@@ -1774,6 +1911,10 @@ class MCPClientUtil:
             lines.append("- 現時点ではツール不要の即答を優先してください。不足が見つかった場合のみ route を見直してください。")
         elif selected_route == "reject":
             lines.append("- サポート範囲外または安全に進めない要求として扱ってください。")
+
+        if expects_evaluation_response and not expects_heading_response:
+            lines.append("- この run は結果評価/投入判断系です。見出し抽出へ逸れず、判断可能な点・不足情報・追加確認事項を整理して complete で返してください。")
+            lines.append("- get_loaded_config_info と文書解析系ツールは、同一目的なら成功結果を再利用してください。analyze_files 系の再実行を繰り返さないでください。")
 
         if normalized_paths:
             lines.append(f"- ユーザーが明示した対象パス: {', '.join(normalized_paths)}")
@@ -1996,9 +2137,10 @@ class MCPClientUtil:
         tool_errors = [
             text for text in raw_texts if text.lstrip().startswith("ERROR:")
         ]
+        heading_extraction_succeeded = bool(headings) and cls.expects_heading_response(evidence)
         successful_tools = [
             "get_loaded_config_info" if isinstance(evidence.get("config_path"), str) and str(evidence.get("config_path")).strip() else "",
-            "heading_extraction" if headings else "",
+            "heading_extraction" if heading_extraction_succeeded else "",
         ]
         successful_tools = [tool_name for tool_name in successful_tools if tool_name]
         latest_task_id = evidence.get("latest_task_id")

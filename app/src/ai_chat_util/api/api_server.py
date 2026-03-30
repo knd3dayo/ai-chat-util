@@ -85,6 +85,17 @@ router.add_api_route(path="/convert_pdf_files_to_images", endpoint=convert_pdf_f
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])
 router.add_api_route(path="/get_completion_model", endpoint=get_completion_model, methods=["GET"])
 router.add_api_route(path="/get_loaded_config_info", endpoint=get_loaded_config_info, methods=["GET"])
+router.add_api_route(
+    path="/chat",
+    endpoint=run_chat,
+    methods=["POST"],
+    summary="Run chat",
+    description=(
+        "Run a chat request via the configured LLM client. "
+        "When use_mcp=true, the response may return status='paused' with hitl and trace_id, "
+        "and the client can resume by sending another ChatRequest with the same trace_id."
+    ),
+)
 router.add_api_route(path="/create_user_message", endpoint=create_user_message, methods=["POST"])
 router.add_api_route(path="/create_assistant_message", endpoint=create_assistant_message, methods=["POST"])
 router.add_api_route(path="/create_system_message", endpoint=create_system_message, methods=["POST"])

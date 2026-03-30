@@ -88,7 +88,7 @@ def create_image_content_from_file(
 def create_pdf_content(
         document_type: Annotated[FileUtilDocument, Field(description="PDF file data for the chat message content")], 
         detail: Annotated[Literal["low", "high", "auto"], Field(description="Detail level for PDF analysis. e.g., 'low', 'high', 'auto'")]= "auto"
-        ) -> Annotated[list["ChatContent"], Field(description="Chat content created from PDF file data")]:
+    ) -> Annotated[list[ChatContent], Field(description="Chat content created from PDF file data")]:
     """
     This function creates a ChatContent object from PDF file data.
     """

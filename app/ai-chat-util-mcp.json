@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "AIChatUtilLocal": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "stdio",
+      "command": "/home/user/source/repos/ai-chat-util/app/.venv/bin/python",
+      "args": [
+        "-m",
+        "ai_chat_util.mcp.mcp_server",
+        "--log_level",
+        "INFO",
+        "--log_file",
+        "work/hitl_mcp_server.log",
+        "--tools",
+        "analyze_files,get_loaded_config_info"
+      ]
+    }
+  }
+}

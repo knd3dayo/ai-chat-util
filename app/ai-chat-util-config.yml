@@ -26,7 +26,7 @@ ai_chat_util_config:
     api_key: os.environ/LLM_API_KEY
 
     # Model name (or Azure deployment name) for chat completion
-    completion_model: gpt-5
+    completion_model: gpt-4o
 
     # Model name for embeddings
     embedding_model: text-embedding-3-small
@@ -34,7 +34,7 @@ ai_chat_util_config:
     # Non-secret API base URL (optional).
     # - OpenAI: https://api.openai.com/v1/
     # - Azure OpenAI: https://<resource-name>.openai.azure.com/
-    base_url: null
+    base_url: http://localhost:4000
 
     # Non-secret API version (mainly for Azure OpenAI; optional)
     api_version: null
@@ -43,7 +43,7 @@ ai_chat_util_config:
   mcp:
     # Optional: MCP client settings JSON path
     # - Preferred key: mcp_config_path
-    mcp_config_path: null
+    mcp_config_path: ai-chat-util-mcp.json
 
     # Optional: custom instructions path
     custom_instructions_file_path: null
@@ -109,7 +109,7 @@ ai_chat_util_config:
 
     # HITL（Human in the loop）: 承認が必要なツール名リスト
     # 例: ["analyze_files", "analyze_pdf_files"]
-    hitl_approval_tools: []
+    hitl_approval_tools: ["analyze_files"]
 
   logging:
     level: INFO

@@ -585,6 +585,175 @@ explicit coding-agent のケースでは、`route_decided.reason_code=route.expl
 
 再開は、**同じ `trace_id` を付けて次の `ChatRequest` を送る**だけです。
 
+### API エンドポイント
+
+FastAPI サーバーでは、CLI の `chat` 相当機能を次のエンドポイントで公開しています。
+
+- `POST /api/ai_chat_util/chat`
+  - Body: `ChatRequest`
+  - Query: `use_mcp`（既定: `false`）
+
+#### 初回リクエスト例
+
+```json
+{
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "auto_approve": false,
+  "chat_history": {
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "このリポジトリの API サーバー構成を説明してください。"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### paused 後の再開例
+
+`status="paused"` で `hitl.prompt` が返った場合は、同じ `trace_id` を使い、人間の回答を `chat_history.messages` に追加して再度 `POST /api/ai_chat_util/chat?use_mcp=true` を呼び出します。
+
+```json
+{
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "auto_approve": false,
+  "chat_history": {
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "このリポジトリの API サーバー構成を説明してください。"
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "はい、その前提で進めてください。"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`use_mcp=true` の場合にのみ内部MCPクライアント経由の pause/resume が有効になります。`use_mcp=false` では通常の completed 応答のみを返します。
+
+#### 承認 pause/resume のテスト手順
+
+`approval` による pause を再現するには、少なくとも次の前提が必要です。
+
+- `ai_chat_util_config.mcp.mcp_config_path` に有効な `mcp.json` を設定している
+- `ai_chat_util_config.features.hitl_approval_tools` に対象ツール名を設定している
+- `use_mcp=true` で chat API を呼び出す
+
+たとえば `hitl_approval_tools: ["analyze_files"]` を設定し、`analyze_files` を使わせる入力を送ると、ツール実行前に `status="paused"` が返ります。
+
+初回リクエスト例:
+
+```json
+{
+  "auto_approve": false,
+  "chat_history": {
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "Use the analyze_files tool to inspect /path/to/file.txt and summarize the file in Japanese."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+レスポンス例:
+
+```json
+{
+  "status": "paused",
+  "trace_id": "9e6ca688a7174864a410fff76aa3de51",
+  "hitl": {
+    "kind": "approval",
+    "prompt": "analyze_files ツールの実行承認をお願いします。",
+    "action_id": "...",
+    "source": "supervisor:analyze_files"
+  },
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "params": {
+            "type": "text",
+            "text": "analyze_files ツールの実行承認をお願いします。"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+再開時は、返ってきた `trace_id` をそのまま使い、承認メッセージを追加して再送します。
+
+```json
+{
+  "trace_id": "9e6ca688a7174864a410fff76aa3de51",
+  "auto_approve": false,
+  "chat_history": {
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "Use the analyze_files tool to inspect /path/to/file.txt and summarize the file in Japanese."
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "params": {
+              "type": "text",
+              "text": "承認します。続けてください。"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+この再開リクエストが成功すると、同じ `trace_id` のまま `status="completed"` が返り、承認待ちだったツール実行後の最終回答が含まれます。
+
 ### SQLiteチェックポイント（状態保存）
 
 内部MCPクライアントは SQLite にチェックポイントを保存します。

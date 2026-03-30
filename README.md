@@ -523,6 +523,7 @@ uv --directory ./app run -m ai_chat_util.cli \
 - 通常ツールで十分な問い合わせを `general_tool_agent` に routing した場合、supervisor から見える tool agent は `tool_agent_general` のみに絞られる。`tool_catalog_resolved.route_name=general_tool_agent` と payload の `tool_agent_names` で確認できる
 - 監査 JSONL を開かなくても、通常ログに `Resolved tool catalog: route=... catalog=...` が出るため、supervisor がどのツール集合を見ていたかを追跡できる
 - ツール一覧確認専用のプロンプトでは workflow 実行前に `resolve_route_tool_catalog()` の結果をそのまま最終回答へ整形するため、回答本文・`tool_catalog_resolved`・通常ログの catalog が同じ集合を指すことが期待動作です
+- ツール一覧確認が「名称、説明、主要な引数を一覧で示してください」のような広めの表現でも、tool catalog intent として扱い、`tool_agent_general` の `analyze_files` / `analyze_pdf_files` / `analyze_image_files` を含む route inventory を本文へ直接反映するのが期待動作です
 - 判断系プロンプトで「見出し抽出は不要」を明示した場合は、`route_decided=general_tool_agent` を維持したまま最終回答が評価文になり、`final_answer_validated.payload.evidence_summary.successful_tools` に `heading_extraction` が入らないのが期待動作です
 
 explicit coding-agent のケースでは、`route_decided.reason_code=route.explicit_coding_agent_request` が残りつつ、順序指定がある場合は `tool_agent_general` の `get_loaded_config_info` が先に 1 回だけ実行され、`preflight_applied` に確定した config path が記録されます。その後に `tool_agent_coding` の `execute/status/get_result` が続くのが期待動作です。

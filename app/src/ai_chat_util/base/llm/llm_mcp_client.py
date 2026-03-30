@@ -137,11 +137,20 @@ class MCPClient(AbstractLLMClient):
             expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
             expects_evaluation_response = MCPClientUtil.requests_evaluation_response(lc_messages)
             expects_tool_catalog_response = MCPClientUtil.requests_tool_catalog_response(lc_messages)
+            expects_tool_catalog_details = MCPClientUtil.requests_tool_catalog_details(lc_messages)
             workflow_messages = list(lc_messages)
             config_preflight_payload: dict[str, Any] | None = None
-            route_tool_catalog = await MCPClientUtil.resolve_route_tool_catalog(
+            route_tool_inventory = await MCPClientUtil.resolve_route_tool_inventory(
                 runtime_config=self.runtime_config,
             )
+            route_tool_catalog = {
+                route_name: [
+                    str(tool.get("name") or "").strip()
+                    for tool in tools
+                    if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()
+                ]
+                for route_name, tools in route_tool_inventory.items()
+            }
             available_tool_names = [
                 tool_name
                 for tool_names in route_tool_catalog.values()
@@ -170,33 +179,16 @@ class MCPClient(AbstractLLMClient):
                 },
             )
             if expects_tool_catalog_response and route_tool_catalog:
-                tool_catalog_payload = {
-                    "tool_agent_names": [
-                        agent_name
-                        for agent_name, tool_names in (
-                            ("tool_agent_coding", route_tool_catalog.get("coding_agent") or []),
-                            ("tool_agent_general", route_tool_catalog.get("general_tool_agent") or []),
-                        )
-                        if any(str(tool_name).strip() for tool_name in tool_names)
-                    ],
-                    "tool_catalog": [
-                        {
-                            "agent_name": agent_name,
-                            "tool_names": [str(tool_name).strip() for tool_name in tool_names if str(tool_name).strip()],
-                        }
-                        for agent_name, tool_names in (
-                            ("tool_agent_coding", route_tool_catalog.get("coding_agent") or []),
-                            ("tool_agent_general", route_tool_catalog.get("general_tool_agent") or []),
-                        )
-                        if any(str(tool_name).strip() for tool_name in tool_names)
-                    ],
-                }
+                tool_catalog_payload = MCPClientUtil.build_route_tool_catalog_payload(route_tool_inventory)
                 audit_context.emit(
                     "tool_catalog_resolved",
                     route_name=routing_decision.selected_route,
                     payload=tool_catalog_payload,
                 )
-                response_text = MCPClientUtil.build_tool_catalog_response_text(route_tool_catalog)
+                response_text = MCPClientUtil.build_tool_catalog_response_text(
+                    route_tool_inventory,
+                    include_details=expects_tool_catalog_details,
+                )
                 evidence = {
                     "expects_tool_catalog_response": True,
                     "tool_catalog": tool_catalog_payload["tool_catalog"],

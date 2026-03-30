@@ -648,10 +648,10 @@ class _FakeMCPClient:
 
 
 class _NamedTool:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, description: str | None = None, args_schema: Any | None = None) -> None:
         self.name = name
-        self.description = f"tool:{name}"
-        self.args_schema = {"type": "object"}
+        self.description = description if description is not None else f"tool:{name}"
+        self.args_schema = args_schema if args_schema is not None else {"type": "object"}
 
 
 class _FakeLangGraphAgent:
@@ -1871,17 +1871,154 @@ def test_requests_tool_catalog_response_detects_tool_list_intent() -> None:
     )
 
 
+def test_requests_tool_catalog_response_detects_detailed_tool_list_intent() -> None:
+    assert MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "利用可能な MCP ツールの名称、説明、主要な引数を一覧で示してください。通常ツールと coding agent 系ツールを分けて整理してください。",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_details_detects_description_and_args_request() -> None:
+    assert MCPClientUtil.requests_tool_catalog_details(
+        [
+            {
+                "role": "user",
+                "content": "利用可能な MCP ツールの名称、説明、主要な引数を一覧で示してください。",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_general_tool_summary_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "現在読み込まれている設定ファイルの場所と利用可能な解析系ツールを簡潔に説明してください",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_exact_shared_general_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "必ず MCP ツールで設定情報を確認してから、現在読み込まれている設定ファイルの場所と利用可能な解析系ツールを簡潔に説明してください。",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_evaluation_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "この設定と文書だけで本番投入判断に足りるかを答え、足りない場合は不足情報を挙げて必要な追加確認を示してください",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_exact_shared_evaluation_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "作業対象は /home/user/source/repos/ai-platform-poc です。まず MCP ツールで現在の設定情報を確認し、その後 coding agent を使って docs/11_検証 配下を調査してください。この設定と文書だけで本番投入判断に足りるかを答え、足りない場合は不足情報を挙げて必要な追加確認を示してください。",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_hitl_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "本番投入してよいか判断してください。不足している場合は追加で確認すべき点を 3 つまで挙げ、どれがユーザー判断事項かを明示してください",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_response_does_not_match_exact_shared_hitl_prompt() -> None:
+    assert not MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "作業対象は /home/user/source/repos/ai-platform-poc です。MCP ツールで関連設定を確認したうえで、本番投入してよいか判断してください。判断に必要な前提が不足している場合は、追加で確認すべき点を 3 つまで挙げ、どれがユーザー判断事項かを明示してください。",
+            }
+        ]
+    )
+
+
+def test_requests_tool_catalog_details_does_not_match_general_supervisor_prompts() -> None:
+    prompts = [
+        "現在読み込まれている設定ファイルの場所と利用可能な解析系ツールを簡潔に説明してください",
+        "この設定と文書だけで本番投入判断に足りるかを答え、足りない場合は不足情報を挙げて必要な追加確認を示してください",
+        "本番投入してよいか判断してください。不足している場合は追加で確認すべき点を 3 つまで挙げ、どれがユーザー判断事項かを明示してください",
+        "必ず MCP ツールで設定情報を確認してから、現在読み込まれている設定ファイルの場所と利用可能な解析系ツールを簡潔に説明してください。",
+        "作業対象は /home/user/source/repos/ai-platform-poc です。まず MCP ツールで現在の設定情報を確認し、その後 coding agent を使って docs/11_検証 配下を調査してください。この設定と文書だけで本番投入判断に足りるかを答え、足りない場合は不足情報を挙げて必要な追加確認を示してください。",
+        "作業対象は /home/user/source/repos/ai-platform-poc です。MCP ツールで関連設定を確認したうえで、本番投入してよいか判断してください。判断に必要な前提が不足している場合は、追加で確認すべき点を 3 つまで挙げ、どれがユーザー判断事項かを明示してください。",
+    ]
+
+    for prompt in prompts:
+        assert not MCPClientUtil.requests_tool_catalog_details(
+            [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ]
+        )
+
+
 def test_build_tool_catalog_response_text_formats_agent_names() -> None:
     text = MCPClientUtil.build_tool_catalog_response_text(
         {
-            "coding_agent": ["execute", "status", "get_result"],
-            "general_tool_agent": ["get_loaded_config_info", "analyze_files"],
+            "coding_agent": [
+                {"name": "execute", "description": "tool:execute", "primary_args": ["prompt", "workspace_path"]},
+                {"name": "status", "description": "tool:status", "primary_args": ["task_id"]},
+                {"name": "get_result", "description": "tool:get_result", "primary_args": ["task_id"]},
+            ],
+            "general_tool_agent": [
+                {"name": "get_loaded_config_info", "description": "tool:get_loaded_config_info", "primary_args": []},
+                {"name": "analyze_files", "description": "tool:analyze_files", "primary_args": ["file_path_list", "prompt"]},
+            ],
         }
     )
 
     assert "supervisor が参照した利用可能ツール一覧:" in text
     assert "tool_agent_coding: execute, status, get_result" in text
     assert "tool_agent_general: get_loaded_config_info, analyze_files" in text
+
+
+def test_build_tool_catalog_response_text_includes_details_when_requested() -> None:
+    text = MCPClientUtil.build_tool_catalog_response_text(
+        {
+            "coding_agent": [
+                {"name": "execute", "description": "非同期でタスクを実行する", "primary_args": ["prompt", "workspace_path", "timeout"]},
+            ],
+            "general_tool_agent": [
+                {"name": "analyze_files", "description": "複数ファイルを解析する", "primary_args": ["file_path_list", "prompt", "detail"]},
+            ],
+        },
+        include_details=True,
+    )
+
+    assert "### tool_agent_coding" in text
+    assert "1. execute" in text
+    assert "説明: 非同期でタスクを実行する" in text
+    assert "主要な引数: prompt, workspace_path, timeout" in text
+    assert "### tool_agent_general" in text
+    assert "analyze_files" in text
 
 
 def test_build_available_routes_text_includes_visible_tools() -> None:
@@ -1939,6 +2076,79 @@ def test_resolve_route_tool_catalog_splits_coding_and_general_tools(monkeypatch:
     assert catalog == {
         "coding_agent": ["execute", "status"],
         "general_tool_agent": ["get_loaded_config_info", "analyze_files"],
+    }
+
+
+def test_resolve_route_tool_inventory_collects_description_and_primary_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeCatalogClient:
+        def __init__(self, config: Any) -> None:
+            self._config = config
+
+        async def get_tools(self) -> list[Any]:
+            server_names = tuple(self._config.keys()) if isinstance(self._config, dict) else ()
+            if server_names == ("coding-agent",):
+                return [
+                    _NamedTool(
+                        "execute",
+                        description="非同期でタスク実行",
+                        args_schema={
+                            "type": "object",
+                            "properties": {
+                                "req": {
+                                    "type": "object",
+                                    "properties": {
+                                        "prompt": {"type": "string"},
+                                        "workspace_path": {"type": "string"},
+                                    },
+                                    "required": ["prompt", "workspace_path"],
+                                }
+                            },
+                            "required": ["req"],
+                        },
+                    )
+                ]
+            if server_names == ("general-tools",):
+                return [
+                    _NamedTool(
+                        "analyze_files",
+                        description="複数ファイルを解析する",
+                        args_schema={
+                            "type": "object",
+                            "properties": {
+                                "file_path_list": {"type": "array"},
+                                "prompt": {"type": "string"},
+                                "detail": {"type": "string"},
+                            },
+                        },
+                    )
+                ]
+            return []
+
+    monkeypatch.setattr(llm_mcp_client_util_mod, "MultiServerMCPClient", _FakeCatalogClient)
+    runtime_config = _build_runtime_config()
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
+
+    inventory = asyncio.run(
+        MCPClientUtil.resolve_route_tool_inventory(
+            runtime_config=runtime_config,
+        )
+    )
+
+    assert inventory == {
+        "coding_agent": [
+            {
+                "name": "execute",
+                "description": "非同期でタスク実行",
+                "primary_args": ["prompt", "workspace_path"],
+            }
+        ],
+        "general_tool_agent": [
+            {
+                "name": "analyze_files",
+                "description": "複数ファイルを解析する",
+                "primary_args": ["file_path_list", "prompt", "detail"],
+            }
+        ],
     }
 
 

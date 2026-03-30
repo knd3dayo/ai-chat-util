@@ -41,6 +41,37 @@ logger = log_settings.getLogger(__name__)
 
 class MCPClientUtil:
 
+    _TOOL_CATALOG_DETAIL_PATTERNS: tuple[str, ...] = (
+        r"ツールの名称",
+        r"名称[、,/]?説明",
+        r"主要な引数",
+        r"引数を一覧",
+        r"arguments?\b",
+    )
+
+    _TOOL_CATALOG_REFERENCE_PATTERNS: tuple[str, ...] = (
+        r"利用可能(?:な)?(?:\s+MCP)?\s*ツール",
+        r"MCP\s*ツール",
+        r"tool\s+catalog",
+        r"available\s+tools",
+        r"tool\s+list",
+        r"tool_catalog_resolved",
+        r"使えるツール",
+    )
+
+    _TOOL_CATALOG_REQUEST_PATTERNS: tuple[str, ...] = (
+        r"ツール一覧",
+        r"一覧(?:で|を|に|表示|化|提示)?",
+        r"列挙",
+        r"agent\s*名ごと",
+        r"agent\s*ごと",
+        r"分けて整理",
+        r"名称",
+        r"主要な引数",
+        r"tool\s+catalog",
+        r"tool\s+list",
+    )
+
     _GENERAL_TOOLS_ALLOWED_WITH_EXPLICIT_CODING_AGENT: tuple[str, ...] = (
         "get_loaded_config_info",
     )
@@ -302,16 +333,6 @@ class MCPClientUtil:
 
     @classmethod
     def requests_tool_catalog_response(cls, messages: Sequence[Any]) -> bool:
-        patterns = (
-            r"利用可能(?:な)?ツール",
-            r"ツール一覧",
-            r"tool\s+catalog",
-            r"available\s+tools",
-            r"tool\s+list",
-            r"tool_catalog_resolved",
-            r"使えるツール",
-        )
-
         for message in messages:
             is_user_message = False
             content: Any | None = None
@@ -334,7 +355,54 @@ class MCPClientUtil:
             if not text:
                 continue
 
-            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
+            has_tool_reference = any(
+                re.search(pattern, text, flags=re.IGNORECASE)
+                for pattern in cls._TOOL_CATALOG_REFERENCE_PATTERNS
+            )
+            has_catalog_request = any(
+                re.search(pattern, text, flags=re.IGNORECASE)
+                for pattern in cls._TOOL_CATALOG_REQUEST_PATTERNS
+            )
+
+            if has_tool_reference and has_catalog_request:
+                return True
+
+        return False
+
+    @classmethod
+    def requests_tool_catalog_details(cls, messages: Sequence[Any]) -> bool:
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            has_tool_reference = any(
+                re.search(pattern, text, flags=re.IGNORECASE)
+                for pattern in cls._TOOL_CATALOG_REFERENCE_PATTERNS
+            )
+            has_detail_request = any(
+                re.search(pattern, text, flags=re.IGNORECASE)
+                for pattern in cls._TOOL_CATALOG_DETAIL_PATTERNS
+            )
+
+            if has_tool_reference and has_detail_request:
                 return True
 
         return False
@@ -1060,18 +1128,108 @@ class MCPClientUtil:
         return "\n".join(lines).strip()
 
     @classmethod
-    def build_tool_catalog_response_text(cls, route_tool_catalog: Mapping[str, Sequence[str]]) -> str:
+    def _normalize_tool_description(cls, description: Any) -> str:
+        text = re.sub(r"\s+", " ", str(description or "")).strip()
+        return text or "(説明なし)"
+
+    @classmethod
+    def _extract_primary_arg_names(cls, args_schema: Any) -> list[str]:
+        if not isinstance(args_schema, Mapping):
+            return []
+
+        props = args_schema.get("properties")
+        if not isinstance(props, Mapping):
+            return []
+
+        req_schema = props.get("req")
+        required = args_schema.get("required")
+        if (
+            isinstance(req_schema, Mapping)
+            and isinstance(required, Sequence)
+            and set(required) == {"req"}
+        ):
+            inner_props = req_schema.get("properties")
+            if isinstance(inner_props, Mapping):
+                return [str(name).strip() for name in inner_props.keys() if str(name).strip()]
+
+        return [str(name).strip() for name in props.keys() if str(name).strip()]
+
+    @classmethod
+    def build_route_tool_catalog_payload(
+        cls,
+        route_tool_inventory: Mapping[str, Sequence[Mapping[str, Any]]],
+    ) -> dict[str, Any]:
+        label_map = {
+            "coding_agent": "tool_agent_coding",
+            "general_tool_agent": "tool_agent_general",
+        }
+        tool_catalog: list[dict[str, Any]] = []
+        tool_agent_names: list[str] = []
+
+        for route_name, tools in route_tool_inventory.items():
+            normalized_tools = [tool for tool in tools if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()]
+            if not normalized_tools:
+                continue
+            agent_name = label_map.get(str(route_name).strip(), str(route_name).strip() or "tool_agent")
+            tool_agent_names.append(agent_name)
+            tool_catalog.append(
+                {
+                    "agent_name": agent_name,
+                    "tool_names": [str(tool.get("name") or "").strip() for tool in normalized_tools],
+                    "tools": [
+                        {
+                            "name": str(tool.get("name") or "").strip(),
+                            "description": cls._normalize_tool_description(tool.get("description")),
+                            "primary_args": [
+                                str(arg_name).strip()
+                                for arg_name in cast(Sequence[Any], tool.get("primary_args") or [])
+                                if str(arg_name).strip()
+                            ],
+                        }
+                        for tool in normalized_tools
+                    ],
+                }
+            )
+
+        return {
+            "tool_agent_names": tool_agent_names,
+            "tool_catalog": tool_catalog,
+        }
+
+    @classmethod
+    def build_tool_catalog_response_text(
+        cls,
+        route_tool_inventory: Mapping[str, Sequence[Mapping[str, Any]]],
+        *,
+        include_details: bool = False,
+    ) -> str:
         lines = ["supervisor が参照した利用可能ツール一覧:"]
         label_map = {
             "coding_agent": "tool_agent_coding",
             "general_tool_agent": "tool_agent_general",
         }
-        for route_name, tool_names in route_tool_catalog.items():
-            normalized_tools = [str(tool_name).strip() for tool_name in tool_names if str(tool_name).strip()]
+        for route_name, tools in route_tool_inventory.items():
+            normalized_tools = [tool for tool in tools if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()]
             if not normalized_tools:
                 continue
             label = label_map.get(str(route_name).strip(), str(route_name).strip() or "tool_agent")
-            lines.append(f"- {label}: {', '.join(normalized_tools)}")
+            if not include_details:
+                lines.append(
+                    f"- {label}: {', '.join(str(tool.get('name') or '').strip() for tool in normalized_tools)}"
+                )
+                continue
+            lines.append(f"\n### {label}")
+            for index, tool in enumerate(normalized_tools, start=1):
+                tool_name = str(tool.get("name") or "").strip()
+                description = cls._normalize_tool_description(tool.get("description"))
+                primary_args = [
+                    str(arg_name).strip()
+                    for arg_name in cast(Sequence[Any], tool.get("primary_args") or [])
+                    if str(arg_name).strip()
+                ]
+                lines.append(f"{index}. {tool_name}")
+                lines.append(f"   - 説明: {description}")
+                lines.append(f"   - 主要な引数: {', '.join(primary_args) if primary_args else 'なし'}")
         return "\n".join(lines)
 
     @classmethod
@@ -2060,11 +2218,11 @@ class MCPClientUtil:
         )
 
     @classmethod
-    async def resolve_route_tool_catalog(
+    async def resolve_route_tool_inventory(
         cls,
         *,
         runtime_config: AiChatUtilConfig,
-    ) -> dict[str, list[str]]:
+    ) -> dict[str, list[dict[str, Any]]]:
         mcp_config = runtime_config.get_mcp_server_config()
         coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
         route_configs = {
@@ -2072,20 +2230,41 @@ class MCPClientUtil:
             "general_tool_agent": mcp_config.filter(exclude_name=coding_agent_server_name),
         }
 
-        route_tool_catalog: dict[str, list[str]] = {}
+        route_tool_inventory: dict[str, list[dict[str, Any]]] = {}
         for route_name, route_config in route_configs.items():
             if len(route_config.servers) == 0:
                 continue
             try:
                 client = MultiServerMCPClient(route_config.to_langchain_config())
                 tools = await client.get_tools()
-                route_tool_catalog[route_name] = [
-                    str(getattr(tool, "name", "")).strip()
+                route_tool_inventory[route_name] = [
+                    {
+                        "name": str(getattr(tool, "name", "")).strip(),
+                        "description": cls._normalize_tool_description(getattr(tool, "description", "")),
+                        "primary_args": cls._extract_primary_arg_names(getattr(tool, "args_schema", None)),
+                    }
                     for tool in tools
                     if str(getattr(tool, "name", "")).strip()
                 ]
             except Exception:
                 logger.debug("Failed to resolve route tool catalog for %s", route_name, exc_info=True)
+
+        return route_tool_inventory
+
+    @classmethod
+    async def resolve_route_tool_catalog(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+    ) -> dict[str, list[str]]:
+        route_tool_inventory = await cls.resolve_route_tool_inventory(runtime_config=runtime_config)
+        route_tool_catalog: dict[str, list[str]] = {}
+        for route_name, tools in route_tool_inventory.items():
+            route_tool_catalog[route_name] = [
+                str(tool.get("name") or "").strip()
+                for tool in tools
+                if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()
+            ]
 
         return route_tool_catalog
 

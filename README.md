@@ -520,11 +520,16 @@ uv --directory ./app run -m ai_chat_util.cli \
 
 - `routing_mode: structured` かつ deterministic rule で確定しないケースでは、追加で `route_decision_model_output` が出る
 - `tool_catalog_resolved` には、その run で supervisor が前提にした tool agent 名と tool 名一覧が安定して記録される
+- 通常ツールで十分な問い合わせを `general_tool_agent` に routing した場合、supervisor から見える tool agent は `tool_agent_general` のみに絞られる。`tool_catalog_resolved.route_name=general_tool_agent` と payload の `tool_agent_names` で確認できる
+- 監査 JSONL を開かなくても、通常ログに `Resolved tool catalog: route=... catalog=...` が出るため、supervisor がどのツール集合を見ていたかを追跡できる
+- ツール一覧確認専用のプロンプトでは workflow 実行前に `resolve_route_tool_catalog()` の結果をそのまま最終回答へ整形するため、回答本文・`tool_catalog_resolved`・通常ログの catalog が同じ集合を指すことが期待動作です
 - 判断系プロンプトで「見出し抽出は不要」を明示した場合は、`route_decided=general_tool_agent` を維持したまま最終回答が評価文になり、`final_answer_validated.payload.evidence_summary.successful_tools` に `heading_extraction` が入らないのが期待動作です
 
 explicit coding-agent のケースでは、`route_decided.reason_code=route.explicit_coding_agent_request` が残りつつ、順序指定がある場合は `tool_agent_general` の `get_loaded_config_info` が先に 1 回だけ実行され、`preflight_applied` に確定した config path が記録されます。その後に `tool_agent_coding` の `execute/status/get_result` が続くのが期待動作です。
 
 判断系のケースでは、`tool_catalog_resolved` で supervisor が見ていた利用可能ツール一覧を確認したうえで、`tool_selected(get_loaded_config_info)` と `tool_selected(analyze_files)` が 1 回ずつ成功し、最終回答がその証拠を踏まえた評価文に収束するのが基準です。`見出し抽出は不要` を含むにもかかわらず見出し列挙へフォールバックした場合は、intent 判定または evidence fallback の回帰を疑ってください。
+
+通常ツールのケースでは、`tool_catalog_resolved` や `Resolved tool catalog` の内容に `tool_agent_coding` や `execute/status/get_result` が含まれていないことも確認してください。ここに coding-agent 側が露出している場合は、通常問い合わせが `execute` に流れる退行の兆候です。
 
 監査ログ上の stable error code:
 

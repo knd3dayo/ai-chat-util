@@ -301,6 +301,45 @@ class MCPClientUtil:
         return False
 
     @classmethod
+    def requests_tool_catalog_response(cls, messages: Sequence[Any]) -> bool:
+        patterns = (
+            r"利用可能(?:な)?ツール",
+            r"ツール一覧",
+            r"tool\s+catalog",
+            r"available\s+tools",
+            r"tool\s+list",
+            r"tool_catalog_resolved",
+            r"使えるツール",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
+                return True
+
+        return False
+
+    @classmethod
     async def collect_checkpoint_results(
         cls,
         *,
@@ -668,6 +707,26 @@ class MCPClientUtil:
                 items.append(normalized)
             return items
 
+        def _is_synthetic_heading(value: str) -> bool:
+            normalized = str(value).strip()
+            if not normalized:
+                return True
+            lowered = normalized.lower()
+            if re.match(r"^#{1,6}\s+headings by file$", lowered):
+                return True
+            if re.match(r"^#{1,6}\s+file\s+\d+\s*:", lowered):
+                return True
+            if re.search(r"`[^`]+\.md`", normalized, flags=re.IGNORECASE):
+                return True
+            return False
+
+        def _is_usable_heading_block(block: Sequence[str]) -> bool:
+            normalized_block = [str(value).strip() for value in block if str(value).strip()]
+            if not normalized_block:
+                return False
+            synthetic_count = sum(1 for value in normalized_block if _is_synthetic_heading(value))
+            return synthetic_count < len(normalized_block)
+
         deduped_stdout: list[str] = []
         seen_stdout: set[str] = set()
         exact_heading_blocks: list[list[str]] = []
@@ -700,7 +759,10 @@ class MCPClientUtil:
         def _pick_best_heading_block(blocks: Sequence[list[str]]) -> list[str]:
             if not blocks:
                 return []
-            return list(max(enumerate(blocks), key=lambda item: (len(item[1]), item[0]))[1])
+            usable_blocks = [block for block in blocks if _is_usable_heading_block(block)]
+            if not usable_blocks:
+                return []
+            return list(max(enumerate(usable_blocks), key=lambda item: (len(item[1]), item[0]))[1])
 
         headings = _pick_best_heading_block(exact_heading_blocks)
         if not headings:
@@ -827,16 +889,35 @@ class MCPClientUtil:
         if not text:
             if cls.expects_heading_response(evidence):
                 return bool(evidence.get("config_path") or evidence.get("headings"))
+            if cls.expects_tool_catalog_response(evidence):
+                return bool(evidence.get("tool_catalog"))
             return bool(evidence.get("config_path") or evidence.get("stdout_blocks"))
 
         config_path = evidence.get("config_path")
-        if isinstance(config_path, str) and config_path.strip() and config_path.strip() not in text:
+        if (
+            not cls.expects_tool_catalog_response(evidence)
+            and isinstance(config_path, str)
+            and config_path.strip()
+            and config_path.strip() not in text
+        ):
             return True
 
         exact_headings = cls.select_headings_for_response(evidence) if cls.expects_heading_response(evidence) else []
         if exact_headings:
             matched = sum(1 for heading in exact_headings if heading in text)
             if matched < len(exact_headings):
+                return True
+
+        if cls.expects_tool_catalog_response(evidence):
+            tool_catalog = cast(Sequence[Any], evidence.get("tool_catalog") or [])
+            expected_tool_names = [
+                str(tool_name).strip()
+                for entry in tool_catalog
+                if isinstance(entry, Mapping)
+                for tool_name in cast(Sequence[Any], entry.get("tool_names") or [])
+                if str(tool_name).strip()
+            ]
+            if expected_tool_names and not any(tool_name in text for tool_name in expected_tool_names):
                 return True
 
         return False
@@ -865,6 +946,11 @@ class MCPClientUtil:
         except (TypeError, ValueError):
             requested_count = 0
         return requested_count > 0
+
+    @classmethod
+    def expects_tool_catalog_response(cls, evidence: Mapping[str, Any]) -> bool:
+        explicit = evidence.get("expects_tool_catalog_response")
+        return bool(explicit) if isinstance(explicit, bool) else False
 
     @staticmethod
     def _heading_level(heading: str) -> int | None:
@@ -945,6 +1031,23 @@ class MCPClientUtil:
             for heading in exact_headings:
                 lines.append(heading)
 
+        if cls.expects_tool_catalog_response(evidence):
+            tool_catalog = cast(Sequence[Any], evidence.get("tool_catalog") or [])
+            if tool_catalog:
+                lines.append("supervisor が参照した利用可能ツール一覧:")
+                for entry in tool_catalog:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    agent_name = str(entry.get("agent_name") or "").strip()
+                    tool_names = [
+                        str(tool_name).strip()
+                        for tool_name in cast(Sequence[Any], entry.get("tool_names") or [])
+                        if str(tool_name).strip()
+                    ]
+                    if not agent_name or not tool_names:
+                        continue
+                    lines.append(f"- {agent_name}: {', '.join(tool_names)}")
+
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):
             stdout_values = [str(v).strip() for v in stdout_blocks if isinstance(v, str) and v.strip()]
@@ -955,6 +1058,21 @@ class MCPClientUtil:
                 lines.append("[/stdout]")
 
         return "\n".join(lines).strip()
+
+    @classmethod
+    def build_tool_catalog_response_text(cls, route_tool_catalog: Mapping[str, Sequence[str]]) -> str:
+        lines = ["supervisor が参照した利用可能ツール一覧:"]
+        label_map = {
+            "coding_agent": "tool_agent_coding",
+            "general_tool_agent": "tool_agent_general",
+        }
+        for route_name, tool_names in route_tool_catalog.items():
+            normalized_tools = [str(tool_name).strip() for tool_name in tool_names if str(tool_name).strip()]
+            if not normalized_tools:
+                continue
+            label = label_map.get(str(route_name).strip(), str(route_name).strip() or "tool_agent")
+            lines.append(f"- {label}: {', '.join(normalized_tools)}")
+        return "\n".join(lines)
 
     @classmethod
     def extract_config_path_from_text(cls, text: str | None) -> str | None:
@@ -1194,6 +1312,27 @@ class MCPClientUtil:
                 if "文書内の重要な見出し:" not in base_text:
                     lines.append("文書内の重要な見出し:")
                 lines.extend(missing_headings)
+
+        if cls.expects_tool_catalog_response(evidence):
+            tool_catalog = cast(Sequence[Any], evidence.get("tool_catalog") or [])
+            expected_lines = []
+            for entry in tool_catalog:
+                if not isinstance(entry, Mapping):
+                    continue
+                agent_name = str(entry.get("agent_name") or "").strip()
+                tool_names = [
+                    str(tool_name).strip()
+                    for tool_name in cast(Sequence[Any], entry.get("tool_names") or [])
+                    if str(tool_name).strip()
+                ]
+                if agent_name and tool_names:
+                    expected_lines.append(f"- {agent_name}: {', '.join(tool_names)}")
+            if expected_lines:
+                if "supervisor が参照した利用可能ツール一覧:" not in base_text:
+                    lines.append("supervisor が参照した利用可能ツール一覧:")
+                for line in expected_lines:
+                    if line not in base_text:
+                        lines.append(line)
 
         stdout_blocks = evidence.get("stdout_blocks")
         if isinstance(stdout_blocks, Sequence):
@@ -1701,6 +1840,11 @@ class MCPClientUtil:
             runtime_config,
             mcp_config,
             llm, prompts, tool_limits, 
+            include_coding_agent=(
+                routing_decision.selected_route != "general_tool_agent"
+                if routing_decision is not None
+                else True
+            ),
             include_general_agent=(
                 routing_decision.selected_route != "coding_agent"
                 if routing_decision is not None
@@ -1722,19 +1866,26 @@ class MCPClientUtil:
         approval_tools_text = runtime_config.features.get_hitl_approval_tools_text()
         tools_description = AgentBuilder.get_tools_description_all(sub_agents)
         logger.info("Allowed tools:\n%s", tools_description)
+        tool_catalog_payload = {
+            "tool_agent_names": [agent.get_agent_name() for agent in sub_agents],
+            "tool_catalog": [
+                {
+                    "agent_name": agent.get_agent_name(),
+                    "tool_names": [str(getattr(tool, "name", "")) for tool in agent.get_tools()],
+                }
+                for agent in sub_agents
+            ],
+        }
+        logger.info(
+            "Resolved tool catalog: route=%s catalog=%s",
+            (routing_decision.selected_route if routing_decision is not None else "(unspecified)"),
+            json.dumps(tool_catalog_payload, ensure_ascii=False),
+        )
         if audit_context is not None:
             audit_context.emit(
                 "tool_catalog_resolved",
-                payload={
-                    "tool_agent_names": [agent.get_agent_name() for agent in sub_agents],
-                    "tool_catalog": [
-                        {
-                            "agent_name": agent.get_agent_name(),
-                            "tool_names": [str(getattr(tool, "name", "")) for tool in agent.get_tools()],
-                        }
-                        for agent in sub_agents
-                    ],
-                },
+                route_name=(routing_decision.selected_route if routing_decision is not None else None),
+                payload=tool_catalog_payload,
             )
 
         if tool_limits is not None and tool_limits.auto_approve:
@@ -1847,12 +1998,35 @@ class MCPClientUtil:
         *,
         has_coding_agent: bool,
         has_general_agent: bool,
+        route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         lines: list[str] = []
+        coding_tools = [
+            str(name).strip()
+            for name in cast(Sequence[Any], (route_tool_catalog or {}).get("coding_agent") or [])
+            if isinstance(name, str) and str(name).strip()
+        ]
+        general_tools = [
+            str(name).strip()
+            for name in cast(Sequence[Any], (route_tool_catalog or {}).get("general_tool_agent") or [])
+            if isinstance(name, str) and str(name).strip()
+        ]
         if has_coding_agent:
-            lines.append("- coding_agent: execute/status/get_result を使う複数ステップ調査向け")
+            if coding_tools:
+                lines.append(
+                    "- coding_agent: execute/status/get_result を使う複数ステップ調査向け"
+                    f" (visible_tools: {', '.join(coding_tools)})"
+                )
+            else:
+                lines.append("- coding_agent: execute/status/get_result を使う複数ステップ調査向け")
         if has_general_agent:
-            lines.append("- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け")
+            if general_tools:
+                lines.append(
+                    "- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け"
+                    f" (visible_tools: {', '.join(general_tools)})"
+                )
+            else:
+                lines.append("- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け")
         lines.append("- planner_agent: 実行前に計画整理が必要な場合のみ")
         lines.append("- direct_answer: ツール不要で即答できる場合のみ")
         lines.append("- reject: サポート範囲外または route を決めても安全に進めない場合")
@@ -1865,19 +2039,55 @@ class MCPClientUtil:
         force_coding_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None,
         routing_mode: str,
+        route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         normalized_paths = [
             str(path).strip()
             for path in (explicit_user_file_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
+        catalog_lines = [
+            f"{route_name}_tools=" + (", ".join(str(name).strip() for name in tool_names if str(name).strip()) or "(none)")
+            for route_name, tool_names in (route_tool_catalog or {}).items()
+        ]
         return "\n".join(
             [
                 f"routing_mode={routing_mode}",
                 f"force_coding_agent_route={str(force_coding_agent_route).lower()}",
                 "explicit_user_file_paths=" + (", ".join(normalized_paths) if normalized_paths else "(none)"),
+                *catalog_lines,
             ]
         )
+
+    @classmethod
+    async def resolve_route_tool_catalog(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+    ) -> dict[str, list[str]]:
+        mcp_config = runtime_config.get_mcp_server_config()
+        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        route_configs = {
+            "coding_agent": mcp_config.filter(include_name=coding_agent_server_name),
+            "general_tool_agent": mcp_config.filter(exclude_name=coding_agent_server_name),
+        }
+
+        route_tool_catalog: dict[str, list[str]] = {}
+        for route_name, route_config in route_configs.items():
+            if len(route_config.servers) == 0:
+                continue
+            try:
+                client = MultiServerMCPClient(route_config.to_langchain_config())
+                tools = await client.get_tools()
+                route_tool_catalog[route_name] = [
+                    str(getattr(tool, "name", "")).strip()
+                    for tool in tools
+                    if str(getattr(tool, "name", "")).strip()
+                ]
+            except Exception:
+                logger.debug("Failed to resolve route tool catalog for %s", route_name, exc_info=True)
+
+        return route_tool_catalog
 
     @classmethod
     def _build_supervisor_routing_guidance_text(
@@ -1906,6 +2116,7 @@ class MCPClientUtil:
             lines.append("- 設定確認が済んだら、以降は coding-agent 系の execute/status/get_result に進み、同じ設定確認を繰り返さないでください。")
         elif selected_route == "general_tool_agent":
             lines.append("- 初手は general_tool_agent で完結するかを優先確認してください。")
+            lines.append("- general_tool_agent で必要なツールが見えている場合、coding-agent 系の execute/status/get_result へ切り替えないでください。")
             lines.append("- 一般ツールで必要情報を取得できた後は、同じツールを同じ引数で繰り返し呼ばないでください。")
         elif selected_route == "direct_answer":
             lines.append("- 現時点ではツール不要の即答を優先してください。不足が見つかった場合のみ route を見直してください。")
@@ -2050,6 +2261,7 @@ class MCPClientUtil:
         force_coding_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
+        route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
         audit_context: AuditContext | None = None,
     ) -> RoutingDecision:
         default_decision = cls._build_default_routing_decision(
@@ -2074,11 +2286,13 @@ class MCPClientUtil:
         available_routes_text = cls._build_available_routes_text(
             has_coding_agent=has_coding_agent,
             has_general_agent=has_general_agent,
+            route_tool_catalog=route_tool_catalog,
         )
         context_text = cls._build_routing_context_text(
             force_coding_agent_route=force_coding_agent_route,
             explicit_user_file_paths=explicit_user_file_paths,
             routing_mode=routing_mode,
+            route_tool_catalog=route_tool_catalog,
         )
 
         try:
@@ -2141,6 +2355,7 @@ class MCPClientUtil:
         successful_tools = [
             "get_loaded_config_info" if isinstance(evidence.get("config_path"), str) and str(evidence.get("config_path")).strip() else "",
             "heading_extraction" if heading_extraction_succeeded else "",
+            "tool_catalog_resolved" if cast(Sequence[Any], evidence.get("tool_catalog") or []) else "",
         ]
         successful_tools = [tool_name for tool_name in successful_tools if tool_name]
         latest_task_id = evidence.get("latest_task_id")

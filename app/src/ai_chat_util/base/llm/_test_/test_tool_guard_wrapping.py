@@ -768,6 +768,44 @@ def test_create_sub_agents_limits_general_tools_when_coding_agent_route_is_force
     assert created[1][2] == ["get_loaded_config_info"]
 
 
+def test_create_sub_agents_excludes_coding_agent_for_general_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config("coding-agent", "general-tools"),
+            llm=object(), # type: ignore
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+            include_coding_agent=False,
+            include_general_agent=True,
+        )
+    )
+
+    assert [name for name, _, _ in created] == ["tool_agent_general"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_general"]
+
+
+def test_create_sub_agents_keeps_coding_agent_when_general_tools_are_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=_build_runtime_config(),
+            mcp_config=_build_mcp_config("coding-agent"),
+            llm=object(), # type: ignore
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+            include_coding_agent=False,
+            include_general_agent=True,
+        )
+    )
+
+    assert [name for name, _, _ in created] == ["tool_agent_coding"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding"]
+
+
 def test_create_sub_agents_keeps_general_when_coding_agent_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     created = _patch_agent_creation(monkeypatch)
 
@@ -1771,6 +1809,137 @@ def test_build_evidence_summary_does_not_mark_heading_extraction_for_evaluation_
 
     assert "get_loaded_config_info" in summary.successful_tools
     assert "heading_extraction" not in summary.successful_tools
+
+
+def test_extract_successful_tool_evidence_ignores_synthetic_headings_by_file_block() -> None:
+    evidence = MCPClientUtil.extract_successful_tool_evidence(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "tool",
+                        "content": '{"stdout": "## Headings by File\n### File 1: `01_doc.md`\n### File 2: `02_doc.md`", "stderr": null}',
+                    }
+                ]
+            }
+        ]
+    )
+
+    assert evidence["headings"] == []
+
+
+def test_build_evidence_reflected_final_text_includes_tool_catalog_when_requested() -> None:
+    text = MCPClientUtil.build_evidence_reflected_final_text(
+        {
+            "expects_tool_catalog_response": True,
+            "tool_catalog": [
+                {
+                    "agent_name": "tool_agent_general",
+                    "tool_names": ["get_loaded_config_info", "analyze_files"],
+                }
+            ],
+        }
+    )
+
+    assert "supervisor が参照した利用可能ツール一覧:" in text
+    assert "tool_agent_general: get_loaded_config_info, analyze_files" in text
+
+
+def test_final_text_missing_concrete_evidence_detects_missing_tool_catalog_listing() -> None:
+    assert MCPClientUtil.final_text_missing_concrete_evidence(
+        "利用可能ツールは確認しました。",
+        {
+            "expects_tool_catalog_response": True,
+            "tool_catalog": [
+                {
+                    "agent_name": "tool_agent_general",
+                    "tool_names": ["get_loaded_config_info", "analyze_files"],
+                }
+            ],
+        },
+    )
+
+
+def test_requests_tool_catalog_response_detects_tool_list_intent() -> None:
+    assert MCPClientUtil.requests_tool_catalog_response(
+        [
+            {
+                "role": "user",
+                "content": "supervisor が見ている利用可能ツール一覧を教えてください。",
+            }
+        ]
+    )
+
+
+def test_build_tool_catalog_response_text_formats_agent_names() -> None:
+    text = MCPClientUtil.build_tool_catalog_response_text(
+        {
+            "coding_agent": ["execute", "status", "get_result"],
+            "general_tool_agent": ["get_loaded_config_info", "analyze_files"],
+        }
+    )
+
+    assert "supervisor が参照した利用可能ツール一覧:" in text
+    assert "tool_agent_coding: execute, status, get_result" in text
+    assert "tool_agent_general: get_loaded_config_info, analyze_files" in text
+
+
+def test_build_available_routes_text_includes_visible_tools() -> None:
+    text = MCPClientUtil._build_available_routes_text(
+        has_coding_agent=True,
+        has_general_agent=True,
+        route_tool_catalog={
+            "coding_agent": ["execute", "status", "get_result"],
+            "general_tool_agent": ["get_loaded_config_info", "analyze_files"],
+        },
+    )
+
+    assert "visible_tools: execute, status, get_result" in text
+    assert "visible_tools: get_loaded_config_info, analyze_files" in text
+
+
+def test_build_routing_context_text_includes_route_tool_catalog() -> None:
+    text = MCPClientUtil._build_routing_context_text(
+        force_coding_agent_route=False,
+        explicit_user_file_paths=[],
+        routing_mode="structured",
+        route_tool_catalog={
+            "coding_agent": ["execute", "status"],
+            "general_tool_agent": ["get_loaded_config_info"],
+        },
+    )
+
+    assert "coding_agent_tools=execute, status" in text
+    assert "general_tool_agent_tools=get_loaded_config_info" in text
+
+
+def test_resolve_route_tool_catalog_splits_coding_and_general_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeCatalogClient:
+        def __init__(self, config: Any) -> None:
+            self._config = config
+
+        async def get_tools(self) -> list[Any]:
+            server_names = tuple(self._config.keys()) if isinstance(self._config, dict) else ()
+            if server_names == ("coding-agent",):
+                return [_NamedTool("execute"), _NamedTool("status")]
+            if server_names == ("general-tools",):
+                return [_NamedTool("get_loaded_config_info"), _NamedTool("analyze_files")]
+            return []
+
+    monkeypatch.setattr(llm_mcp_client_util_mod, "MultiServerMCPClient", _FakeCatalogClient)
+    runtime_config = _build_runtime_config()
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
+
+    catalog = asyncio.run(
+        MCPClientUtil.resolve_route_tool_catalog(
+            runtime_config=runtime_config,
+        )
+    )
+
+    assert catalog == {
+        "coding_agent": ["execute", "status"],
+        "general_tool_agent": ["get_loaded_config_info", "analyze_files"],
+    }
 
 
 def test_extract_config_path_from_text_returns_yaml_path() -> None:

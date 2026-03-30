@@ -136,22 +136,25 @@ class MCPClient(AbstractLLMClient):
             requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
             expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
             expects_evaluation_response = MCPClientUtil.requests_evaluation_response(lc_messages)
+            expects_tool_catalog_response = MCPClientUtil.requests_tool_catalog_response(lc_messages)
             workflow_messages = list(lc_messages)
             config_preflight_payload: dict[str, Any] | None = None
+            route_tool_catalog = await MCPClientUtil.resolve_route_tool_catalog(
+                runtime_config=self.runtime_config,
+            )
+            available_tool_names = [
+                tool_name
+                for tool_names in route_tool_catalog.values()
+                for tool_name in tool_names
+            ]
             routing_decision = await MCPClientUtil.decide_route(
                 runtime_config=self.runtime_config,
                 prompts=prompts,
                 messages=lc_messages,
                 force_coding_agent_route=force_coding_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
-                available_tool_names=[
-                    "execute",
-                    "status",
-                    "get_result",
-                    "cancel",
-                    "workspace_path",
-                    "get_loaded_config_info",
-                ],
+                available_tool_names=available_tool_names,
+                route_tool_catalog=route_tool_catalog,
                 audit_context=audit_context,
             )
             audit_context.emit(
@@ -163,8 +166,69 @@ class MCPClient(AbstractLLMClient):
                     "candidate_routes": [candidate.model_dump(mode="json") for candidate in routing_decision.candidate_routes],
                     "next_action": routing_decision.next_action,
                     "explicit_user_file_paths": list(explicit_user_file_paths),
+                    "route_tool_catalog": route_tool_catalog,
                 },
             )
+            if expects_tool_catalog_response and route_tool_catalog:
+                tool_catalog_payload = {
+                    "tool_agent_names": [
+                        agent_name
+                        for agent_name, tool_names in (
+                            ("tool_agent_coding", route_tool_catalog.get("coding_agent") or []),
+                            ("tool_agent_general", route_tool_catalog.get("general_tool_agent") or []),
+                        )
+                        if any(str(tool_name).strip() for tool_name in tool_names)
+                    ],
+                    "tool_catalog": [
+                        {
+                            "agent_name": agent_name,
+                            "tool_names": [str(tool_name).strip() for tool_name in tool_names if str(tool_name).strip()],
+                        }
+                        for agent_name, tool_names in (
+                            ("tool_agent_coding", route_tool_catalog.get("coding_agent") or []),
+                            ("tool_agent_general", route_tool_catalog.get("general_tool_agent") or []),
+                        )
+                        if any(str(tool_name).strip() for tool_name in tool_names)
+                    ],
+                }
+                audit_context.emit(
+                    "tool_catalog_resolved",
+                    route_name=routing_decision.selected_route,
+                    payload=tool_catalog_payload,
+                )
+                response_text = MCPClientUtil.build_tool_catalog_response_text(route_tool_catalog)
+                evidence = {
+                    "expects_tool_catalog_response": True,
+                    "tool_catalog": tool_catalog_payload["tool_catalog"],
+                }
+                if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
+                    summary = MCPClientUtil.build_evidence_summary(evidence)
+                    final_sufficiency = MCPClientUtil.judge_sufficiency(
+                        response_text=response_text,
+                        resp_type="complete",
+                        hitl_kind=None,
+                        evidence_summary=summary,
+                    )
+                    audit_context.emit(
+                        "final_answer_validated",
+                        reason_code=final_sufficiency.reason_code,
+                        confidence=final_sufficiency.confidence,
+                        payload=final_sufficiency.model_dump(mode="json"),
+                        final_status="completed",
+                    )
+                return ChatResponse(
+                    status=cast(Any, "completed"),
+                    trace_id=run_trace_id,
+                    hitl=None,
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": response_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
+                )
             if routing_decision.requires_clarification and not auto_approve:
                 prompt_text = "\n".join(routing_decision.missing_information) if routing_decision.missing_information else (routing_decision.notes or "続行前に確認が必要です。")
                 hitl = HitlRequest(
@@ -377,6 +441,14 @@ class MCPClient(AbstractLLMClient):
             evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
             evidence = dict(evidence)
             evidence["expects_heading_response"] = expects_heading_response
+            evidence["expects_tool_catalog_response"] = expects_tool_catalog_response
+            evidence["tool_catalog"] = [
+                {
+                    "agent_name": route_name,
+                    "tool_names": list(tool_names),
+                }
+                for route_name, tool_names in route_tool_catalog.items()
+            ]
             evidence_summary = MCPClientUtil.build_evidence_summary(evidence)
             if requested_heading_count is not None:
                 evidence["requested_heading_count"] = requested_heading_count
@@ -541,6 +613,14 @@ class MCPClient(AbstractLLMClient):
             postclose_evidence["requested_heading_count"] = requested_heading_count
         postclose_evidence = dict(postclose_evidence)
         postclose_evidence["expects_heading_response"] = expects_heading_response
+        postclose_evidence["expects_tool_catalog_response"] = expects_tool_catalog_response
+        postclose_evidence["tool_catalog"] = [
+            {
+                "agent_name": route_name,
+                "tool_names": list(tool_names),
+            }
+            for route_name, tool_names in route_tool_catalog.items()
+        ]
 
         contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
         missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)

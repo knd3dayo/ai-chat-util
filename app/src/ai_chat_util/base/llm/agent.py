@@ -1125,6 +1125,7 @@ class AgentBuilder:
         llm: BaseChatModel,
         prompts: PromptsBase,
         tool_limits: ToolLimits | None,
+        include_coding_agent: bool = True,
         include_general_agent: bool = True,
         general_tool_allowlist: Sequence[str] | None = None,
         explicit_user_file_paths: Sequence[str] | None = None,
@@ -1152,7 +1153,8 @@ class AgentBuilder:
         normal_tools_mcp_config = mcp_config.filter(exclude_name=coding_agent_server_name)
         # allowed_tools_configにcoding_agent_nameと一致するツールがあれば、コードエージェントを作成する。
         agents = []
-        if len(code_agent_mcp_config.servers) > 0 :
+        should_create_coding_agent = include_coding_agent or len(normal_tools_mcp_config.servers) == 0
+        if should_create_coding_agent and len(code_agent_mcp_config.servers) > 0 :
             logger.info("Creating code agent for MCP server '%s'...", ", ".join(code_agent_mcp_config.servers.keys()))
             code_agent_builder = AgentBuilder()
             await code_agent_builder.prepare(

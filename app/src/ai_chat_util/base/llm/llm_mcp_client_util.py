@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping, Sequence, cast
 
 import ast
@@ -169,6 +170,54 @@ class MCPClientUtil:
                     except Exception:
                         continue
                     if not resolved.is_file():
+                        continue
+                    normalized = resolved.as_posix()
+                    if normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    candidates.append(normalized)
+
+        return candidates
+
+    @classmethod
+    def extract_explicit_user_directory_paths(cls, messages: Sequence[Any]) -> list[str]:
+        candidates: list[str] = []
+        seen: set[str] = set()
+        patterns = (
+            r"(?P<path>/[^\s'\"`]+)",
+            r"(?P<path>[A-Za-z]:[\\/][^\s'\"`]+)",
+        )
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            for pattern in patterns:
+                for match in re.finditer(pattern, text):
+                    raw_path = match.group("path").strip().rstrip(",.);:]>}")
+                    try:
+                        resolved = Path(raw_path).expanduser().resolve()
+                    except Exception:
+                        continue
+                    if not resolved.is_dir():
                         continue
                     normalized = resolved.as_posix()
                     if normalized in seen:
@@ -702,9 +751,10 @@ class MCPClientUtil:
         def _strip_markdown_emphasis(value: str) -> str:
             text = value.strip()
             if len(text) >= 4 and text.startswith("**") and text.endswith("**"):
-                return text[2:-2].strip()
+                text = text[2:-2].strip()
             if len(text) >= 2 and text.startswith("`") and text.endswith("`"):
                 return text[1:-1].strip()
+            text = text.replace("**", "").replace("__", "")
             return text
 
         def _extract_heading_candidates(block: str) -> dict[str, list[str]]:
@@ -750,6 +800,12 @@ class MCPClientUtil:
                     if value:
                         fallback_lines.append(value)
 
+                table_match = re.match(r"^\|\s*\d+\s*\|\s*(.+?)\s*\|\s*.+\|$", stripped)
+                if table_match:
+                    value = _strip_markdown_emphasis(table_match.group(1).strip())
+                    if value:
+                        fallback_lines.append(value)
+
             label_match = re.search(r"重要な見出し\s*[:：]\s*(.+)", block)
             if label_match:
                 tail = label_match.group(1).strip()
@@ -781,6 +837,10 @@ class MCPClientUtil:
                 return True
             lowered = normalized.lower()
             if re.match(r"^#{1,6}\s+headings by file$", lowered):
+                return True
+            if re.match(r"^#{1,6}\s+共通見出し\s*\d+\s*点$", normalized):
+                return True
+            if re.match(r"^#{1,6}\s+common\s+headings?\b", lowered):
                 return True
             if re.match(r"^#{1,6}\s+file\s+\d+\s*:", lowered):
                 return True
@@ -820,7 +880,6 @@ class MCPClientUtil:
                 continue
             if markdown_values:
                 markdown_heading_blocks.append(markdown_values)
-                continue
             if fallback_values:
                 fallback_heading_blocks.append(fallback_values)
 
@@ -858,7 +917,6 @@ class MCPClientUtil:
                     continue
                 if markdown_values:
                     raw_markdown_blocks.append(markdown_values)
-                    continue
                 if fallback_values:
                     raw_fallback_blocks.append(fallback_values)
 
@@ -875,6 +933,158 @@ class MCPClientUtil:
             "headings": headings,
             "raw_texts": raw_texts,
         }
+
+    @classmethod
+    def _extract_task_id_from_tool_result(cls, result: Any) -> str | None:
+        if isinstance(result, Sequence) and not isinstance(result, (str, bytes, bytearray, Mapping)):
+            for item in result:
+                if isinstance(item, Mapping):
+                    text_value = item.get("text")
+                    if isinstance(text_value, str) and text_value.strip():
+                        mapping = cls._extract_mapping_from_text(text_value)
+                        if isinstance(mapping, Mapping):
+                            task_id = mapping.get("task_id")
+                            if isinstance(task_id, str) and task_id.strip():
+                                return task_id.strip()
+        if isinstance(result, Mapping):
+            task_id = result.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                return task_id.strip()
+        return None
+
+    @classmethod
+    def build_coding_agent_heading_rescue_prompt(
+        cls,
+        *,
+        user_request_text: str,
+        requested_heading_count: int,
+    ) -> str:
+        count = requested_heading_count if requested_heading_count > 0 else 3
+        lines = [user_request_text.strip()]
+        lines.extend(
+            [
+                "",
+                "Requirements:",
+                "- Investigate only the Markdown files relevant to the user request.",
+                f"- Return exactly {count} common headings.",
+                "- Output each heading on its own line in the format: HEADING_LINE_EXACT: <exact Markdown heading line>",
+                "- Do not summarize in a table.",
+                "- Do not paraphrase the heading text.",
+                "- Preserve the exact Markdown heading line from the source files.",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    @classmethod
+    async def run_direct_coding_agent_heading_rescue(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+        messages: Sequence[Any],
+        run_trace_id: str,
+        requested_heading_count: int,
+    ) -> dict[str, Any]:
+        user_request_text = cls._extract_user_request_text(messages)
+        if not user_request_text.strip():
+            return {}
+
+        workspace_candidates = cls.extract_explicit_user_directory_paths(messages)
+        workspace_path = workspace_candidates[0] if workspace_candidates else str(runtime_config.mcp.working_directory or "")
+        if not workspace_path:
+            return {}
+
+        mcp_config = runtime_config.get_mcp_server_config().filter(include_name=runtime_config.mcp.coding_agent_endpoint.mcp_server_name)
+        if len(mcp_config.servers) == 0:
+            return {}
+
+        def _status_mapping(value: Any) -> Mapping[str, Any] | None:
+            if isinstance(value, Mapping):
+                return value
+            if hasattr(value, "model_dump"):
+                try:
+                    dumped = value.model_dump(mode="python")
+                except TypeError:
+                    dumped = value.model_dump()
+                if isinstance(dumped, Mapping):
+                    return dumped
+            text = cls._stringify_message_content(value)
+            parsed = cls._extract_mapping_from_text(text)
+            return parsed if isinstance(parsed, Mapping) else None
+
+        def _build_rescue_evidence(status_value: Any, result_value: Any) -> dict[str, Any]:
+            status_mapping = _status_mapping(status_value)
+            return cls.extract_successful_tool_evidence(
+                [
+                    {
+                        "messages": [
+                            {
+                                "role": "tool",
+                                "content": cls._stringify_message_content(status_value),
+                                "artifact": status_mapping,
+                            },
+                            {
+                                "role": "tool",
+                                "content": cls._stringify_message_content(result_value),
+                            },
+                        ]
+                    }
+                ]
+            )
+
+        client = MultiServerMCPClient(mcp_config.to_langchain_config())
+        tools = await client.get_tools()
+        tool_map = {
+            str(getattr(tool, "name", "")).strip(): tool
+            for tool in tools
+            if str(getattr(tool, "name", "")).strip()
+        }
+        execute_tool = tool_map.get("execute")
+        status_tool = tool_map.get("status")
+        result_tool = tool_map.get("get_result")
+        if execute_tool is None or status_tool is None or result_tool is None:
+            return {}
+
+        rescue_prompt = cls.build_coding_agent_heading_rescue_prompt(
+            user_request_text=user_request_text,
+            requested_heading_count=requested_heading_count,
+        )
+        execute_result = await execute_tool.ainvoke(
+            {
+                "req": {
+                    "prompt": rescue_prompt,
+                    "workspace_path": workspace_path,
+                    "timeout": 300,
+                    "trace_id": run_trace_id,
+                }
+            }
+        )
+        task_id = cls._extract_task_id_from_tool_result(execute_result)
+        if not task_id:
+            return {}
+
+        latest_status_result: Any | None = None
+        for _ in range(30):
+            status_result = await status_tool.ainvoke({"task_id": task_id, "tail": 40, "wait_seconds": 1})
+            latest_status_result = status_result
+            status_text = cls._stringify_message_content(status_result)
+            if "completed" in status_text or "failed" in status_text or "timeout" in status_text or "cancelled" in status_text or '"sub_status":"completed"' in status_text:
+                break
+
+        result = await result_tool.ainvoke({"task_id": task_id, "tail": None, "wait_seconds": 0})
+        evidence = _build_rescue_evidence(latest_status_result, result)
+        if not (evidence.get("headings") or []):
+            for _ in range(5):
+                await asyncio.sleep(1)
+                latest_status_result = await status_tool.ainvoke({"task_id": task_id, "tail": 40, "wait_seconds": 0})
+                result = await result_tool.ainvoke({"task_id": task_id, "tail": None, "wait_seconds": 0})
+                evidence = _build_rescue_evidence(latest_status_result, result)
+                if evidence.get("headings"):
+                    break
+        evidence = dict(evidence)
+        evidence["latest_task_id"] = task_id
+        if requested_heading_count > 0:
+            evidence["requested_heading_count"] = requested_heading_count
+        return evidence
 
     @classmethod
     async def collect_evidence_results(

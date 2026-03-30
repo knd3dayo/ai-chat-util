@@ -342,6 +342,10 @@ class ToolLimits(BaseModel):
         if moved_top_level_fields or isinstance(req, Mapping):
             normalized_kwargs["req"] = normalized_req
 
+        prompt = normalized_req.get("prompt")
+        if isinstance(prompt, str) and cls._looks_like_heading_extraction_task(prompt):
+            cast(dict[str, Any], tool_call_state)["expects_heading_output"] = True
+
         target_file_path = cls._extract_single_explicit_user_file_path(tool_call_state)
         if not target_file_path:
             return tuple(args), normalized_kwargs
@@ -349,7 +353,6 @@ class ToolLimits(BaseModel):
         if not normalized_req:
             return tuple(args), normalized_kwargs
 
-        prompt = normalized_req.get("prompt")
         workspace_path = normalized_req.get("workspace_path")
         if not isinstance(prompt, str) or not prompt.strip() or target_file_path in prompt or cls._contains_explicit_file_path(prompt):
             return tuple(args), normalized_kwargs
@@ -378,6 +381,18 @@ class ToolLimits(BaseModel):
 
         normalized_req["prompt"] = prompt.rstrip() + "\n\n" + "\n".join(prompt_suffix_lines)
         normalized_kwargs["req"] = normalized_req
+        return tuple(args), normalized_kwargs
+
+    @staticmethod
+    def normalize_followup_arguments(
+        tool_name: str,
+        tool_call_state: Mapping[str, Any],
+        args: Sequence[Any],
+        kwargs: Mapping[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        normalized_kwargs = dict(kwargs)
+        if (tool_name or "").strip().lower() == "get_result" and bool(tool_call_state.get("expects_heading_output")):
+            normalized_kwargs["tail"] = None
         return tuple(args), normalized_kwargs
 
     @staticmethod
@@ -411,6 +426,19 @@ class ToolLimits(BaseModel):
 
     @staticmethod
     def extract_execute_task_id(result: Any) -> str | None:
+        if isinstance(result, Sequence) and not isinstance(result, (str, bytes, bytearray, Mapping)):
+            for item in result:
+                if isinstance(item, Mapping):
+                    text_value = item.get("text")
+                    if isinstance(text_value, str) and text_value.strip():
+                        try:
+                            parsed = json.loads(text_value)
+                        except Exception:
+                            parsed = None
+                        if isinstance(parsed, Mapping):
+                            task_id = parsed.get("task_id")
+                            if isinstance(task_id, str) and task_id.strip():
+                                return task_id.strip()
         if isinstance(result, Mapping):
             task_id = result.get("task_id")
             if isinstance(task_id, str) and task_id.strip():
@@ -575,6 +603,7 @@ class ToolLimits(BaseModel):
         ) -> Any:
             def _wrapped_func(*args: Any, **kwargs: Any) -> Any:
                 args, kwargs = cls.normalize_execute_arguments(tool_name, tool_call_state, args, kwargs)
+                args, kwargs = cls.normalize_followup_arguments(tool_name, tool_call_state, args, kwargs)
                 used = int(tool_call_state.get("used", 0) or 0)
                 if used < 0:
                     used = 0
@@ -788,6 +817,7 @@ class ToolLimits(BaseModel):
         attempts = tool_timeout_retries_int + 1
         last_err: BaseException | None = None
         args, kwargs = cls.normalize_execute_arguments(tool_name, tool_call_state, args, kwargs)
+        args, kwargs = cls.normalize_followup_arguments(tool_name, tool_call_state, args, kwargs)
         followup_task_id = cls.extract_followup_task_id(tool_name, args, kwargs)
         invalid_task_ids = cast(set[str], tool_call_state.setdefault("invalid_followup_task_ids", set()))
         latest_execute_task_id = cast(str | None, tool_call_state.get("latest_execute_task_id"))

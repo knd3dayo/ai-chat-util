@@ -1828,6 +1828,23 @@ def test_extract_successful_tool_evidence_ignores_synthetic_headings_by_file_blo
     assert evidence["headings"] == []
 
 
+def test_extract_successful_tool_evidence_parses_heading_table_rows() -> None:
+    evidence = MCPClientUtil.extract_successful_tool_evidence(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "tool",
+                        "content": '{"stdout": "## 共通見出し 3 点\n| # | 見出し | 該当ファイル |\n|---|--------|---------------|\n| 1 | **検証目的** | 全ファイル |\n| 2 | **検証手順** / **検証シナリオ** | 全ファイル |\n| 3 | **判定基準** | 01, 02, 03 |", "stderr": null}',
+                    }
+                ]
+            }
+        ]
+    )
+
+    assert evidence["headings"] == ["検証目的", "検証手順 / 検証シナリオ", "判定基準"]
+
+
 def test_build_evidence_reflected_final_text_includes_tool_catalog_when_requested() -> None:
     text = MCPClientUtil.build_evidence_reflected_final_text(
         {
@@ -2050,6 +2067,14 @@ def test_build_routing_context_text_includes_route_tool_catalog() -> None:
     assert "general_tool_agent_tools=get_loaded_config_info" in text
 
 
+def test_extract_task_id_from_tool_result_supports_text_part_list() -> None:
+    task_id = MCPClientUtil._extract_task_id_from_tool_result(
+        [{"type": "text", "text": '{"task_id":"task-123"}'}]
+    )
+
+    assert task_id == "task-123"
+
+
 def test_resolve_route_tool_catalog_splits_coding_and_general_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeCatalogClient:
         def __init__(self, config: Any) -> None:
@@ -2150,6 +2175,60 @@ def test_resolve_route_tool_inventory_collects_description_and_primary_args(monk
             }
         ],
     }
+
+
+def test_run_direct_coding_agent_heading_rescue_returns_headings(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeExecuteTool:
+        name = "execute"
+
+        async def ainvoke(self, payload: Any) -> Any:
+            assert payload["req"]["workspace_path"] == "/tmp/workspace"
+            assert "HEADING_LINE_EXACT" in payload["req"]["prompt"]
+            return [{"type": "text", "text": '{"task_id":"task-123"}'}]
+
+    class _FakeStatusTool:
+        name = "status"
+
+        async def ainvoke(self, payload: Any) -> Any:
+            assert payload["task_id"] == "task-123"
+            return [{"type": "text", "text": '{"status":"exited","sub_status":"completed"}'}]
+
+    class _FakeResultTool:
+        name = "get_result"
+
+        async def ainvoke(self, payload: Any) -> Any:
+            assert payload["task_id"] == "task-123"
+            assert payload["tail"] is None
+            return [
+                {
+                    "type": "text",
+                    "text": '{"stdout":"HEADING_LINE_EXACT: ## 検証目的\\nHEADING_LINE_EXACT: ## 検証手順\\nHEADING_LINE_EXACT: ## 判定基準","stderr":null}',
+                }
+            ]
+
+    class _FakeCatalogClient:
+        def __init__(self, _config: Any) -> None:
+            pass
+
+        async def get_tools(self) -> list[Any]:
+            return [_FakeExecuteTool(), _FakeStatusTool(), _FakeResultTool()]
+
+    monkeypatch.setattr(llm_mcp_client_util_mod, "MultiServerMCPClient", _FakeCatalogClient)
+    runtime_config = _build_runtime_config()
+    runtime_config.mcp.working_directory = "/tmp/workspace"
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent"))
+
+    evidence = asyncio.run(
+        MCPClientUtil.run_direct_coding_agent_heading_rescue(
+            runtime_config=runtime_config,
+            messages=[{"role": "user", "content": "作業対象は /tmp/workspace です。必ず coding agent を使って docs/11_検証 配下の Markdown を調査し、共通している見出しを 3 点に整理してください。"}],
+            run_trace_id="trace-1",
+            requested_heading_count=3,
+        )
+    )
+
+    assert evidence["headings"] == ["## 検証目的", "## 検証手順", "## 判定基準"]
+    assert evidence["latest_task_id"] == "task-123"
 
 
 def test_extract_config_path_from_text_returns_yaml_path() -> None:

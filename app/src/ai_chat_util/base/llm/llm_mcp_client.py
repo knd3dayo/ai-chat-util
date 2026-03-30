@@ -614,6 +614,35 @@ class MCPClient(AbstractLLMClient):
             for route_name, tool_names in route_tool_catalog.items()
         ]
 
+        if routing_decision.selected_route == "coding_agent" and expects_heading_response and not (postclose_evidence.get("headings") or []):
+            rescue_evidence = await MCPClientUtil.run_direct_coding_agent_heading_rescue(
+                runtime_config=self.runtime_config,
+                messages=lc_messages,
+                run_trace_id=run_trace_id,
+                requested_heading_count=requested_heading_count or 3,
+            )
+            rescue_headings = rescue_evidence.get("headings")
+            if isinstance(rescue_headings, Sequence) and any(isinstance(v, str) and str(v).strip() for v in rescue_headings):
+                audit_context.emit(
+                    "coding_agent_heading_rescued",
+                    route_name="coding_agent",
+                    payload={
+                        "heading_count": len([v for v in rescue_headings if isinstance(v, str) and str(v).strip()]),
+                        "latest_task_id": rescue_evidence.get("latest_task_id"),
+                    },
+                )
+                merged_postclose_evidence = dict(postclose_evidence)
+                merged_postclose_evidence.update({
+                    "stdout_blocks": rescue_evidence.get("stdout_blocks") or postclose_evidence.get("stdout_blocks") or [],
+                    "headings": rescue_headings,
+                    "raw_texts": rescue_evidence.get("raw_texts") or postclose_evidence.get("raw_texts") or [],
+                })
+                if rescue_evidence.get("config_path") and not merged_postclose_evidence.get("config_path"):
+                    merged_postclose_evidence["config_path"] = rescue_evidence.get("config_path")
+                if rescue_evidence.get("latest_task_id"):
+                    merged_postclose_evidence["latest_task_id"] = rescue_evidence.get("latest_task_id")
+                postclose_evidence = merged_postclose_evidence
+
         contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
         missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
         logger.info(

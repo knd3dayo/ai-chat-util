@@ -1,6 +1,6 @@
 from fastapi import APIRouter, FastAPI, Request
-from ai_chat_util_base.config.runtime import init_runtime
-from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers
+from ai_chat_util.common.config.runtime import init_runtime
+from ai_chat_util.common.model.request_headers import RequestHeaders, bind_current_request_headers
 
 from ai_chat_util.base.core.resource_app import (
     use_custom_pdf_analyzer,

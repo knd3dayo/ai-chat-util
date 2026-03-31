@@ -8,14 +8,14 @@ import uuid
 import asyncio
 from langgraph.errors import GraphRecursionError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from ai_chat_util_base.config.runtime import (
+from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
     get_runtime_config,
 )
-from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
-from ai_chat_util_base.model.request_headers import get_current_request_headers
+from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
+from ai_chat_util.common.model.request_headers import get_current_request_headers
 from .abstract_llm_client import AbstractLLMClient
-from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
+from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts, PromptsBase
 from .supervisor_support import create_audit_context

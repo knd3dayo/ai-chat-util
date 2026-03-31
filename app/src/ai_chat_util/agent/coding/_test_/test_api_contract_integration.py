@@ -6,8 +6,8 @@ from typing import Any, AsyncGenerator, Optional
 
 from fastapi.testclient import TestClient
 
-from ai_chat_util_base.model.agent_util_models import TaskStatus
-from coding_agent_util._api_.api_server import create_app
+from ai_chat_util.common.model.agent_util_models import TaskStatus
+from ai_chat_util.agent.coding._api_.api_server import create_app
 
 
 @dataclass
@@ -70,8 +70,8 @@ def test_http_execute_status_cancel_contract(tmp_path: Path, monkeypatch) -> Non
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from coding_agent_util.core import endpoint as endpoint_mod
-    from coding_agent_util.core import task_manager as tm_mod
+    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.coding.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

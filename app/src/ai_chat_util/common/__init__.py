@@ -1,0 +1,1 @@
+"""Shared config and model layer for ai_chat_util."""

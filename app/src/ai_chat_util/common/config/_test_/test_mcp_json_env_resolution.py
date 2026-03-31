@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import pytest
 
-from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig
+from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig
 
 
 def _write_mcp_json(tmp_path: Path, env: dict | None) -> str:

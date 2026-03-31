@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ai_chat_util_base.config.runtime import FileServerAllowedRoot, FileServerSMBSection
+from ai_chat_util.common.config.runtime import FileServerAllowedRoot, FileServerSMBSection
 from file_util.model import (
     FileServerEntry,
     FileServerEntryType,

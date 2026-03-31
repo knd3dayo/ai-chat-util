@@ -20,8 +20,8 @@ try:
 except Exception:  # pragma: no cover
     AsyncSqliteSaver = None  # type: ignore[assignment]
 
-from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig
-from ai_chat_util_base.config.runtime import (
+from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig
+from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
     CodingAgentUtilConfig,
 )

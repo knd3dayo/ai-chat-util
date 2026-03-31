@@ -9,10 +9,10 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from ai_chat_util_base.config import runtime as runtime_mod
-from ai_chat_util_base.model.agent_util_models import TaskStatus
-from coding_agent_util._api_.api_server import create_app
-from coding_agent_util.core.endpoint import EndPoint
+from ai_chat_util.common.config import runtime as runtime_mod
+from ai_chat_util.common.model.agent_util_models import TaskStatus
+from ai_chat_util.agent.coding._api_.api_server import create_app
+from ai_chat_util.agent.coding.core.endpoint import EndPoint
 
 endpoint = EndPoint()
 
@@ -73,7 +73,7 @@ def test_init_coding_runtime_rejects_nested_coding_agent_util(tmp_path: Path, mo
     monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
     runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
 
-    from ai_chat_util_base.config.config_util import ConfigError
+    from ai_chat_util.common.config.config_util import ConfigError
 
     with pytest.raises(ConfigError):
         runtime_mod.init_coding_runtime(None)
@@ -162,8 +162,8 @@ def test_http_execute_applies_rewrite_and_persists_metadata(tmp_path: Path, monk
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from coding_agent_util.core import endpoint as endpoint_mod
-    from coding_agent_util.core import task_manager as tm_mod
+    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.coding.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 
@@ -209,8 +209,8 @@ def test_http_execute_normalizes_existing_file_workspace_path_to_parent(tmp_path
     store: dict[str, TaskStatus] = {}
     fake_service = _FakeTaskService(store=store)
 
-    from coding_agent_util.core import endpoint as endpoint_mod
-    from coding_agent_util.core import task_manager as tm_mod
+    from ai_chat_util.agent.coding.core import endpoint as endpoint_mod
+    from ai_chat_util.agent.coding.core import task_manager as tm_mod
 
     monkeypatch.setattr(endpoint_mod, "select_task_service", lambda backend=None: fake_service)
 

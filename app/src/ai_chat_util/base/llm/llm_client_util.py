@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from .abstract_llm_client import AbstractLLMClient
 
-from ai_chat_util_base.model.ai_chatl_util_models import (
+from ai_chat_util.common.model.ai_chatl_util_models import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )

@@ -1,1 +1,1 @@
-"""Coding agent executor HTTP API (FastAPI)."""
+"""API entrypoints for ai_chat_util.agent.coding."""

@@ -6,7 +6,7 @@ import json
 from typing import Iterable
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ..base.llm.llm_client_util import LLMClientUtil
-from ai_chat_util_base.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
+from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:

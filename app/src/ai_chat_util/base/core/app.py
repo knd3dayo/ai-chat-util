@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 from pydantic import Field
-from ai_chat_util_base.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util.common.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient, MCPBatchClient
 

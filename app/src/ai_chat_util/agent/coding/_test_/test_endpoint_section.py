@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_chat_util_base.config.runtime import CodingAgentEndpointSection, init_runtime
+from ai_chat_util.common.config.runtime import CodingAgentEndpointSection, init_runtime
 
 
 def test_coding_agent_endpoint_section_model_validate_accepts_and_strips() -> None:

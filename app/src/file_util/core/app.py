@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 
 from pydantic import Field
 
-from ai_chat_util_base.config.runtime import get_runtime_config, get_runtime_config_path
+from ai_chat_util.common.config.runtime import get_runtime_config, get_runtime_config_path
 from file_util.util.file_util import FileUtil
 from file_util.model import (
     FileServerListResponse,

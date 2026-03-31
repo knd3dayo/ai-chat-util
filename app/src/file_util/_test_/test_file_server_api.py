@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ai_chat_util_base.config.runtime import get_runtime_config, init_runtime
+from ai_chat_util.common.config.runtime import get_runtime_config, init_runtime
 from file_util.api.api_server import app
 
 

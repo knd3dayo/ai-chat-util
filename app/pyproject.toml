@@ -52,9 +52,11 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["ai_chat_util*", "file_util*"]
+exclude = ["ai_chat_util_base*", "coding_agent_util*"]
 
 [project.scripts]
 ai-chat-util = "ai_chat_util.cli.__main__:cli_main"
-coding-agent-api = "coding_agent_util._api_.api_server:main"
-coding-agent-mcp = "coding_agent_util.mcp.mcp_server:main"
-coding-agent-util = "coding_agent_util._cli_.main:main"
+coding-agent-api = "ai_chat_util.agent.coding._api_.api_server:main"
+coding-agent-mcp = "ai_chat_util.agent.coding.mcp.mcp_server:main"
+coding-agent-util = "ai_chat_util.agent.coding._cli_.main:main"

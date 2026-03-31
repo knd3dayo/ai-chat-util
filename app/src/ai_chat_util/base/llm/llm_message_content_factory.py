@@ -8,8 +8,8 @@ import atexit
 import base64
 from abc import ABC, abstractmethod
 
-from ai_chat_util_base.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util_base.model.ai_chatl_util_models import (
+from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.common.model.ai_chatl_util_models import (
     ChatHistory, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel
 )

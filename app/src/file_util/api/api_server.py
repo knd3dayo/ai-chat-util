@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
 
-from ai_chat_util_base.config.runtime import init_runtime
+from ai_chat_util.common.config.runtime import init_runtime
 from file_util.model import FileServerProvider
 
 from file_util.core.app import (

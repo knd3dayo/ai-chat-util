@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
-from ai_chat_util_base.model.ai_chatl_util_models import (
+from ai_chat_util.common.model.ai_chatl_util_models import (
     ChatResponse, ChatRequest
 )
 from .llm_message_content_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory
-from ai_chat_util_base.config.runtime import AiChatUtilConfig
+from ai_chat_util.common.config.runtime import AiChatUtilConfig
 
 class AbstractLLMClient(ABC):
 

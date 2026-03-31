@@ -33,7 +33,7 @@
 ### 🤖 コーディングエージェント実行（coding-agent-util）
 - コーディングエージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
 - 設定は `ai-chat-util-config.yml`（`coding_agent_util:` セクションで統合）、秘密情報は `.env` / 環境変数で管理。
-- 独立 namespace として `coding_agent_util` を追加しており、正規の起動点は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` です。
+- 実装本体は `ai_chat_util.agent.coding` に統合しており、正規の起動点は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` です。
 - Docker 実行例は [docker/coding-agent/images/all-in-one-image/README.md](docker/coding-agent/images/all-in-one-image/README.md) と [docker/coding-agent/images/dood/README.md](docker/coding-agent/images/dood/README.md) を参照。
 
 ---
@@ -100,22 +100,16 @@
 
 ```
 app/src/
-├── ai_chat_util/        # LLMアプリ本体（API / CLI / MCP / agent / chat workflow）
-│   ├── agent/           # coding-agent の互換 wrapper / legacy entrypoint
+├── ai_chat_util/        # LLMアプリ本体 + 共有層 + coding-agent runtime
+│   ├── agent/           # coding-agent runtime
+│   │   └── coding/      # coding-agent の API / CLI / MCP / core / test
 │   ├── api/             # FastAPI APIサーバー
 │   ├── base/            # chat / batch / llm / resource 組み立て
 │   ├── cli/             # CLI
+│   ├── common/          # 共通設定・共通モデル・契約
 │   ├── log/             # ログ設定
 │   ├── mcp/             # MCPサーバー
 │   └── test/            # サンプル/簡易スクリプト
-├── ai_chat_util_base/   # 共通設定・共通モデル・契約
-│   ├── config/          # YAML設定ロード・runtime・MCP設定モデル
-│   └── model/           # Pydanticモデル / request headers / agent models
-├── coding_agent_util/   # coding-agent の正規 runtime / test 配置
-│   ├── _api_/           # API entrypoint
-│   ├── _cli_/           # CLI entrypoint
-│   ├── core/subprocess/ # detached subprocess entrypoint
-│   └── mcp/             # MCP server entrypoint
 └── file_util/           # ファイル処理基盤
     ├── api/             # ファイル処理API
     ├── core/            # ファイル処理ツール公開関数
@@ -127,11 +121,11 @@ app/src/
 
 依存方向は次のルールを前提に保守します。
 
-- `file_util` は最下層のファイル処理基盤です。`ai_chat_util` と `ai_chat_util_base` を import しません。
-- `ai_chat_util_base` は共通設定・共通モデル・契約を持つ層です。`ai_chat_util` を import しません。
-- `ai_chat_util` はアプリケーション層です。`ai_chat_util_base` と `file_util` に依存して構いません。
-- `coding_agent_util` は coding-agent の正規 package です。runtime / entrypoint / test は原則ここへ配置します。
-- `ai_chat_util.agent.coding` は後方互換のための wrapper 層として残します。
+- `file_util` は最下層のファイル処理基盤です。`ai_chat_util` の app 層へ依存しません。
+- `ai_chat_util.common` は共通設定・共通モデル・契約を持つ共有層です。
+- `ai_chat_util.base` はアプリケーション層の chat / llm 組み立てを持ちます。
+- `ai_chat_util.agent.coding` は coding-agent の runtime / entrypoint / test を持ちます。
+- `ai_chat_util` 配下の app 層は `ai_chat_util.common` と `file_util` に依存して構いません。
 - LLM 非依存のファイル処理は `file_util` に置きます。
 - LLM 固有のメッセージ組み立てや chat workflow は `ai_chat_util` に置きます。
 
@@ -141,21 +135,21 @@ app/src/
 file_util
     ^
     |
-ai_chat_util_base
-    ^
-    |
-ai_chat_util
+ai_chat_util.common
+  ^
+  |
+ai_chat_util.base / ai_chat_util.agent.coding / ai_chat_util.api / ai_chat_util.mcp / ai_chat_util.cli
 ```
 
-`ai_chat_util_base -> ai_chat_util` の逆向き依存は作らないでください。
+`ai_chat_util.common -> ai_chat_util.base` の逆向き依存は作らないでください。
 
 ### 再編の優先順
 
 責務整理は一度に大きく動かさず、次の順番で進めます。
 
-1. 共通で使うが LLM 非依存な処理を `file_util` または `ai_chat_util_base` に移す
+1. 共通で使うが LLM 非依存な処理を `file_util` または `ai_chat_util.common` に移す
 2. `ai_chat_util/base/util` に残るものを「LLM 固有かどうか」で分類する
-3. `ai_chat_util/agent/coding` に残る互換 wrapper をどこまで維持するか判断する
+3. `ai_chat_util` 配下の共有層と runtime 層へ責務を集約する
 
 ### 現在の再編状況
 
@@ -165,21 +159,12 @@ ai_chat_util
 - `downloader` は `file_util/util/downloader.py` に配置
 - `office2pdf` は `file_util/util/office2pdf.py` に配置
 - PDF のテキスト/画像抽出は `file_util/util/pdf_util.py` に配置
-- coding-agent の API / CLI / MCP / subprocess entrypoint は `coding_agent_util` namespace に集約
+- 共有設定・共有モデルは `ai_chat_util.common` に集約
+- coding-agent の API / CLI / MCP / subprocess entrypoint は `ai_chat_util.agent.coding` に集約
 - console script は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` を提供
-- coding-agent の自動テストは `coding_agent_util/_test_` に移動
+- coding-agent の自動テストは `ai_chat_util/agent/coding/_test_` に配置
 
 `ai_chat_util/base/util` の file util shim は削除済みです。
-
-### 互換レイヤの扱い
-
-現在の `ai_chat_util/agent/coding` には次のものを残しています。
-
-- 旧 import path を壊さないための forwarding wrapper
-- `python -m ai_chat_util.agent.coding...` を維持するための互換 entrypoint
-- 手動検証用の最小ファイル（例: `mcp_client.py`）
-
-新規実装・新規テストは `coding_agent_util` 側へ追加してください。
 
 ### 次の移動候補
 
@@ -187,8 +172,6 @@ ai_chat_util
 
 - `ai_chat_util/base/util` 全体
   - 最終的には「LLM 文脈を知らなくても成立する処理」を残さない方針です。
-- `ai_chat_util/agent/coding`
-  - runtime 実装の大半は `coding_agent_util` へ移設済みです。次段階では wrapper の維持範囲を整理します。
 
 ---
 
@@ -1128,7 +1111,7 @@ uvicorn ai_chat_util.api.api_server:app
 
 ## coding-agent-util（コーディングエージェント実行ユーティリティ）
 
-本プロジェクト（ai-chat-util）には、`src/coding_agent_util/` 配下に **coding-agent-util（コーディングエージェント実行ユーティリティ）** が統合されています。
+本プロジェクト（ai-chat-util）には、`src/ai_chat_util/agent/coding/` 配下に **coding-agent-util（コーディングエージェント実行ユーティリティ）** が統合されています。
 
 ローカルまたは Docker 上で「コーディングエージェント実行タスク」を起動し、進捗確認（status）やキャンセル（cancel）を行うためのユーティリティです。
 
@@ -1141,8 +1124,6 @@ uvicorn ai_chat_util.api.api_server:app
 - `coding-agent-api`
 - `coding-agent-mcp`
 - `coding-agent-util`
-
-`src/ai_chat_util/agent/coding/` 側は後方互換の import path / module entrypoint を維持する wrapper 層です。
 
 本機能では **非秘匿の設定を `ai-chat-util-config.yml` に統合（ルート直下の `coding_agent_util:`）**し、**秘匿情報（API key 等）は `.env` / 環境変数**で供給する方針です。
 
@@ -1425,5 +1406,5 @@ uv --directory ./app run coding-agent-util --config ./ai-chat-util-config.yml st
 
 ## 開発メモ
 
-- 設定ローダは `src/ai_chat_util_base/config/ai_chat_util_runtime.py` にあります（ai-chat-util / coding-agent-util を同梱）
+- 設定ローダは `src/ai_chat_util/common/config/runtime.py` にあります（ai-chat-util / coding-agent-util を同梱）
 - 設定は `ai-chat-util-config.yml` へ統合可能で、環境変数は secrets（`.env` 含む）の供給にのみ使う設計です

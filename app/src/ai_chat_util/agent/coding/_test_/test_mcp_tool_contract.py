@@ -4,8 +4,8 @@ import asyncio
 
 from fastmcp import FastMCP
 
-from coding_agent_util.core.endpoint import EndPoint
-from coding_agent_util.mcp.mcp_server import CodingMCPServer
+from ai_chat_util.agent.coding.core.endpoint import EndPoint
+from ai_chat_util.agent.coding.mcp.mcp_server import CodingMCPServer
 
 an_server = CodingMCPServer()
 endpoint = EndPoint()

@@ -1,4 +1,1 @@
-"""Test / scratch modules for the coding application.
-
-This package is intentionally not part of production code paths.
-"""
+"""Test utilities for ai_chat_util.agent.coding."""

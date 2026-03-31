@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ai_chat_util_base.model.request_headers import RequestHeaders
+from ai_chat_util.common.model.request_headers import RequestHeaders
 
 
 def test_request_headers_trace_id_aliases() -> None:

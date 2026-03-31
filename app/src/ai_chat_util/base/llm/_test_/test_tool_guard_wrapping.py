@@ -29,8 +29,8 @@ from ai_chat_util.base.llm.agent import AgentBuilder, ToolLimits
 from ai_chat_util.base.llm.prompts import CodingAgentPrompts
 from ai_chat_util.base.llm.llm_mcp_client_util import MCPClientUtil
 from ai_chat_util.base.llm.supervisor_support import RouteCandidate, RoutingDecision
-from ai_chat_util_base.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
-from ai_chat_util_base.config.runtime import (
+from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
+from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
     FeaturesSection,
     LLMSection,
@@ -39,7 +39,7 @@ from ai_chat_util_base.config.runtime import (
     NetworkSection,
     Office2PDFSection,
 )
-from ai_chat_util_base.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest
+from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest
 
 
 class _FakeTool:

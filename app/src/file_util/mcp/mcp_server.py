@@ -2,7 +2,7 @@ import asyncio
 from dotenv import load_dotenv
 import argparse
 from fastmcp import FastMCP
-from ai_chat_util_base.config.runtime import init_runtime
+from ai_chat_util.common.config.runtime import init_runtime
 from file_util.core.app import (
     list_file_server_roots,
     list_file_server_entries,

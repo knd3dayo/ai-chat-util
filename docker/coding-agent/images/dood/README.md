@@ -82,7 +82,7 @@ host 側からテストクライアントで execute できます。
 mkdir -p /srv/ai_platform/workspaces/e2e_dood_ws_1
 
 cd app
-uv run python -m coding_agent_util._test_.mcp_client \
+uv run python -m ai_chat_util.agent.coding._test_.mcp_client \
   --url http://127.0.0.1:7101/mcp \
   --workspace-path /srv/ai_platform/workspaces/e2e_dood_ws_1 \
   --prompt "コーディングエージェントMCPツールとして、ワークスペース直下に done.txt を作成し、内容を dood-ok にしてください。最後に実施内容を短く報告してください。" \

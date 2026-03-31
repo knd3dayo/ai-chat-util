@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from ai_chat_util_base.config.runtime import CodingAgentUtilConfig
+from ai_chat_util.common.config.runtime import CodingAgentUtilConfig
 
 
 def test_backend_subprocess_is_normalized_to_process() -> None:

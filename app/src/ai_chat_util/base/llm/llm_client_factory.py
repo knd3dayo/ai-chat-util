@@ -1,4 +1,4 @@
-from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig
+from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig
 from ai_chat_util.base.llm.llm_client import LLMClient
 from .llm_mcp_client import MCPClient
 from ai_chat_util.base.llm.hitl_client import StdIOHITLClient, HITLClientBase

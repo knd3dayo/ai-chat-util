@@ -49,10 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプト文字列",
     )
-    chat_parser.add_argument(
-        "--use_mcp",
-        action="store_true",
-        help="MCPを使用してチャットする場合は指定します。指定しない場合は通常のLLMクライアントを使用します。",
+    agent_chat_parser = subparsers.add_parser("agent_chat", help="MCP を使用してテキストでチャットします")
+    agent_chat_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプト文字列",
     )
     # batch_chat
     batch_chat_parser = subparsers.add_parser(
@@ -65,61 +68,64 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプトテンプレート文字列",
     )
-    batch_chat_parser.add_argument(
-        "--use_mcp",
-        action="store_true",
-        help="MCPを使用してチャットする場合は指定します。指定しない場合は通常のLLMクライアントを使用します。",
+    agent_batch_chat_parser = subparsers.add_parser(
+        "agent_batch_chat", help="MCP を使用してテキストでバッチチャットします"
     )
-
-    batch_chat_parser.add_argument(
-        "-i",
-        "--input_excel_path",
+    agent_batch_chat_parser.add_argument(
+        "-p",
+        "--prompt",
         type=str,
         required=True,
-        help="処理対象のメッセージとファイルパスを記載したExcelファイルのパス",
+        help="送信するプロンプトテンプレート文字列",
     )
-    batch_chat_parser.add_argument(
-        "-o",
-        "--output_excel_path",
-        type=str,
-        default="output.xlsx",
-        required=False,
-        help="結果を出力するExcelファイルのパス",
-    )
-    # batch_chat 実行時の動作をカスタマイズするオプション
-    batch_chat_parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=16,
-        required=False,
-        help="同時実行数の上限（デフォルト: 16）",
-    )
-    batch_chat_parser.add_argument(
-        "--content_column",
-        type=str,
-        default="content",
-        help="入力Excelファイル内のメッセージを含む列名（デフォルト: content）",
-    )
-    batch_chat_parser.add_argument(
-        "--file_path_column",
-        type=str,
-        default="file_path",
-        help="入力Excelファイル内のファイルパスを含む列名（デフォルト: file_path）",
-    )
-    # output_column は LLM の応答を出力する列名
-    batch_chat_parser.add_argument(
-        "--output_column",
-        type=str,
-        default="output",
-        help="出力Excelファイル内のLLM応答を含む列名（デフォルト: output）",
-    )
-    # 画像解析の detail レベルを指定するオプション
-    batch_chat_parser.add_argument(
-        "--image_detail",
-        type=str,
-        default="auto",
-        help="画像解析のdetail（low/high/auto）。既定は auto",
-    )
+
+    for current_batch_parser in (batch_chat_parser, agent_batch_chat_parser):
+        current_batch_parser.add_argument(
+            "-i",
+            "--input_excel_path",
+            type=str,
+            required=True,
+            help="処理対象のメッセージとファイルパスを記載したExcelファイルのパス",
+        )
+        current_batch_parser.add_argument(
+            "-o",
+            "--output_excel_path",
+            type=str,
+            default="output.xlsx",
+            required=False,
+            help="結果を出力するExcelファイルのパス",
+        )
+        current_batch_parser.add_argument(
+            "--concurrency",
+            type=int,
+            default=16,
+            required=False,
+            help="同時実行数の上限（デフォルト: 16）",
+        )
+        current_batch_parser.add_argument(
+            "--content_column",
+            type=str,
+            default="content",
+            help="入力Excelファイル内のメッセージを含む列名（デフォルト: content）",
+        )
+        current_batch_parser.add_argument(
+            "--file_path_column",
+            type=str,
+            default="file_path",
+            help="入力Excelファイル内のファイルパスを含む列名（デフォルト: file_path）",
+        )
+        current_batch_parser.add_argument(
+            "--output_column",
+            type=str,
+            default="output",
+            help="出力Excelファイル内のLLM応答を含む列名（デフォルト: output）",
+        )
+        current_batch_parser.add_argument(
+            "--image_detail",
+            type=str,
+            default="auto",
+            help="画像解析のdetail（low/high/auto）。既定は auto",
+        )
     
     # analyze_image_files
     image_parser = subparsers.add_parser(
@@ -261,9 +267,13 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client(use_mcp=args.use_mcp)
-        # HITL対応: status='paused' の場合は質問を表示して入力待ち→同じ trace_id で再開する。
+        llm_client = LLMFactory.create_llm_client()
+        trace_id: str | None = None
+        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
 
+    if args.command == "agent_chat":
+        _validate_non_empty(args.prompt, parser)
+        llm_client = LLMFactory.create_mcp_client()
         trace_id: str | None = None
         return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
     
@@ -272,7 +282,25 @@ async def main(argv: Iterable[str] | None = None) -> None:
         # Heavy deps (e.g., pandas) are only needed for batch_chat.
         from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
 
-        llm_batch_client = LLMBatchClient(use_mcp=args.use_mcp)
+        llm_batch_client = LLMBatchClient()
+        await llm_batch_client.run_batch_chat_from_excel(
+            input_excel_path=args.input_excel_path,
+            output_excel_path=args.output_excel_path,
+            prompt=args.prompt,
+            content_column=args.content_column,
+            file_path_column=args.file_path_column,
+            output_column=args.output_column,
+            concurrency=args.concurrency,
+            detail=args.image_detail,
+        )
+        print(f"Batch chat completed. Results saved to {args.output_excel_path}")
+        return
+
+    if args.command == "agent_batch_chat":
+        _validate_non_empty(args.prompt, parser)
+        from ai_chat_util.base.llm.llm_batch_client import MCPBatchClient
+
+        llm_batch_client = MCPBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,
             output_excel_path=args.output_excel_path,

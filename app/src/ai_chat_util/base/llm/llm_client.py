@@ -12,8 +12,6 @@ from ai_chat_util_base.model.ai_chatl_util_models import (
 )
 from .llm_message_content_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory
 
-from .llm_mcp_client import MCPClient
-
 import litellm
 
 import ai_chat_util.log.log_settings as log_settings
@@ -183,10 +181,9 @@ class LLMClient(LLMClientBase):
 
     default_timeout_seconds: float = 300.0
     
-    def __init__(self, llm_config: AiChatUtilConfig, use_mcp: bool = False):
+    def __init__(self, llm_config: AiChatUtilConfig):
 
         self.llm_config = llm_config
-        self.use_mcp = use_mcp
         self.message_factory = LLMMessageContentFactory(config=llm_config)
 
         # ai-chat-util-config.yml の non-secret 設定を既定値として採用
@@ -204,71 +201,19 @@ class LLMClient(LLMClientBase):
         return self.message_factory
 
     def create(
-        self, llm_config: AiChatUtilConfig | None = None, use_mcp: bool = False
+        self, llm_config: AiChatUtilConfig | None = None
         ) -> "LLMClient":
         if llm_config is None:
             llm_config = get_runtime_config()
-        return LLMClient(llm_config, use_mcp=use_mcp)
+        return LLMClient(llm_config)
 
     async def _chat_completion_(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
-        if self.use_mcp:
-            raise NotImplementedError("MCP経由のChatCompletionはMCPClientクラスで直接呼び出してください。")
-            return await self.run_mcp_chat_completion(
-                self.llm_config, 
-                chat_request, 
-                self.default_timeout_seconds, 
+        return await self.run_litellm_chat_completion(
+                self.llm_config,
+                chat_request,
+                self.default_timeout_seconds,
                 **kwargs
-            )
-        else:
-            return await self.run_litellm_chat_completion(
-                    self.llm_config, 
-                    chat_request, 
-                    self.default_timeout_seconds, 
-                    **kwargs
-            )
-
-
-    async def run_mcp_chat_completion(
-        self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
-    ) -> ChatResponse:
-        messages = chat_request.chat_history.messages
-        mcp_client = MCPClient(llm_config)
-        # タイムアウトが未指定だと、ネットワーク待ちで無限に止まることがある
-        kwargs.setdefault("timeout", default_timeout_seconds)
-
-        # LiteLLM/OpenAI 側の timeout とは別に、アプリ側でも強制タイムアウトを掛けて
-        # 予期せぬ接続待ち等で“体感ハング”しないようにする。
-        hard_timeout: float = default_timeout_seconds
-        timeout_kw = kwargs.get("timeout")
-        if isinstance(timeout_kw, (int, float)) and float(timeout_kw) > 0:
-            hard_timeout = float(timeout_kw)
-
-        # async関数内で同期I/Oを呼ぶとイベントループがブロックされるため、acompletionを使う
-        # NOTE: messages には画像base64等が入るため、ここでは内容をログ出力しない（巨大化防止）
-        logger.debug(
-            "LLM completion request: provider=%s model=%s messages=%d timeout=%s",
-            llm_config.llm.provider,
-            llm_config.llm.completion_model,
-            len(messages),
-            kwargs.get("timeout"),
         )
-        try:
-            response = await asyncio.wait_for(
-                mcp_client.chat(chat_request),
-                timeout=hard_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(
-                "LLM呼び出しがタイムアウトしました。"
-                f" timeout={hard_timeout}s provider={llm_config.llm.provider} model={llm_config.llm.completion_model}.\n"
-                "対処: ai-chat-util-config.yml の llm.timeout_seconds を増やすか、CLIの --loglevel/--logfile でログを確認してください。"
-            ) from e
-        logger.debug("LLM completion response type: %s", type(response))
-
-        if isinstance(response, ChatResponse):
-            return response
-
-        raise TypeError(f"Unexpected MCP response type: {type(response)!r}")
 
     async def run_litellm_chat_completion(
         self, llm_config: AiChatUtilConfig, chat_request: ChatRequest, default_timeout_seconds, **kwargs
@@ -426,8 +371,7 @@ class LLMClient(LLMClientBase):
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message__(message_num: int, message: ChatMessage, previous_messages: list[ChatMessage]) -> tuple[int, ChatResponse]:
-            # Preserve MCP mode when creating per-task clients.
-            client = self.create(self.llm_config, use_mcp=self.use_mcp)
+            client = self.create(self.llm_config)
             chat_request: ChatRequest = ChatRequest(chat_history=ChatHistory(messages=previous_messages), chat_request_context=request_context)
             
             chat_request.chat_history.add_message(message)

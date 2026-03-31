@@ -449,9 +449,9 @@ ai_chat_util_config:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 秘密 | AWS Bedrock を使う場合の認証情報 |
 | `AI_CHAT_UTIL_CONFIG` | 非秘密 | `ai-chat-util-config.yml` のパス（`--config` を渡せない起動で使用） |
 
-### MCP設定（内部MCPクライアント用：任意）
+### MCP設定（agent_chat / agent_batch_chat 用：任意）
 
-CLIの `chat` / `batch_chat` は `--use_mcp` を指定すると、内部の MCP クライアントを使って「MCPツール込みのワークフロー」で実行できます。
+CLIの `agent_chat` / `agent_batch_chat` は、内部の MCP クライアントを使って「MCPツール込みのワークフロー」で実行します。
 このとき、`ai-chat-util-config.yml` の `mcp.mcp_config_path`に、MCPサーバー設定JSONのパスを指定してください。
 
 ```yml
@@ -487,7 +487,7 @@ ai_chat_util_config:
 }
 ```
 
-> 注意: `--use_mcp` を付けても `mcp.mcp_config_path` が未設定の場合、MCPツールはロードされません（警告ログが出ます）。
+> 注意: `agent_chat` / `agent_batch_chat` を使っても `mcp.mcp_config_path` が未設定の場合、MCPツールはロードされません（警告ログが出ます）。
 
 ### 内部MCPクライアントの安全弁（無限ループ/タイムアウト）
 
@@ -540,7 +540,7 @@ ai_chat_util_config:
 
 ### structured routing 検証手順
 
-supervisor が「どの route を選び、どのツールを呼び、最終的に回答十分と判断したか」を確認したい場合は、structured routing 用の設定を使って `chat --use_mcp` を実行します。
+supervisor が「どの route を選び、どのツールを呼び、最終的に回答十分と判断したか」を確認したい場合は、structured routing 用の設定を使って `agent_chat` を実行します。
 
 設定例:
 
@@ -570,7 +570,7 @@ uv --directory ./app run -m ai_chat_util.cli \
   --config ./work/ai-chat-util-config.structured-routing-test.yml \
   --loglevel INFO \
   --logfile ./work/structured-route-explicit.log \
-  chat --use_mcp -p "$PROMPT" > ./work/structured-route-explicit.out
+  agent_chat -p "$PROMPT" > ./work/structured-route-explicit.out
 ```
 
 通常ツール寄りの検証例:
@@ -582,7 +582,7 @@ uv --directory ./app run -m ai_chat_util.cli \
   --config ./work/ai-chat-util-config.structured-routing-test.yml \
   --loglevel INFO \
   --logfile ./work/structured-route-general.log \
-  chat --use_mcp -p "$PROMPT" > ./work/structured-route-general.out
+  agent_chat -p "$PROMPT" > ./work/structured-route-general.out
 ```
 
 判断系で「見出し抽出は不要」を明示する検証例:
@@ -594,7 +594,7 @@ uv --directory ./app run -m ai_chat_util.cli \
   --config ./work/ai-chat-util-config.structured-routing-test.yml \
   --loglevel INFO \
   --logfile ./work/structured-route-judgment.log \
-  chat --use_mcp -p "$PROMPT" > ./work/structured-route-judgment.out
+  agent_chat -p "$PROMPT" > ./work/structured-route-judgment.out
 ```
 
 期待される観測ポイント:
@@ -656,16 +656,16 @@ explicit coding-agent のケースでは、`route_decided.reason_code=route.expl
 
 ## HITL（Human-in-the-Loop：一時停止/再開）
 
-`ai_chat_util` は、内部MCPクライアント（LangGraph Supervisor + MCPツール）経由で実行する場合に限り、
+`ai_chat_util` は、`agent_chat` または `agent_batch_chat` のように内部MCPクライアント（LangGraph Supervisor + MCPツール）経由で実行する場合に限り、
 **人間への確認が必要になったタイミングで処理を一時停止（pause）し、回答/承認後に同じスレッドで再開（resume）**できます。
 
 ### 前提（重要）
 
-- HITL（pause/resume）が発生するのは **`--use_mcp`（内部MCPクライアント）を使う場合のみ**です。
-  - `--use_mcp` を付けない場合（LiteLLM経由の直接呼び出し）は、HITLは発生しません。
-- `run_simple_chat` / `run_simple_batch_chat` は常に LiteLLM 経由の直接呼び出し（MCP非対応）で実行されます（`use_mcp` 引数はありません）。
-- `--use_mcp` を使う場合は、`ai-chat-util-config.yml` の `mcp.mcp_config_path`が必要です。
-- CLI の `chat` は、同一プロセス内での対話として pause/resume を処理します（プロセスを跨いだ再開のための `trace_id` 指定オプションは現状ありません）。
+- HITL（pause/resume）が発生するのは **`agent_chat` / `agent_batch_chat`（内部MCPクライアント）を使う場合のみ**です。
+  - `chat` / `batch_chat`（LiteLLM経由の直接呼び出し）では、HITLは発生しません。
+- `run_simple_chat` / `run_simple_batch_chat` は常に LiteLLM 経由の直接呼び出し（MCP非対応）で実行されます。
+- `agent_chat` / `agent_batch_chat` を使う場合は、`ai-chat-util-config.yml` の `mcp.mcp_config_path`が必要です。
+- CLI の `agent_chat` は、同一プロセス内での対話として pause/resume を処理します（プロセスを跨いだ再開のための `trace_id` 指定オプションは現状ありません）。
   - プロセスを跨いで再開したい場合は、API/ライブラリ利用で `ChatRequest.trace_id` を指定してください。
 
 ### レスポンス形（API/ライブラリ利用時）
@@ -682,11 +682,12 @@ explicit coding-agent のケースでは、`route_decided.reason_code=route.expl
 
 ### API エンドポイント
 
-FastAPI サーバーでは、CLI の `chat` 相当機能を次のエンドポイントで公開しています。
+FastAPI サーバーでは、CLI の `chat` / `agent_chat` 相当機能を次のエンドポイントで公開しています。
 
 - `POST /api/ai_chat_util/chat`
   - Body: `ChatRequest`
-  - Query: `use_mcp`（既定: `false`）
+- `POST /api/ai_chat_util/agent_chat`
+  - Body: `ChatRequest`
 
 #### 初回リクエスト例
 
@@ -714,7 +715,7 @@ FastAPI サーバーでは、CLI の `chat` 相当機能を次のエンドポイ
 
 #### paused 後の再開例
 
-`status="paused"` で `hitl.prompt` が返った場合は、同じ `trace_id` を使い、人間の回答を `chat_history.messages` に追加して再度 `POST /api/ai_chat_util/chat?use_mcp=true` を呼び出します。
+`status="paused"` で `hitl.prompt` が返った場合は、同じ `trace_id` を使い、人間の回答を `chat_history.messages` に追加して再度 `POST /api/ai_chat_util/agent_chat` を呼び出します。
 
 ```json
 {
@@ -749,7 +750,7 @@ FastAPI サーバーでは、CLI の `chat` 相当機能を次のエンドポイ
 }
 ```
 
-`use_mcp=true` の場合にのみ内部MCPクライアント経由の pause/resume が有効になります。`use_mcp=false` では通常の completed 応答のみを返します。
+`POST /api/ai_chat_util/agent_chat` の場合にのみ内部MCPクライアント経由の pause/resume が有効になります。`POST /api/ai_chat_util/chat` では通常の completed 応答のみを返します。
 
 #### 承認 pause/resume のテスト手順
 
@@ -757,7 +758,7 @@ FastAPI サーバーでは、CLI の `chat` 相当機能を次のエンドポイ
 
 - `ai_chat_util_config.mcp.mcp_config_path` に有効な `mcp.json` を設定している
 - `ai_chat_util_config.features.hitl_approval_tools` に対象ツール名を設定している
-- `use_mcp=true` で chat API を呼び出す
+- `POST /api/ai_chat_util/agent_chat` を呼び出す
 
 たとえば `hitl_approval_tools: ["analyze_files"]` を設定し、`analyze_files` を使わせる入力を送ると、ツール実行前に `status="paused"` が返ります。
 
@@ -925,10 +926,10 @@ uv run ai-chat-util --help
 uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは"
 ```
 
-内部MCPクライアントを使う場合:
+#### agent_chat（MCP テキストチャット）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは" --use_mcp
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml agent_chat -p "こんにちは"
 ```
 
 HITL（pause/resume）が発生した場合:
@@ -948,14 +949,13 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
   -o output.xlsx
 ```
 
-内部MCPクライアントを使う場合:
+#### agent_batch_chat（MCP の Excel 入力バッチチャット）
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml batch_chat \
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml agent_batch_chat \
   -i data/input.xlsx \
   -p "要約してください" \
-  -o output.xlsx \
-  --use_mcp
+  -o output.xlsx
 ```
 
 入力Excelの列（既定）:

@@ -45,13 +45,10 @@ dependencies = [
     "chardet==5.2.0",
     "aiofiles",
     "pyzipper",
-    "pysmb"
+    "pysmb",
+    "deepagents"
 ]
 
-[project.optional-dependencies]
-deepagents = [
-    "deepagents>=0.5.0a2",
-]
 
 [tool.setuptools.packages.find]
 where = ["src"]

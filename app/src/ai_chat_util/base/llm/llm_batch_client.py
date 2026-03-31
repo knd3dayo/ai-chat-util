@@ -1,5 +1,6 @@
 import os
 import asyncio
+from abc import ABC, abstractmethod
 from tqdm.asyncio import tqdm_asyncio
 
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
@@ -12,9 +13,14 @@ import pandas as pd
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-class LLMBatchClient:
-    def __init__(self, llm_config: AiChatUtilConfig | None = None, use_mcp: bool = False):
-        self.llm_client = LLMFactory.create_llm_client(llm_config, use_mcp=use_mcp)
+class BatchClientBase(ABC):
+    def __init__(self, llm_config: AiChatUtilConfig | None = None):
+        self.llm_client = self._create_client(llm_config)
+
+    @abstractmethod
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
+        pass
+
 
     async def _run_one_(self, i: int, chat_history: ChatRequest, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse]:
         # Semaphore is effective only when each task acquires it.
@@ -162,5 +168,15 @@ class LLMBatchClient:
 
         # 結果を新しいExcelファイルに保存
         df.to_excel(output_excel_path, index=False)
+
+
+class LLMBatchClient(BatchClientBase):
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
+        return LLMFactory.create_llm_client(llm_config)
+
+
+class MCPBatchClient(BatchClientBase):
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
+        return LLMFactory.create_mcp_client(llm_config)
 
 

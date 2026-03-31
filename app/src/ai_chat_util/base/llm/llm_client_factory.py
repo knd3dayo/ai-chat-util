@@ -7,14 +7,19 @@ from .abstract_llm_client import AbstractLLMClient
 class LLMFactory:
     @classmethod
     def create_llm_client(
-        cls, llm_config: AiChatUtilConfig | None = None, 
-        use_mcp: bool = False
+        cls, llm_config: AiChatUtilConfig | None = None,
     ) -> AbstractLLMClient:
         if llm_config is None:
             llm_config = get_runtime_config()
-        if use_mcp:
-            return MCPClient(llm_config)
         return LLMClient(llm_config)
+
+    @classmethod
+    def create_mcp_client(
+        cls, llm_config: AiChatUtilConfig | None = None,
+    ) -> AbstractLLMClient:
+        if llm_config is None:
+            llm_config = get_runtime_config()
+        return MCPClient(llm_config)
         
     @classmethod
     def create_stdio_hitl_client(

@@ -21,10 +21,13 @@ from ai_chat_util.base.core.resource_app import (
 
 from ai_chat_util.base.core.app import (
     run_chat,
+    run_agent_chat,
     run_simple_chat,
     run_batch_chat,
+    run_agent_batch_chat,
     run_simple_batch_chat,
     run_batch_chat_from_excel,
+    run_agent_batch_chat_from_excel,
 )
 
 from ai_chat_util.base.core.tool_app import (
@@ -99,11 +102,24 @@ router.add_api_route(
     methods=["POST"],
     summary="Run chat",
     description=(
-        "Run a chat request via the configured LLM client. "
-        "When use_mcp=true, the response may return status='paused' with hitl and trace_id, "
+        "Run a chat request via the standard LLM client."
+    ),
+)
+router.add_api_route(
+    path="/agent_chat",
+    endpoint=run_agent_chat,
+    methods=["POST"],
+    summary="Run agent chat",
+    description=(
+        "Run a chat request via the MCP-backed agent client. "
+        "The response may return status='paused' with hitl and trace_id, "
         "and the client can resume by sending another ChatRequest with the same trace_id."
     ),
 )
+router.add_api_route(path="/batch_chat", endpoint=run_batch_chat, methods=["POST"])
+router.add_api_route(path="/agent_batch_chat", endpoint=run_agent_batch_chat, methods=["POST"])
+router.add_api_route(path="/batch_chat_from_excel", endpoint=run_batch_chat_from_excel, methods=["POST"])
+router.add_api_route(path="/agent_batch_chat_from_excel", endpoint=run_agent_batch_chat_from_excel, methods=["POST"])
 router.add_api_route(path="/create_user_message", endpoint=create_user_message, methods=["POST"])
 router.add_api_route(path="/create_assistant_message", endpoint=create_assistant_message, methods=["POST"])
 router.add_api_route(path="/create_system_message", endpoint=create_system_message, methods=["POST"])

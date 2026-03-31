@@ -23,12 +23,13 @@ fake_sessions_module = types.ModuleType("langchain_mcp_adapters.sessions")
 fake_sessions_module.Connection = dict[str, Any] # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
-import ai_chat_util.base.llm.agent as agent_mod
-import ai_chat_util.base.llm.llm_mcp_client_util as llm_mcp_client_util_mod
-from ai_chat_util.base.llm.agent import AgentBuilder, ToolLimits
-from ai_chat_util.base.llm.prompts import CodingAgentPrompts
-from ai_chat_util.base.llm.llm_mcp_client_util import MCPClientUtil
-from ai_chat_util.base.llm.supervisor_support import RouteCandidate, RoutingDecision
+import ai_chat_util.base.agent.agent as agent_mod
+import ai_chat_util.base.agent.mcp_client_util as llm_mcp_client_util_mod
+from ai_chat_util.base.agent.agent_builder import AgentBuilder
+from ai_chat_util.base.agent.tool_limits import ToolLimits
+from ai_chat_util.base.agent.prompts import CodingAgentPrompts
+from ai_chat_util.base.agent.mcp_client_util import MCPClientUtil
+from ai_chat_util.base.agent.supervisor_support import RouteCandidate, RoutingDecision
 from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
 from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
@@ -1648,7 +1649,7 @@ def test_get_loaded_runtime_config_path_returns_existing_config(
     config_file = tmp_path / "ai-chat-util-config.yml"
     config_file.write_text("llm: {}\n", encoding="utf-8")
     monkeypatch.setattr(
-        "ai_chat_util.base.llm.llm_mcp_client_util.get_runtime_config_path",
+        "ai_chat_util.base.agent.mcp_client_util.get_runtime_config_path",
         lambda: config_file,
     )
 
@@ -1660,7 +1661,7 @@ def test_get_loaded_runtime_config_path_returns_none_for_missing_config(
 ) -> None:
     missing = tmp_path / "missing.yml"
     monkeypatch.setattr(
-        "ai_chat_util.base.llm.llm_mcp_client_util.get_runtime_config_path",
+        "ai_chat_util.base.agent.mcp_client_util.get_runtime_config_path",
         lambda: missing,
     )
 
@@ -2298,7 +2299,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
     recorded_events: list[dict[str, Any]] = []
 
     original_llm_client_module = sys.modules.get("ai_chat_util.base.llm.llm_client")
-    sys.modules.pop("ai_chat_util.base.llm.llm_mcp_client", None)
+    sys.modules.pop("ai_chat_util.base.agent.mcp_client", None)
 
     stub_llm_client_module = types.ModuleType("ai_chat_util.base.llm.llm_client")
 
@@ -2313,7 +2314,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
     setattr(stub_llm_client_module, "LLMMessageContentFactory", _StubMessageFactory)
     sys.modules["ai_chat_util.base.llm.llm_client"] = stub_llm_client_module
 
-    llm_mcp_client_mod = importlib.import_module("ai_chat_util.base.llm.llm_mcp_client")
+    llm_mcp_client_mod = importlib.import_module("ai_chat_util.base.agent.mcp_client")
     MCPClient = llm_mcp_client_mod.MCPClient
 
     if original_llm_client_module is not None:

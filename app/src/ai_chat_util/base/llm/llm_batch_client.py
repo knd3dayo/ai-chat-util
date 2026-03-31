@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from tqdm.asyncio import tqdm_asyncio
 
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
 
 from ai_chat_util.common.model.ai_chatl_util_models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
@@ -14,12 +15,12 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 class BatchClientBase(ABC):
-    def __init__(self, llm_config: AiChatUtilConfig | None = None):
-        self.llm_client = self._create_client(llm_config)
+    def __init__(self, llm_config: AiChatUtilConfig | None = None) -> None:
+        self.llm_client: AbstractLLMClient = self._create_client(llm_config)
 
     @abstractmethod
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
-        pass
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
+        raise NotImplementedError
 
 
     async def _run_one_(self, i: int, chat_history: ChatRequest, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse]:
@@ -171,12 +172,12 @@ class BatchClientBase(ABC):
 
 
 class LLMBatchClient(BatchClientBase):
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
         return LLMFactory.create_llm_client(llm_config)
 
 
 class MCPBatchClient(BatchClientBase):
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None):
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
         return LLMFactory.create_mcp_client(llm_config)
 
 

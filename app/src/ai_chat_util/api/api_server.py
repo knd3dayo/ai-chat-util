@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI, Request
 from ai_chat_util.common.config.runtime import init_runtime
 from ai_chat_util.common.model.request_headers import RequestHeaders, bind_current_request_headers
@@ -46,7 +48,15 @@ from ai_chat_util.base.core.tool_app import (
 
 router = APIRouter()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Ensure config is loaded (uvicorn direct import path).
+    init_runtime(None)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -54,12 +64,6 @@ async def _capture_request_headers(request: Request, call_next):
     headers = {str(k).lower(): str(v) for k, v in request.headers.items()}
     with bind_current_request_headers(RequestHeaders.from_mapping(headers)):
         return await call_next(request)
-
-
-@app.on_event("startup")
-async def _startup_init_runtime() -> None:
-    # Ensure config is loaded (uvicorn direct import path).
-    init_runtime(None)
 
 # 複数の画像の分析を行う
 router.add_api_route(path="/analyze_image_files", endpoint=analyze_image_files, methods=["POST"])

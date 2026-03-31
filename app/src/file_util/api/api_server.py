@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -20,13 +21,16 @@ from file_util.core.app import (
     export_data_to_excel,
     import_data_from_excel,
 )
-app = FastAPI()
-router = APIRouter()
 
 
-@app.on_event("startup")
-async def _startup_init_runtime() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     init_runtime(None)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+router = APIRouter()
 
 
 async def _list_file_server_entries_api(

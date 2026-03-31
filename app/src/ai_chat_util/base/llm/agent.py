@@ -245,6 +245,83 @@ class ToolLimits(BaseModel):
         return normalized in {"get_result", "workspace_path"}
 
     @staticmethod
+    def tool_action_kind(tool_name: str) -> str:
+        normalized = (tool_name or "").strip().lower()
+        if normalized in {"convert_office_files_to_pdf", "convert_pdf_files_to_images", "execute", "cancel"}:
+            return "write"
+        if normalized in {"status", "get_result", "workspace_path"}:
+            return "control"
+        if normalized in {"healthz", "get_loaded_config_info"}:
+            return "inspect"
+        return "read"
+
+    @staticmethod
+    def tool_target_system(tool_name: str) -> str:
+        normalized = (tool_name or "").strip().lower()
+        if normalized in {"execute", "status", "get_result", "workspace_path", "cancel", "healthz"}:
+            return "coding_agent"
+        if normalized.startswith("analyze_") or normalized.startswith("convert_"):
+            return "filesystem"
+        return "mcp_tool"
+
+    @classmethod
+    def tool_resource_identifier(
+        cls,
+        tool_name: str,
+        args: Sequence[Any],
+        kwargs: Mapping[str, Any],
+    ) -> str | None:
+        normalized = (tool_name or "").strip().lower()
+        if normalized in {"status", "get_result", "workspace_path", "cancel"}:
+            task_id = kwargs.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                return f"task_id:{task_id.strip()}"
+
+        for key in (
+            "file_list",
+            "file_path_list",
+            "pdf_path_list",
+            "office_path_list",
+            "output_dir",
+            "input_excel_path",
+            "output_excel_path",
+            "workspace_path",
+        ):
+            value = kwargs.get(key)
+            if isinstance(value, str) and value.strip():
+                try:
+                    return Path(value).name or value.strip()
+                except Exception:
+                    return value.strip()
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+                names: list[str] = []
+                for item in value[:3]:
+                    if not isinstance(item, str) or not item.strip():
+                        continue
+                    try:
+                        names.append(Path(item).name or item.strip())
+                    except Exception:
+                        names.append(item.strip())
+                if names:
+                    more = "" if len(value) <= 3 else f" (+{len(value) - 3} more)"
+                    return ", ".join(names) + more
+
+        if normalized == "execute":
+            for key in ("task_id", "trace_id"):
+                value = kwargs.get(key)
+                if isinstance(value, str) and value.strip():
+                    return f"{key}:{value.strip()}"
+
+        return None
+
+    @staticmethod
+    def tool_approval_status(tool_name: str, tool_call_state: Mapping[str, Any]) -> str | None:
+        approval_tools = cast(set[str], tool_call_state.get("approval_tools", set()))
+        if (tool_name or "").strip() in approval_tools:
+            return "required"
+        return None
+
+    @staticmethod
     def _freeze_for_cache(value: Any) -> Any:
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
@@ -581,17 +658,25 @@ class ToolLimits(BaseModel):
             event_type: str,
             *,
             tool_name: str,
+            args: Sequence[Any] | None = None,
+            kwargs: Mapping[str, Any] | None = None,
             payload: Mapping[str, Any] | None = None,
             reason_code: str | None = None,
         ) -> None:
             audit_context = tool_call_state.get("audit_context")
             if not isinstance(audit_context, AuditContext):
                 return
+            call_args = args or ()
+            call_kwargs = kwargs or {}
             audit_context.emit(
                 event_type,
                 agent_name=cast(str | None, tool_call_state.get("agent_name")),
                 tool_name=tool_name,
                 reason_code=reason_code,
+                target_system=cls.tool_target_system(tool_name),
+                action_kind=cls.tool_action_kind(tool_name),
+                resource_identifier=cls.tool_resource_identifier(tool_name, call_args, call_kwargs),
+                approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                 payload=dict(payload or {}),
             )
 
@@ -649,6 +734,8 @@ class ToolLimits(BaseModel):
                     _emit_tool_event(
                         "tool_result_received",
                         tool_name=tool_name,
+                        args=args,
+                        kwargs=kwargs,
                         payload={"success": True, "cached": True},
                     )
                     return cls.clone_cached_tool_result(cached_results[call_cache_key])
@@ -656,6 +743,8 @@ class ToolLimits(BaseModel):
                 _emit_tool_event(
                     "tool_selected",
                     tool_name=tool_name,
+                    args=args,
+                    kwargs=kwargs,
                     payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
                 )
 
@@ -701,6 +790,8 @@ class ToolLimits(BaseModel):
                     _emit_tool_event(
                         "tool_result_received",
                         tool_name=tool_name,
+                        args=args,
+                        kwargs=kwargs,
                         payload={"success": True, "cached": False},
                     )
                     return result
@@ -729,6 +820,8 @@ class ToolLimits(BaseModel):
                     _emit_tool_event(
                         "tool_result_received",
                         tool_name=tool_name,
+                        args=args,
+                        kwargs=kwargs,
                         reason_code="sufficiency.tool_result_error_only",
                         payload={"success": False, "exception": type(e).__name__, "error": error_code},
                     )
@@ -861,6 +954,10 @@ class ToolLimits(BaseModel):
                     "tool_result_received",
                     agent_name=cast(str | None, tool_call_state.get("agent_name")),
                     tool_name=tool_name,
+                    target_system=cls.tool_target_system(tool_name),
+                    action_kind=cls.tool_action_kind(tool_name),
+                    resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
+                    approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                     payload={"success": True, "cached": True},
                 )
             return cls.clone_cached_tool_result(cached_results[call_cache_key])
@@ -869,6 +966,10 @@ class ToolLimits(BaseModel):
                 "tool_selected",
                 agent_name=cast(str | None, tool_call_state.get("agent_name")),
                 tool_name=tool_name,
+                target_system=cls.tool_target_system(tool_name),
+                action_kind=cls.tool_action_kind(tool_name),
+                resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
+                approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                 payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
             )
 
@@ -926,6 +1027,10 @@ class ToolLimits(BaseModel):
                         "tool_result_received",
                         agent_name=cast(str | None, tool_call_state.get("agent_name")),
                         tool_name=tool_name,
+                        target_system=cls.tool_target_system(tool_name),
+                        action_kind=cls.tool_action_kind(tool_name),
+                        resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
+                        approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                         payload={"success": True, "cached": False},
                     )
                 return result
@@ -975,6 +1080,10 @@ class ToolLimits(BaseModel):
                         agent_name=cast(str | None, tool_call_state.get("agent_name")),
                         tool_name=tool_name,
                         reason_code="sufficiency.tool_result_error_only",
+                        target_system=cls.tool_target_system(tool_name),
+                        action_kind=cls.tool_action_kind(tool_name),
+                        resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
+                        approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                         payload={"success": False, "exception": type(e).__name__, "error": error_code},
                     )
                 return cls._guard_output(
@@ -1014,6 +1123,7 @@ class ToolLimits(BaseModel):
 
 
 class AgentBuilder:
+    _APPROVAL_METADATA_PATTERN = re.compile(r"requires_approval\s*=\s*true", re.IGNORECASE)
 
     @staticmethod
     def _slugify_agent_name_part(value: str) -> str:
@@ -1057,6 +1167,33 @@ class AgentBuilder:
         tools_description = "\n".join(f"## name: {tool.name}\n - description: {tool.description}\n - args_schema: {tool.args_schema}\n" for tool in self.langchain_tools)
         return tools_description
 
+    @classmethod
+    def infer_approval_tools_from_langchain_tools(cls, tools: Sequence[Any]) -> list[str]:
+        inferred: list[str] = []
+        seen: set[str] = set()
+        for tool in tools:
+            name = str(getattr(tool, "name", "") or "").strip()
+            description = str(getattr(tool, "description", "") or "")
+            if not name or name in seen:
+                continue
+            if cls._APPROVAL_METADATA_PATTERN.search(description):
+                inferred.append(name)
+                seen.add(name)
+        return inferred
+
+    @staticmethod
+    def merge_approval_tool_names(*groups: Sequence[str] | None) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for group in groups:
+            for name in group or []:
+                normalized = str(name).strip()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                merged.append(normalized)
+        return merged
+
     async def prepare(
             self,
             runtime_config: AiChatUtilConfig,
@@ -1085,6 +1222,12 @@ class AgentBuilder:
 
         # Shared tool call counter across all tools within this workflow.
         # Using a mutable container avoids invalid `nonlocal` usage across methods.
+        configured_hitl_approval_tools = [
+            str(name).strip()
+            for name in (runtime_config.features.hitl_approval_tools or [])
+            if isinstance(name, str) and str(name).strip()
+        ]
+
         tool_call_state: dict[str, Any] = {
             "used": 0,
             "general_used": 0,
@@ -1092,14 +1235,15 @@ class AgentBuilder:
             "followup_limit": effective_followup_tool_call_limit_int,
             "agent_name": agent_name,
             "audit_context": audit_context,
+            "approval_tools": {
+                *configured_hitl_approval_tools,
+            },
             "explicit_user_file_paths": [
                 str(path).strip()
                 for path in (explicit_user_file_paths or [])
                 if isinstance(path, str) and str(path).strip()
             ],
         }
-
-        hitl_approval_tools = runtime_config.features.hitl_approval_tools or []
 
         agent_client = MultiServerMCPClient(mcp_config.to_langchain_config())
         # LangChainのツールリストを取得
@@ -1109,6 +1253,13 @@ class AgentBuilder:
             coding_agent_langchain_tools = [
                 tool for tool in coding_agent_langchain_tools if str(getattr(tool, "name", "")) in allowed_names
             ]
+
+        inferred_hitl_approval_tools = self.infer_approval_tools_from_langchain_tools(coding_agent_langchain_tools)
+        hitl_approval_tools = self.merge_approval_tool_names(
+            configured_hitl_approval_tools,
+            inferred_hitl_approval_tools,
+        )
+        tool_call_state["approval_tools"] = set(hitl_approval_tools)
 
         ToolLimits._apply_tool_execution_guards(
             coding_agent_langchain_tools,

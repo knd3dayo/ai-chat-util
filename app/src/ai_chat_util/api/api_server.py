@@ -1,5 +1,6 @@
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from ai_chat_util_base.config.runtime import init_runtime
+from ai_chat_util_base.model.request_headers import RequestHeaders, bind_current_request_headers
 
 from ai_chat_util.base.core.resource_app import (
     use_custom_pdf_analyzer,
@@ -43,6 +44,13 @@ from ai_chat_util.base.core.tool_app import (
 router = APIRouter()
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def _capture_request_headers(request: Request, call_next):
+    headers = {str(k).lower(): str(v) for k, v in request.headers.items()}
+    with bind_current_request_headers(RequestHeaders.from_mapping(headers)):
+        return await call_next(request)
 
 
 @app.on_event("startup")

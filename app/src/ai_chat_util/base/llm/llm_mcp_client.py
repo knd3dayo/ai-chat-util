@@ -13,6 +13,7 @@ from ai_chat_util_base.config.runtime import (
     get_runtime_config,
 )
 from ai_chat_util_base.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
+from ai_chat_util_base.model.request_headers import get_current_request_headers
 from .abstract_llm_client import AbstractLLMClient
 from ai_chat_util_base.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from .llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
@@ -96,10 +97,15 @@ class MCPClient(AbstractLLMClient):
 
  
         trace_id = getattr(chat_request, "trace_id", None)
+        current_request_headers = get_current_request_headers()
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
-        audit_context = create_audit_context(self.runtime_config, run_trace_id)
+        audit_context = create_audit_context(
+            self.runtime_config,
+            run_trace_id,
+            request_headers=current_request_headers,
+        )
         pending_response: dict[str, Any] | None = None
         pending_workflow_results: list[Any] = []
         checkpoint_db_path = MCPClientUtil._default_checkpoint_db_path(self.runtime_config)
@@ -125,9 +131,13 @@ class MCPClient(AbstractLLMClient):
 
             audit_context.emit(
                 "request_received",
+                action_kind="read",
                 payload={
                     "message_count": len(lc_messages),
                     "auto_approve": auto_approve,
+                    "has_authorization": bool(
+                        current_request_headers is not None and current_request_headers.authorization
+                    ),
                 },
             )
 
@@ -171,6 +181,8 @@ class MCPClient(AbstractLLMClient):
                 route_name=routing_decision.selected_route,
                 reason_code=routing_decision.reason_code,
                 confidence=routing_decision.confidence,
+                target_system=routing_decision.selected_route,
+                action_kind="route",
                 payload={
                     "candidate_routes": [candidate.model_dump(mode="json") for candidate in routing_decision.candidate_routes],
                     "next_action": routing_decision.next_action,
@@ -234,6 +246,8 @@ class MCPClient(AbstractLLMClient):
                     reason_code="hitl.user_input_requested",
                     route_name=routing_decision.selected_route,
                     confidence=routing_decision.confidence,
+                    target_system=routing_decision.selected_route,
+                    approval_status="requested",
                     payload={"kind": "input", "source": "routing", "reason_code": routing_decision.reason_code},
                     final_status="paused",
                 )
@@ -500,6 +514,7 @@ class MCPClient(AbstractLLMClient):
                     "sufficiency_judged",
                     reason_code=sufficiency_decision.reason_code,
                     confidence=sufficiency_decision.confidence,
+                    action_kind="validate",
                     payload=sufficiency_decision.model_dump(mode="json"),
                 )
 
@@ -528,6 +543,7 @@ class MCPClient(AbstractLLMClient):
                     audit_context.emit(
                         "hitl_requested",
                         reason_code=("hitl.tool_approval_requested" if kind == "approval" else "hitl.user_input_requested"),
+                        approval_status=("requested" if kind == "approval" else None),
                         payload={"kind": kind, "source": hitl.source},
                         final_status=status,
                     )
@@ -706,6 +722,7 @@ class MCPClient(AbstractLLMClient):
                 "final_answer_validated",
                 reason_code=final_sufficiency.reason_code,
                 confidence=final_sufficiency.confidence,
+                action_kind="validate",
                 payload=final_sufficiency.model_dump(mode="json"),
                 final_status=cast(str | None, pending_response.get("status")),
             )
@@ -713,6 +730,7 @@ class MCPClient(AbstractLLMClient):
             audit_context.emit(
                 "final_answer_validated",
                 reason_code="audit.validation_passed",
+                action_kind="validate",
                 payload={
                     "status": pending_response.get("status"),
                     "has_hitl": pending_response.get("hitl") is not None,

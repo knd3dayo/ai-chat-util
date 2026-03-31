@@ -63,6 +63,38 @@ def _resolve_output_dir(output_dir: str | None) -> Path | None:
     return (Path(working_directory).expanduser() / candidate).resolve()
 
 
+def _plan_office_pdf_outputs(resolved_paths: list[str], output_dir: Path | None) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    for office_path in resolved_paths:
+        source_path = Path(office_path)
+        if output_dir is None:
+            pdf_path = source_path.with_suffix(".pdf")
+        else:
+            pdf_path = output_dir / source_path.with_suffix(".pdf").name
+        results.append({
+            "source_path": office_path,
+            "pdf_path": str(pdf_path),
+        })
+    return results
+
+
+def _plan_pdf_image_outputs(resolved_paths: list[str], output_root: Path | None) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for pdf_path in resolved_paths:
+        source_path = Path(pdf_path)
+        image_dir = (
+            (output_root / f"{source_path.stem}_pages")
+            if output_root is not None
+            else source_path.with_name(f"{source_path.stem}_pages")
+        )
+        results.append({
+            "source_path": pdf_path,
+            "image_dir": str(image_dir),
+            "image_file_pattern": f"{source_path.stem}_page_####.png",
+        })
+    return results
+
+
 def _get_network_download_options() -> tuple[bool, str | None]:
     cfg = get_runtime_config()
     return cfg.network.requests_verify, cfg.network.ca_bundle
@@ -379,33 +411,48 @@ async def analyze_office_files(
 async def convert_office_files_to_pdf(
         office_path_list: Annotated[list[str], Field(description="List of Office file paths to convert to PDF. e.g., [/path/to/document1.docx, /path/to/spreadsheet1.xlsx]")],
         output_dir: Annotated[str | None, Field(description="Optional output directory for generated PDFs. If omitted, PDFs are created next to the source files.")] = None,
+    dry_run: Annotated[bool, Field(description="If true, do not write files. Return the planned output paths only.")] = False,
     ) -> Annotated[list[dict[str, str]], Field(description="List of source and generated PDF paths")]:
     """
-    Convert Office documents to PDF files and return the generated PDF paths.
+        Convert Office documents to PDF files and return the generated PDF paths.
+
+        For write-safe usage, call this tool with dry_run=True first to preview the
+        output paths. After approval, call it again with dry_run=False.
     """
     call_id = next(_TOOL_CALL_SEQ)
     started = time.perf_counter()
     logger.info(
-        "MCP_TOOL_START tool=convert_office_files_to_pdf call_id=%s files=%d output_dir=%s",
+        "MCP_TOOL_START tool=convert_office_files_to_pdf call_id=%s files=%d output_dir=%s dry_run=%s",
         call_id,
         len(office_path_list or []),
         output_dir,
+        dry_run,
     )
     try:
         resolved_paths = _resolve_existing_file_paths(office_path_list)
         target_dir = _resolve_output_dir(output_dir)
-        if target_dir is not None:
+        if target_dir is not None and not dry_run:
             target_dir.mkdir(parents=True, exist_ok=True)
 
+        planned_results = _plan_office_pdf_outputs(resolved_paths, target_dir)
+        if dry_run:
+            return [
+                {
+                    **item,
+                    "dry_run": "true",
+                }
+                for item in planned_results
+            ]
+
         results: list[dict[str, str]] = []
-        for office_path in resolved_paths:
+        for office_path, planned in zip(resolved_paths, planned_results):
             pdf_path = Office2PDFUtil.create_pdf_from_document_file(
                 input_path=office_path,
                 output_path=target_dir,
                 configured_libreoffice_path=_get_configured_libreoffice_path(),
             )
             results.append({
-                "source_path": office_path,
+                "source_path": planned["source_path"],
                 "pdf_path": str(pdf_path),
             })
         return results
@@ -424,32 +471,44 @@ async def convert_office_files_to_pdf(
 async def convert_pdf_files_to_images(
         pdf_path_list: Annotated[list[str], Field(description="List of PDF file paths to convert into PNG page images. e.g., [/path/to/document1.pdf, /path/to/document2.pdf]")],
         output_dir: Annotated[str | None, Field(description="Optional output directory root for generated images. If omitted, an adjacent <pdf-stem>_pages directory is created for each PDF.")] = None,
+    dry_run: Annotated[bool, Field(description="If true, do not write files. Return the planned output directories and filename pattern only.")] = False,
     ) -> Annotated[list[dict[str, Any]], Field(description="List of source PDF paths and generated image paths")]:
     """
-    Convert PDF pages into PNG image files and return the generated image paths.
+        Convert PDF pages into PNG image files and return the generated image paths.
+
+        For write-safe usage, call this tool with dry_run=True first to preview the
+        target image directory and filename pattern. After approval, call it again
+        with dry_run=False.
     """
     call_id = next(_TOOL_CALL_SEQ)
     started = time.perf_counter()
     logger.info(
-        "MCP_TOOL_START tool=convert_pdf_files_to_images call_id=%s files=%d output_dir=%s",
+        "MCP_TOOL_START tool=convert_pdf_files_to_images call_id=%s files=%d output_dir=%s dry_run=%s",
         call_id,
         len(pdf_path_list or []),
         output_dir,
+        dry_run,
     )
     try:
         resolved_paths = _resolve_existing_file_paths(pdf_path_list)
         output_root = _resolve_output_dir(output_dir)
-        if output_root is not None:
+        if output_root is not None and not dry_run:
             output_root.mkdir(parents=True, exist_ok=True)
 
+        planned_results = _plan_pdf_image_outputs(resolved_paths, output_root)
+        if dry_run:
+            return [
+                {
+                    **item,
+                    "dry_run": True,
+                }
+                for item in planned_results
+            ]
+
         results: list[dict[str, Any]] = []
-        for pdf_path in resolved_paths:
+        for pdf_path, planned in zip(resolved_paths, planned_results):
             source_path = Path(pdf_path)
-            image_dir = (
-                (output_root / f"{source_path.stem}_pages")
-                if output_root is not None
-                else source_path.with_name(f"{source_path.stem}_pages")
-            )
+            image_dir = Path(planned["image_dir"])
             image_dir.mkdir(parents=True, exist_ok=True)
 
             image_paths: list[str] = []
@@ -466,6 +525,7 @@ async def convert_pdf_files_to_images(
             results.append({
                 "source_path": pdf_path,
                 "image_paths": image_paths,
+                "image_dir": str(image_dir),
             })
         return results
     except Exception:

@@ -11,6 +11,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_chat_util_base.config.runtime import AiChatUtilConfig
+from ai_chat_util_base.model.request_headers import RequestHeaders
 
 import ai_chat_util.log.log_settings as log_settings
 
@@ -80,6 +81,11 @@ class SupervisorAuditEvent(BaseModel):
     route_name: str | None = None
     reason_code: str | None = None
     confidence: float | None = None
+    user_identity_hint: str | None = None
+    target_system: str | None = None
+    action_kind: str | None = None
+    resource_identifier: str | None = None
+    approval_status: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     final_status: str | None = None
 
@@ -110,6 +116,7 @@ class AuditContext:
     trace_id: str
     turn_id: str
     enabled: bool
+    user_identity_hint: str | None = None
     sink: AuditSink = field(default_factory=NullAuditSink)
 
     def emit(
@@ -121,6 +128,11 @@ class AuditContext:
         route_name: str | None = None,
         reason_code: str | None = None,
         confidence: float | None = None,
+        user_identity_hint: str | None = None,
+        target_system: str | None = None,
+        action_kind: str | None = None,
+        resource_identifier: str | None = None,
+        approval_status: str | None = None,
         payload: dict[str, Any] | None = None,
         final_status: str | None = None,
     ) -> None:
@@ -137,6 +149,11 @@ class AuditContext:
             route_name=route_name,
             reason_code=reason_code,
             confidence=confidence,
+            user_identity_hint=user_identity_hint or self.user_identity_hint,
+            target_system=target_system,
+            action_kind=action_kind,
+            resource_identifier=resource_identifier,
+            approval_status=approval_status,
             payload=payload or {},
             final_status=final_status,
         )
@@ -155,11 +172,17 @@ def build_audit_sink(runtime_config: AiChatUtilConfig) -> AuditSink:
     return JsonlAuditSink(destination)
 
 
-def create_audit_context(runtime_config: AiChatUtilConfig, trace_id: str) -> AuditContext:
+def create_audit_context(
+    runtime_config: AiChatUtilConfig,
+    trace_id: str,
+    *,
+    request_headers: RequestHeaders | None = None,
+) -> AuditContext:
     sink = build_audit_sink(runtime_config)
     return AuditContext(
         trace_id=trace_id,
         turn_id=uuid.uuid4().hex,
         enabled=not isinstance(sink, NullAuditSink),
+        user_identity_hint=request_headers.user_identity_hint() if request_headers is not None else None,
         sink=sink,
     )

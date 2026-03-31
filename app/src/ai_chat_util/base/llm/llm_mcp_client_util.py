@@ -2231,7 +2231,10 @@ class MCPClientUtil:
             )
 
 
-        approval_tools_text = runtime_config.features.get_hitl_approval_tools_text()
+        approval_tool_names = AgentBuilder.merge_approval_tool_names(
+            *[agent.get_hitl_approval_tools() for agent in sub_agents]
+        )
+        approval_tools_text = ", ".join(approval_tool_names) if approval_tool_names else "(なし)"
         tools_description = AgentBuilder.get_tools_description_all(sub_agents)
         logger.info("Allowed tools:\n%s", tools_description)
         tool_catalog_payload = {

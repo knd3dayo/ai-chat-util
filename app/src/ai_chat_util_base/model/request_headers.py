@@ -70,6 +70,20 @@ class RequestHeaders:
             env.setdefault("TRACE_ID", self.trace_id)
         return env
 
+    def user_identity_hint(self) -> Optional[str]:
+        for key in (
+            "x-user-id",
+            "x-user-email",
+            "x-forwarded-user",
+            "x-auth-request-user",
+            "preferred_username",
+            "upn",
+        ):
+            value = self.raw.get(key)
+            if value:
+                return value
+        return None
+
 
 _current_request_headers: ContextVar[Optional[RequestHeaders]] = ContextVar(
     "ai_platform_current_request_headers", default=None

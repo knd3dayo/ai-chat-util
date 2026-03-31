@@ -103,6 +103,13 @@ ai_chat_util_config:
     use_custom_pdf_analyzer: false
     routing_mode: legacy
     routing_confidence_threshold: 0.6
+    # DeepAgents route を使う場合に true にします。
+    # 利用前に `cd app && uv sync --extra deepagents` などで追加依存をインストールしてください。
+    enable_deep_agent: false
+    # 複雑な調査系要求で優先する route。
+    # - coding_agent: execute/status/get_result を使う既存経路
+    # - deep_agent: DeepAgents ベースの調査経路
+    preferred_coding_route: coding_agent
     sufficiency_check_enabled: false
     audit_log_enabled: false
     audit_log_path: null

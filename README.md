@@ -38,6 +38,62 @@
 
 ---
 
+## マルチエージェント構成
+
+本アプリの MCP 連携付きチャット実行は、LangChain の Router パターンと Subagents / Supervisor パターンを組み合わせた構成です。
+
+- Router の考え方:
+  ユーザー要求を最初に分類し、どの経路へ進むべきかを決めます。LangChain の Router パターンでいう「前段の routing step」に相当します。
+- Supervisor の考え方:
+  route 決定後は中央の supervisor が会話コンテキストを持ち、配下のツール実行エージェントへ委譲しながら結果をまとめます。LangChain の Subagents / Supervisor パターンに相当します。
+- Tool agents の考え方:
+  実際のツール呼び出しは、役割ごとに分かれた tool agent が担当します。現在は主に coding 系と general tool 系の 2 系統です。
+  また、オプションで DeepAgents ベースの `deep_agent` route を追加できます。
+
+参考 URL:
+
+- [LangChain Router](https://docs.langchain.com/oss/python/langchain/multi-agent/router)
+- [LangChain Subagents / Supervisor](https://docs.langchain.com/oss/python/langchain/multi-agent/subagents)
+
+### このアプリでの対応関係
+
+#### 1. Router
+
+- 役割: ユーザー入力、明示ファイルパス、利用可能ツール群をもとに、最初に進むべき経路を決定します。
+- 主な遷移先: `coding_agent` / `general_tool_agent` / `direct_answer` / `reject`
+- オプション遷移先: `deep_agent`
+- 性質: 会話全体を統括する main agent ではなく、最初の経路選択に特化した軽量な routing step です。
+- 実装の中心: `MCPClient.chat()` と `MCPClientUtil.decide_route()`
+
+#### 2. Supervisor
+
+- 役割: route 決定後に中央の supervisor がどの tool agent を使うかを判断し、結果を最終応答へ収束させます。
+- 性質: LangChain の supervisor パターンと同様に、中央の supervisor が配下エージェントの出力を受け取り、最終応答を組み立てます。
+- 実装の中心: `MCPClientUtil.create_workflow()`
+
+#### 3. Tool agents
+
+- 役割: supervisor 配下で実際の MCP ツールを実行します。
+- 現在の主な構成:
+  - `tool_agent_coding`: `execute` / `status` / `get_result` など、coding-agent 系の複数ステップ実行を担当
+  - `tool_agent_general`: `get_loaded_config_info` や各種 analyze 系など、一般 MCP ツールの単発実行を担当
+  - `deep_agent`: DeepAgents ベースの複数ステップ調査を担当。初期実装では `execute` / `status` / `get_result` を使う非同期ジョブ系は含めません
+- 実装の中心: `AgentBuilder.create_sub_agents()`
+
+`deep_agent` を選んだ場合も、外側の実行契約は `MCPClient.chat()` 側で維持します。つまり `route_decided`、`tool_catalog_resolved`、`final_answer_validated` などの audit event は従来どおり発火し、`tool_catalog_resolved` には deep-agent 実行時に実際に公開したツール名が記録されます。
+
+### 実行イメージ
+
+1. ユーザー入力を受け取る
+2. Router が最初の経路を選ぶ
+3. Supervisor が必要な tool agent へ委譲する
+4. Tool agent が MCP ツールを実行する
+5. Supervisor が結果を統合し、最終応答を返す
+
+このため、本アプリは「単一の supervisor のみ」でも「単純な router のみ」でもなく、router + supervisor + tool agents のハイブリッド構成として整理できます。
+
+---
+
 ## ディレクトリ構成
 
 実際のソースコードは `app/src` 配下で、責務ごとに複数 package に分かれています。
@@ -141,6 +197,22 @@ ai_chat_util
 ```bash
 uv sync
 ```
+
+DeepAgents を使う場合は、追加依存を含めてインストールしてください。
+
+```bash
+cd app
+uv sync --extra deepagents
+```
+
+`pip` を使う場合は、`app` ディレクトリで extras を指定します。
+
+```bash
+cd app
+pip install -e ".[deepagents]"
+```
+
+`features.enable_deep_agent: true` を設定したのに `deepagents` が未導入の場合、`deep_agent route requires the deepagents package` という明示エラーになります。
 ## 設定（ai-chat-util-config.yml + .env）
 
 本プロジェクトは、
@@ -226,6 +298,29 @@ ai_chat_util_config:
         # MCP stdio transport の env に転送（ENV_NAME は [A-Za-z_][A-Za-z0-9_]*）
         x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
 ```
+
+#### DeepAgents route の有効化
+
+`deep_agent` route は既定では無効です。使う場合は `ai-chat-util-config.yml` に非秘密設定として追加してください。
+
+```yml
+ai_chat_util_config:
+  llm:
+    provider: openai
+    completion_model: gpt-5
+    api_key: os.environ/LLM_API_KEY
+
+  features:
+    enable_deep_agent: true
+    preferred_coding_route: deep_agent
+```
+
+- `enable_deep_agent: true`
+  `deep_agent` route を有効化します。
+- `preferred_coding_route: deep_agent`
+  複雑な調査系要求で `coding_agent` より `deep_agent` を優先します。
+
+初回実装では、`deep_agent` route は `execute` / `status` / `get_result` / `workspace_path` / `cancel` を使いません。これらが必要な非同期ジョブ系要求は `coding_agent` 側に残します。
 
 #### file_server 設定
 

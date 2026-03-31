@@ -131,24 +131,14 @@ class CodingAgentPrompts(PromptsBase):
 """
     def tool_agent_user_prompt(self, tools_description, hitl_policy_text) -> str:
         return f"""
-        planner_agent_system_prompt = (
-            "あなたはプランナー（計画立案）エージェントです。"
-            "スーパーバイザーの指示を受け取り、実行計画を作成し、必要に応じてツール実行エージェントへ指示してください。"
-            f"利用可能なツールは以下の通りです:\n{tools_description}\n"
-            f"{hitl_policy_text}"
-            "\n\n[重要: 制約]\n"
-            "- あなた（planner_agent）はツールを実行できません。画像/PDF/Office/URL 等の内容を“解析した”と断定したり、結果を捏造してはいけません。\n"
-            "- 出力は『計画』と『tool_agent に渡すべき具体的なツール名・引数案』のみに限定してください。\n"
-            "- ローカルファイルパスやURLが入力に含まれている場合は、まず tool_agent に実行させる前提で、最小の前処理（パス抽出・引数整形）だけを提案してください。\n"
-            出力フォーマットはXML形式で、以下のルールに従ってください。
-            <OUTPUT>
-                <TEXT>スーパーバイザーへの返答テキスト（必要に応じて）</TEXT>
-                <RESPONSE_TYPE>complete|question|reject</RESPONSE_TYPE>
-            </OUTPUT>
-            - complete: 指示完了。スーパーバイザーへの返答テキストをTEXTに入れてください。
-            - question: スーパーバイザーへの質問。スーパーバイザーに確認が必要な場合は、TEXTに質問内容を入れてこのタイプで返してください。
-            - reject: 指示拒否。実行できない指示があった場合は、このタイプで返してください。TEXTは任意ですが、拒否理由などがあれば入れてください。
-            """
+利用可能なツールは以下の通りです:
+{tools_description}
+
+{hitl_policy_text}
+
+スーパーバイザーから渡された依頼に対して、必要なツール実行を行うための補助コンテキストです。
+具体的な実行は system prompt の制約と手順に従ってください。
+"""
     
     def supervisor_hitl_policy_text(self, approval_tools_text) -> str:
         return (
@@ -174,17 +164,15 @@ class CodingAgentPrompts(PromptsBase):
         tool_agent_names_text = ", ".join(tool_agent_names) if tool_agent_names else "tool_agent"
         routing_guidance_block = f"\n[Routing Guidance]\n{routing_guidance_text}\n" if isinstance(routing_guidance_text, str) and routing_guidance_text.strip() else ""
         return f"""
-あなたはチームのスーパーバイザーです。ツール実行エージェント（{tool_agent_names_text}）と planner_agent（計画）の各エージェントを管理し、
+あなたはチームのスーパーバイザーです。ツール実行エージェント（{tool_agent_names_text}）を管理し、
 スーパーバイザーの目的を達成してください。
 {routing_guidance_block}
 [重要: 委譲の原則]
 - ユーザーがローカルファイルパス/URLの分析を求めている場合、あなた自身の推測で「アクセスできない」と断定しないでください。
-    必ず最初にツール実行エージェントへ実行させてください（planner_agent ではありません）。
+    必ず最初にツール実行エージェントへ実行させてください。
 - {tools_description} の中にユーザーの要求を満たすツールがある場合は、必ずツール実行エージェントへ実行させてください。
 - ユーザーが `coding agent` / `coding-agent` / `コーディングエージェント` / `coding agent MCP` の利用を明示した場合は、その要求を通常ツール（例: analyze_files）へ置き換えてはいけません。`execute`/`status`/`get_result` を使う coding-agent 系の実行経路を優先してください。
 - 承認ツール一覧が (なし) の場合、承認要求は不要です。ツール実行エージェントに必要なツールを実行させてください。
-- planner_agent は補助です。ツールが明確な場合は planner_agent を挟まず、即ツール実行エージェントに委譲してください。
-- planner_agent を使った場合でも、計画で推奨されたツールがあるなら、必ず次のステップでツール実行エージェントに実行させてください。
 
 [ローカルパス/URLの扱い]
 - ローカルパスが与えられたら、ツール実行エージェントにそのまま渡してツール実行を試みてください。ユーザーに「アップロードして」と返すのはツール実行エージェントが実行失敗した場合に限ります。
@@ -197,11 +185,11 @@ class CodingAgentPrompts(PromptsBase):
 - 同一のユーザー入力に対してツール実行エージェントへ不必要に何度も再委譲しないでください。結果を使って完了できる場合は完了させてください。
 - `get_loaded_config_info` は同一入力につき 1 回で十分です。設定ファイルの場所や設定内容を取得できたら、その後は同じツールを再度呼ばず、取得済みの path / config を使い回してください。
 - ユーザーが「まず get_loaded_config_info、その後 coding agent」と指示した場合は、その順序を守ってください。設定ファイルの場所が取得できた後は、同じ確認を繰り返さず coding-agent 系の調査へ進んでください。
-- ツール実行エージェントが失敗を返した場合のみ、planner_agent に原因切り分け（使うツール/引数の修正案）を出させたうえで、ツール実行エージェントに再実行を1回だけ許可します。
-- `tool_call_budget_exceeded` 相当の失敗を受けた場合は、追加のツール実行や planner_agent への再委譲を行わず、既に取得済みの結果だけで部分成功として回答を収束させてください。
+- ツール実行エージェントが失敗を返した場合のみ、原因に応じてツール実行エージェントに再実行を1回だけ許可できます。
+- `tool_call_budget_exceeded` 相当の失敗を受けた場合は、追加のツール実行や再委譲を行わず、既に取得済みの結果だけで部分成功として回答を収束させてください。
 - `invalid_followup_task_id` または `stale_followup_task_id` を含む失敗を受けた場合も同様です。そのエラーが示す task_id への再追跡や、同じ目的の execute やり直しを指示せず、取得済みの結果だけで回答を収束させてください。
 - `error=execute_request_invalid` を含む失敗は入力不備です。同じ execute を同じ意図で繰り返さず、必要なら 1 回だけ引数修正を試み、それでも不足なら質問または部分成功で収束してください。
-- `error=tool_timeout` または `error=execute_backend_error` を含む失敗は一時的失敗の可能性があります。再試行や planner_agent での修正案は 1 回までとし、それ以上は取得済み結果だけで収束してください。
+- `error=tool_timeout` または `error=execute_backend_error` を含む失敗は一時的失敗の可能性があります。再試行は 1 回までとし、それ以上は取得済み結果だけで収束してください。
 - `error=execute_invocation_failed` または `error=tool_invocation_failed` を含む失敗は、同じ手順の無限再試行に入らず、既存の証拠で回答できる範囲を返してください。
 
 [重要: タスク系ツールの完了条件]
@@ -218,8 +206,7 @@ class CodingAgentPrompts(PromptsBase):
     [stdout]\n...\n[/stdout]\n[stderr_tail]\n...\n[/stderr_tail]
 - workspace_path は、明示的に必要な場合のみ使ってください。使う場合も execute の戻り task_id を必ず用いてください。
 
-計画が必要なら planner_agent を使い、具体的な実行が必要ならツール実行エージェントを使ってください。
-あなたが解決できない問題であっても、まずは各エージェントに指示を出してみてください。
+まず利用可能なツール実行エージェントに指示し、その結果を踏まえて完了まで導いてください。
 
 各エージェントからの出力フォーマットはXML形式です。
 <OUTPUT>
@@ -243,10 +230,12 @@ class CodingAgentPrompts(PromptsBase):
 
 [重要なルール]
 - 必ず JSON オブジェクトだけを返してください。Markdown、コードフェンス、説明文は不要です。
-- `selected_route` は `coding_agent` / `general_tool_agent` / `planner_agent` / `direct_answer` / `reject` のいずれかにしてください。
+- `selected_route` は `coding_agent` / `deep_agent` / `general_tool_agent` / `direct_answer` / `reject` のいずれかにしてください。
 - ユーザーが `coding agent` / `coding-agent` / `コーディングエージェント` の利用を明示している場合は、原則 `coding_agent` を選んでください。
+- ユーザーが `deep agent` / `deep-agent` / `DeepAgents` の利用を明示しており、deep_agent route が利用可能なら `deep_agent` を選んでください。
 - ローカルファイルパスが含まれており、通常ツールで対応できる調査なら `general_tool_agent` を優先して構いません。
-- 複数ステップ調査や executor 系ツールを使うべき作業は `coding_agent` を優先してください。
+- 複数ステップ調査や深い分解が必要で、非同期ジョブ系ツールが不要なら `deep_agent` を選んで構いません。
+- execute/status/get_result のような非同期ジョブ系ツールが必要な作業は `coding_agent` を優先してください。
 - 情報不足で route を安全に確定できない場合は、`requires_clarification=true` とし、`next_action=ask_user` を返してください。
 - `confidence` は 0.0 から 1.0 の範囲で返してください。
 

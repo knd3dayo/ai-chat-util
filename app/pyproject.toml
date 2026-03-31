@@ -48,6 +48,11 @@ dependencies = [
     "pysmb"
 ]
 
+[project.optional-dependencies]
+deepagents = [
+    "deepagents>=0.5.0a2",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

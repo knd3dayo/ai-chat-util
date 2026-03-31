@@ -615,6 +615,14 @@ class FeaturesSection(BaseModel):
 
     allow_outside_modifications: bool = Field(default=False)
     use_custom_pdf_analyzer: bool = Field(default=False)
+    enable_deep_agent: bool = Field(
+        default=False,
+        description="deep_agent route を有効化します。未導入時は deepagents パッケージのインストールが必要です。",
+    )
+    preferred_coding_route: Literal["coding_agent", "deep_agent"] = Field(
+        default="coding_agent",
+        description="複雑な調査系要求で優先する route。deep_agent を選ぶには enable_deep_agent も有効化してください。",
+    )
     routing_mode: Literal["legacy", "structured", "hybrid"] = Field(
         default="legacy",
         description="Supervisor の routing 判定モード。legacy は従来挙動、structured/hybrid は RoutingDecision を併用します。",

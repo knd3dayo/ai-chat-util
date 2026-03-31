@@ -20,6 +20,7 @@ from langgraph_supervisor import create_supervisor
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from .deep_agent_support import build_deep_agent_system_prompt, deepagents_available, require_create_deep_agent
 from .prompts import PromptsBase
 from .agent import AgentBuilder, ToolLimits
 from .supervisor_support import AuditContext, EvidenceSummary, RoutingDecision, RouteCandidate, SufficiencyDecision
@@ -82,6 +83,19 @@ class MCPClientUtil:
         r"コーディング[\s\-]*エージェント",
     )
 
+    _EXPLICIT_DEEP_AGENT_PATTERNS: tuple[str, ...] = (
+        r"\bdeep(?:[\s\-_]+agent)s?\b",
+        r"ディープ[\s\-]*エージェント",
+    )
+
+    _DEEP_AGENT_EXCLUDED_TOOL_NAMES: tuple[str, ...] = (
+        "execute",
+        "status",
+        "get_result",
+        "workspace_path",
+        "cancel",
+    )
+
     _PATH_LIKE_PATTERNS: tuple[str, ...] = (
         r"(?:[A-Za-z]:[\\/]|/)[^\s'\"`]+",
     )
@@ -130,6 +144,48 @@ class MCPClientUtil:
                 return True
 
         return False
+
+    @classmethod
+    def explicitly_requests_deep_agent(cls, messages: Sequence[Any]) -> bool:
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            normalized_text = text
+            for pattern in cls._PATH_LIKE_PATTERNS:
+                normalized_text = re.sub(pattern, " ", normalized_text)
+
+            if any(re.search(pattern, normalized_text, flags=re.IGNORECASE) for pattern in cls._EXPLICIT_DEEP_AGENT_PATTERNS):
+                return True
+
+        return False
+
+    @classmethod
+    def deep_agent_route_enabled(cls, runtime_config: AiChatUtilConfig) -> bool:
+        return bool(getattr(runtime_config.features, "enable_deep_agent", False)) and deepagents_available()
+
+    @classmethod
+    def _is_deep_agent_tool_allowed(cls, tool_name: str) -> bool:
+        normalized = str(tool_name or "").strip().lower()
+        return normalized not in cls._DEEP_AGENT_EXCLUDED_TOOL_NAMES
 
     @classmethod
     def extract_explicit_user_file_paths(cls, messages: Sequence[Any]) -> list[str]:
@@ -1746,7 +1802,7 @@ class MCPClientUtil:
     def build_budget_exhausted_completion_directive(cls, prior_text: str) -> str:
         return (
             "ツール呼び出し予算に到達しました。これ以上ツールを呼び出すことはできません。\n"
-            "追加のツール実行、同一ツールの再試行、planner_agent への再委譲は行わないでください。\n"
+            "追加のツール実行、同一ツールの再試行、追加の再委譲は行わないでください。\n"
             "このスレッドで既に取得済みのツール結果だけを使って、回答できる部分をまとめてください。\n"
             "不足している情報があれば、その不足点だけを短く明記してください。\n"
             "必ず <RESPONSE_TYPE>complete</RESPONSE_TYPE> を返してください。\n"
@@ -2181,6 +2237,90 @@ class MCPClientUtil:
         litellm_router = Router(model_list=runtime_config.llm.create_litellm_model_list())
         llm = ChatLiteLLMRouter(router=litellm_router, model_name=runtime_config.llm.completion_model)
         return llm
+
+    @classmethod
+    async def _resolve_deep_agent_tools(
+        cls,
+        *,
+        runtime_config: AiChatUtilConfig,
+        tool_limits: ToolLimits | None,
+        audit_context: AuditContext | None,
+        explicit_user_file_paths: Sequence[str] | None = None,
+    ) -> list[Any]:
+        agent_client = MultiServerMCPClient(runtime_config.get_mcp_server_config().to_langchain_config())
+        deep_agent_tools = [
+            cls._maybe_wrap_req_nested_tool(tool)
+            for tool in await agent_client.get_tools()
+            if cls._is_deep_agent_tool_allowed(str(getattr(tool, "name", "")))
+        ]
+
+        if tool_limits is not None:
+            tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = tool_limits.guard_params()
+            followup_limit = int(tool_limits.followup_tool_call_limit)
+        else:
+            tool_call_limit_int, tool_timeout_seconds_f, tool_timeout_retries_int = (0, 0.0, 0)
+            followup_limit = 0
+
+        effective_tool_call_limit_int, effective_followup_tool_call_limit_int = ToolLimits.effective_call_limits(
+            tool_call_limit_int,
+            followup_limit,
+            explicit_user_file_paths,
+        )
+        configured_hitl_approval_tools = [
+            str(name).strip()
+            for name in (runtime_config.features.hitl_approval_tools or [])
+            if isinstance(name, str) and str(name).strip()
+        ]
+        tool_call_state: dict[str, Any] = {
+            "used": 0,
+            "general_used": 0,
+            "followup_used": 0,
+            "followup_limit": effective_followup_tool_call_limit_int,
+            "agent_name": "deep_agent",
+            "audit_context": audit_context,
+            "approval_tools": set(configured_hitl_approval_tools),
+            "explicit_user_file_paths": [
+                str(path).strip()
+                for path in (explicit_user_file_paths or [])
+                if isinstance(path, str) and str(path).strip()
+            ],
+        }
+        ToolLimits._apply_tool_execution_guards(
+            deep_agent_tools,
+            tool_call_state=tool_call_state,
+            tool_call_limit_int=effective_tool_call_limit_int,
+            tool_timeout_seconds_f=tool_timeout_seconds_f,
+            tool_timeout_retries_int=tool_timeout_retries_int,
+        )
+        return deep_agent_tools
+
+    @classmethod
+    async def create_deep_agent_workflow(
+        cls,
+        runtime_config: AiChatUtilConfig,
+        *,
+        checkpointer: Any | None = None,
+        tool_limits: ToolLimits | None = None,
+        explicit_user_file_paths: Sequence[str] | None = None,
+        audit_context: AuditContext | None = None,
+    ) -> tuple[CompiledStateGraph, list[str]]:
+        create_deep_agent = require_create_deep_agent()
+        llm = cls.create_llm(runtime_config)
+        deep_agent_tools = await cls._resolve_deep_agent_tools(
+            runtime_config=runtime_config,
+            tool_limits=tool_limits,
+            audit_context=audit_context,
+            explicit_user_file_paths=explicit_user_file_paths,
+        )
+        graph = create_deep_agent(
+            model=llm,
+            tools=deep_agent_tools,
+            system_prompt=build_deep_agent_system_prompt(),
+            checkpointer=checkpointer,
+            name="mcp_deep_agent",
+        )
+        tool_names = [str(getattr(tool, "name", "")).strip() for tool in deep_agent_tools if str(getattr(tool, "name", "")).strip()]
+        return graph, tool_names
     
     @classmethod
     async def create_workflow(
@@ -2191,6 +2331,7 @@ class MCPClientUtil:
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
         force_coding_agent_route: bool = False,
+        force_deep_agent_route: bool = False,
         explicit_user_file_paths: Sequence[str] | None = None,
         routing_decision: RoutingDecision | None = None,
         audit_context: AuditContext | None = None,
@@ -2201,6 +2342,25 @@ class MCPClientUtil:
         # LLM + MCP ツールでエージェントを作成
         llm = cls.create_llm(runtime_config)
         mcp_config = runtime_config.get_mcp_server_config()
+
+        if routing_decision is not None and routing_decision.selected_route == "deep_agent":
+            graph, deep_agent_tool_names = await cls.create_deep_agent_workflow(
+                runtime_config,
+                checkpointer=checkpointer,
+                tool_limits=tool_limits,
+                explicit_user_file_paths=explicit_user_file_paths,
+                audit_context=audit_context,
+            )
+            if audit_context is not None:
+                audit_context.emit(
+                    "tool_catalog_resolved",
+                    route_name="deep_agent",
+                    payload={
+                        "tool_agent_names": ["deep_agent"],
+                        "tool_catalog": [{"agent_name": "deep_agent", "tool_names": deep_agent_tool_names}],
+                    },
+                )
+            return graph
 
         # ツール実行用のエージェント
         # システムプロンプトで役割分担を指示する例。実際のプロンプトは用途に応じて調整してください。
@@ -2301,6 +2461,8 @@ class MCPClientUtil:
         cls,
         *,
         force_coding_agent_route: bool,
+        force_deep_agent_route: bool,
+        deep_agent_enabled: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
     ) -> RoutingDecision:
@@ -2315,6 +2477,22 @@ class MCPClientUtil:
             for path in (explicit_user_file_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
+
+        if force_deep_agent_route and deep_agent_enabled:
+            candidate = RouteCandidate(
+                route_name="deep_agent",
+                score=1.0,
+                reason_code="route.multi_step_investigation_needed",
+                tool_hints=[name for name in normalized_tools if cls._is_deep_agent_tool_allowed(name)],
+            )
+            return RoutingDecision(
+                selected_route="deep_agent",
+                candidate_routes=[candidate],
+                reason_code="route.multi_step_investigation_needed",
+                confidence=1.0,
+                next_action="execute_selected_route",
+                notes="explicit deep-agent request detected",
+            )
 
         if force_coding_agent_route and has_coding_agent_tools:
             candidate = RouteCandidate(
@@ -2368,6 +2546,7 @@ class MCPClientUtil:
         cls,
         *,
         has_coding_agent: bool,
+        has_deep_agent: bool,
         has_general_agent: bool,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
@@ -2382,6 +2561,11 @@ class MCPClientUtil:
             for name in cast(Sequence[Any], (route_tool_catalog or {}).get("general_tool_agent") or [])
             if isinstance(name, str) and str(name).strip()
         ]
+        deep_tools = [
+            str(name).strip()
+            for name in cast(Sequence[Any], (route_tool_catalog or {}).get("deep_agent") or [])
+            if isinstance(name, str) and str(name).strip()
+        ]
         if has_coding_agent:
             if coding_tools:
                 lines.append(
@@ -2390,6 +2574,14 @@ class MCPClientUtil:
                 )
             else:
                 lines.append("- coding_agent: execute/status/get_result を使う複数ステップ調査向け")
+        if has_deep_agent:
+            if deep_tools:
+                lines.append(
+                    "- deep_agent: 深い分解や複数ステップ調査向け。非同期ジョブ系ツールを使わずに完結する経路"
+                    f" (visible_tools: {', '.join(deep_tools)})"
+                )
+            else:
+                lines.append("- deep_agent: 深い分解や複数ステップ調査向け。非同期ジョブ系ツールを使わずに完結する経路")
         if has_general_agent:
             if general_tools:
                 lines.append(
@@ -2398,7 +2590,6 @@ class MCPClientUtil:
                 )
             else:
                 lines.append("- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け")
-        lines.append("- planner_agent: 実行前に計画整理が必要な場合のみ")
         lines.append("- direct_answer: ツール不要で即答できる場合のみ")
         lines.append("- reject: サポート範囲外または route を決めても安全に進めない場合")
         return "\n".join(lines)
@@ -2408,8 +2599,10 @@ class MCPClientUtil:
         cls,
         *,
         force_coding_agent_route: bool,
+        force_deep_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None,
         routing_mode: str,
+        preferred_coding_route: str,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         normalized_paths = [
@@ -2425,6 +2618,8 @@ class MCPClientUtil:
             [
                 f"routing_mode={routing_mode}",
                 f"force_coding_agent_route={str(force_coding_agent_route).lower()}",
+                f"force_deep_agent_route={str(force_deep_agent_route).lower()}",
+                f"preferred_coding_route={preferred_coding_route}",
                 "explicit_user_file_paths=" + (", ".join(normalized_paths) if normalized_paths else "(none)"),
                 *catalog_lines,
             ]
@@ -2461,6 +2656,23 @@ class MCPClientUtil:
                 ]
             except Exception:
                 logger.debug("Failed to resolve route tool catalog for %s", route_name, exc_info=True)
+
+        if cls.deep_agent_route_enabled(runtime_config):
+            try:
+                client = MultiServerMCPClient(mcp_config.to_langchain_config())
+                tools = await client.get_tools()
+                route_tool_inventory["deep_agent"] = [
+                    {
+                        "name": str(getattr(tool, "name", "")).strip(),
+                        "description": cls._normalize_tool_description(getattr(tool, "description", "")),
+                        "primary_args": cls._extract_primary_arg_names(getattr(tool, "args_schema", None)),
+                    }
+                    for tool in tools
+                    if str(getattr(tool, "name", "")).strip()
+                    and cls._is_deep_agent_tool_allowed(str(getattr(tool, "name", "")))
+                ]
+            except Exception:
+                logger.debug("Failed to resolve route tool catalog for deep_agent", exc_info=True)
 
         return route_tool_inventory
 
@@ -2506,6 +2718,10 @@ class MCPClientUtil:
             lines.append("- 初手は coding_agent ルートを優先してください。general_tool_agent へ広げるのは `get_loaded_config_info` のような事前確認が必要な場合だけです。")
             lines.append("- `get_loaded_config_info` を使う場合でも 1 回だけ実行し、取得した path / config を以後の委譲で再利用してください。")
             lines.append("- 設定確認が済んだら、以降は coding-agent 系の execute/status/get_result に進み、同じ設定確認を繰り返さないでください。")
+        elif selected_route == "deep_agent":
+            lines.append("- 初手は deep_agent ルートを優先してください。非同期ジョブ系の execute/status/get_result は使わず、利用可能なファイル系/MCP ツールだけで完結してください。")
+            lines.append("- deep_agent で必要情報を取得できた後は、同じツールを同じ引数で繰り返し呼ばないでください。")
+            lines.append("- deep_agent で不足する場合のみ clarification を返し、coding_agent への安易な切り替えは行わないでください。")
         elif selected_route == "general_tool_agent":
             lines.append("- 初手は general_tool_agent で完結するかを優先確認してください。")
             lines.append("- general_tool_agent で必要なツールが見えている場合、coding-agent 系の execute/status/get_result へ切り替えないでください。")
@@ -2580,6 +2796,8 @@ class MCPClientUtil:
         route = str(route_name or "").strip().lower()
         if route == "coding_agent":
             return "route.multi_step_investigation_needed"
+        if route == "deep_agent":
+            return "route.multi_step_investigation_needed"
         if route == "general_tool_agent":
             return "route.general_tool_sufficient"
         if route == "direct_answer":
@@ -2651,6 +2869,7 @@ class MCPClientUtil:
         prompts: PromptsBase,
         messages: Sequence[Any],
         force_coding_agent_route: bool,
+        force_deep_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
@@ -2658,32 +2877,38 @@ class MCPClientUtil:
     ) -> RoutingDecision:
         default_decision = cls._build_default_routing_decision(
             force_coding_agent_route=force_coding_agent_route,
+            force_deep_agent_route=force_deep_agent_route,
+            deep_agent_enabled=cls.deep_agent_route_enabled(runtime_config),
             explicit_user_file_paths=explicit_user_file_paths,
             available_tool_names=available_tool_names,
         )
 
         routing_mode = str(getattr(runtime_config.features, "routing_mode", "legacy") or "legacy").strip().lower()
-        if routing_mode == "legacy" or default_decision.reason_code == "route.explicit_coding_agent_request":
+        if routing_mode == "legacy" or force_deep_agent_route or default_decision.reason_code == "route.explicit_coding_agent_request":
             return default_decision
 
         mcp_config = runtime_config.get_mcp_server_config()
         coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
         has_coding_agent = len(mcp_config.filter(include_name=coding_agent_server_name).servers) > 0
+        has_deep_agent = cls.deep_agent_route_enabled(runtime_config)
         has_general_agent = len(mcp_config.filter(exclude_name=coding_agent_server_name).servers) > 0
-        if not has_coding_agent and not has_general_agent:
+        if not has_coding_agent and not has_deep_agent and not has_general_agent:
             return default_decision
 
         llm = cls.create_llm(runtime_config)
         user_request_text = cls._extract_user_request_text(messages)
         available_routes_text = cls._build_available_routes_text(
             has_coding_agent=has_coding_agent,
+            has_deep_agent=has_deep_agent,
             has_general_agent=has_general_agent,
             route_tool_catalog=route_tool_catalog,
         )
         context_text = cls._build_routing_context_text(
             force_coding_agent_route=force_coding_agent_route,
+            force_deep_agent_route=force_deep_agent_route,
             explicit_user_file_paths=explicit_user_file_paths,
             routing_mode=routing_mode,
+            preferred_coding_route=str(getattr(runtime_config.features, "preferred_coding_route", "coding_agent") or "coding_agent"),
             route_tool_catalog=route_tool_catalog,
         )
 

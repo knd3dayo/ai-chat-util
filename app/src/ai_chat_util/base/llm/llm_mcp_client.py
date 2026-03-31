@@ -142,6 +142,7 @@ class MCPClient(AbstractLLMClient):
             )
 
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
+            force_deep_agent_route = MCPClientUtil.explicitly_requests_deep_agent(lc_messages)
             explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
             requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
             expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
@@ -150,6 +151,25 @@ class MCPClient(AbstractLLMClient):
             expects_tool_catalog_details = MCPClientUtil.requests_tool_catalog_details(lc_messages)
             workflow_messages = list(lc_messages)
             config_preflight_payload: dict[str, Any] | None = None
+            if force_deep_agent_route and not MCPClientUtil.deep_agent_route_enabled(self.runtime_config):
+                response_text = (
+                    "deep_agent route が要求されましたが、現在は利用できません。\n"
+                    "- features.enable_deep_agent を有効にしてください。\n"
+                    "- deepagents パッケージが未導入ならインストールしてください。"
+                )
+                return ChatResponse(
+                    status=cast(Any, "completed"),
+                    trace_id=run_trace_id,
+                    hitl=None,
+                    messages=[
+                        ChatMessage(
+                            role="assistant",
+                            content=[ChatContent(params={"type": "text", "text": response_text})],
+                        )
+                    ],
+                    input_tokens=0,
+                    output_tokens=0,
+                )
             route_tool_inventory = await MCPClientUtil.resolve_route_tool_inventory(
                 runtime_config=self.runtime_config,
             )
@@ -171,6 +191,7 @@ class MCPClient(AbstractLLMClient):
                 prompts=prompts,
                 messages=lc_messages,
                 force_coding_agent_route=force_coding_agent_route,
+                force_deep_agent_route=force_deep_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
                 available_tool_names=available_tool_names,
                 route_tool_catalog=route_tool_catalog,
@@ -264,7 +285,7 @@ class MCPClient(AbstractLLMClient):
                     input_tokens=0,
                     output_tokens=0,
                 )
-            if routing_decision.selected_route == "coding_agent" and MCPClientUtil.should_run_config_preflight(lc_messages):
+            if routing_decision.selected_route in {"coding_agent", "deep_agent"} and MCPClientUtil.should_run_config_preflight(lc_messages):
                 config_preflight_payload = await MCPClientUtil.run_config_preflight(
                     runtime_config=self.runtime_config,
                     tool_limits=tool_limits,
@@ -287,6 +308,7 @@ class MCPClient(AbstractLLMClient):
                 checkpointer=checkpointer,
                 tool_limits=tool_limits,
                 force_coding_agent_route=force_coding_agent_route,
+                force_deep_agent_route=force_deep_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
                 routing_decision=routing_decision,
                 audit_context=audit_context,

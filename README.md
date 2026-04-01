@@ -102,14 +102,16 @@
 ```
 app/src/
 ├── ai_chat_util/        # LLMアプリ本体 + 共有層 + coding-agent runtime
+│   ├── analysis/        # ファイル/文書解析の共通サービス層
 │   ├── agent/           # coding-agent runtime
 │   │   └── coding/      # coding-agent の API / CLI / MCP / core / test
 │   ├── api/             # FastAPI APIサーバー
-│   ├── base/            # chat / batch / llm / resource 組み立て
 │   ├── cli/             # CLI
 │   ├── common/          # 共通設定・共通モデル・契約
+│   ├── core/            # chat / batch / tool / resource の公開 facade
 │   ├── log/             # ログ設定
 │   ├── mcp/             # MCPサーバー
+│   ├── base/            # 内部実装層（llm / agent）
 │   └── test/            # サンプル/簡易スクリプト
 └── file_util/           # ファイル処理基盤
     ├── api/             # ファイル処理API
@@ -124,7 +126,9 @@ app/src/
 
 - `file_util` は最下層のファイル処理基盤です。`ai_chat_util` の app 層へ依存しません。
 - `ai_chat_util.common` は共通設定・共通モデル・契約を持つ共有層です。
-- `ai_chat_util.base` はアプリケーション層の chat / llm 組み立てを持ちます。
+- `ai_chat_util.analysis` はファイル/文書解析の共通サービス層です。CLI と API/MCP 公開層の双方から利用します。
+- `ai_chat_util.core` は chat / batch / tool / resource の公開 facade です。
+- `ai_chat_util.base` は内部実装層です。現在は主に `llm` と `agent` を保持します。
 - `ai_chat_util.agent.coding` は coding-agent の runtime / entrypoint / test を持ちます。
 - `ai_chat_util` 配下の app 層は `ai_chat_util.common` と `file_util` に依存して構いません。
 - LLM 非依存のファイル処理は `file_util` に置きます。
@@ -139,18 +143,18 @@ file_util
 ai_chat_util.common
   ^
   |
-ai_chat_util.base / ai_chat_util.agent.coding / ai_chat_util.api / ai_chat_util.mcp / ai_chat_util.cli
+ai_chat_util.analysis / ai_chat_util.core / ai_chat_util.base / ai_chat_util.agent.coding / ai_chat_util.api / ai_chat_util.mcp / ai_chat_util.cli
 ```
 
-`ai_chat_util.common -> ai_chat_util.base` の逆向き依存は作らないでください。
+`ai_chat_util.common -> ai_chat_util.analysis/core/base` の逆向き依存は作らないでください。
 
 ### 再編の優先順
 
 責務整理は一度に大きく動かさず、次の順番で進めます。
 
 1. 共通で使うが LLM 非依存な処理を `file_util` または `ai_chat_util.common` に移す
-2. `ai_chat_util/base/util` に残るものを「LLM 固有かどうか」で分類する
-3. `ai_chat_util` 配下の共有層と runtime 層へ責務を集約する
+2. `ai_chat_util/base` に残るものを「公開 facade か内部実装か」で分類する
+3. 公開する責務は `ai_chat_util.analysis` / `ai_chat_util.core` に寄せ、内部実装は `ai_chat_util.base` に残す
 
 ### 現在の再編状況
 
@@ -160,12 +164,15 @@ ai_chat_util.base / ai_chat_util.agent.coding / ai_chat_util.api / ai_chat_util.
 - `downloader` は `file_util/util/downloader.py` に配置
 - `office2pdf` は `file_util/util/office2pdf.py` に配置
 - PDF のテキスト/画像抽出は `file_util/util/pdf_util.py` に配置
+- ファイル/文書解析の共通サービスは `ai_chat_util/analysis` に配置
+- chat / batch / tool / resource の公開 facade は `ai_chat_util/core` に配置
+- `ai_chat_util/base` は `llm` / `agent` の内部実装層として維持
 - 共有設定・共有モデルは `ai_chat_util.common` に集約
 - coding-agent の API / CLI / MCP / subprocess entrypoint は `ai_chat_util.agent.coding` に集約
 - console script は `coding-agent-api` / `coding-agent-mcp` / `coding-agent-util` を提供
 - coding-agent の自動テストは `ai_chat_util/agent/coding/_test_` に配置
 
-`ai_chat_util/base/util` の file util shim は削除済みです。
+`ai_chat_util/base/util` の file util shim は削除済みです。`ai_chat_util/base/core` と `ai_chat_util/base/analysis` もトップレベルへ移動済みです。
 
 ### 次の移動候補
 
@@ -173,6 +180,8 @@ ai_chat_util.base / ai_chat_util.agent.coding / ai_chat_util.api / ai_chat_util.
 
 - `ai_chat_util/base/util` 全体
   - 最終的には「LLM 文脈を知らなくても成立する処理」を残さない方針です。
+- `ai_chat_util/base/llm` と `ai_chat_util/base/agent`
+  - 現在は内部実装層として維持します。公開 API として使う前提ではなく、外部からは `ai_chat_util.core` / `ai_chat_util.analysis` の利用を推奨します。
 
 ---
 

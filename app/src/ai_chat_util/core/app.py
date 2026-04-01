@@ -1,13 +1,14 @@
 from typing import Annotated, Literal
-from pydantic import Field
-from ai_chat_util.base.agent.agent_batch_client import MCPBatchClient, DeepAgentBatchClient
-from ai_chat_util.common.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
-from ai_chat_util.base.agent.agent_client_factory import AgentFactory
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
 
-# toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
-# chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
+from pydantic import Field
+
+from ai_chat_util.base.agent.agent_batch_client import DeepAgentBatchClient, MCPBatchClient
+from ai_chat_util.base.agent.agent_client_factory import AgentFactory
+from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
+from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse, WebRequestModel
+
+
 async def run_chat(
         chat_request: Annotated[ChatRequest, Field(description="Chat request object")],
 ) -> Annotated[ChatResponse, Field(description="List of related articles from Wikipedia")]:
@@ -48,6 +49,7 @@ async def run_simple_chat(
     response = await llm_client.simple_chat(prompt)
     return response
 
+
 async def run_simple_batch_chat(
         prompt: Annotated[str, Field(description="Prompt for the batch chat")],
         messages: Annotated[list[str], Field(description="List of messages for the batch chat")],
@@ -59,6 +61,7 @@ async def run_simple_batch_chat(
     batch_client = LLMBatchClient()
     results = await batch_client.run_simple_batch_chat(prompt, messages, concurrency)
     return results
+
 
 async def run_batch_chat(
         chat_requests: Annotated[list[ChatRequest], Field(description="List of chat histories for batch processing")],
@@ -94,6 +97,7 @@ async def run_deepagent_batch_chat(
     batch_client = DeepAgentBatchClient()
     results = await batch_client.run_batch_chat(chat_requests, concurrency)
     return [response for _, response in results]
+
 
 async def run_batch_chat_from_excel(
         prompt: Annotated[str, Field(description="Prompt for the batch chat")],
@@ -171,4 +175,3 @@ async def run_deepagent_batch_chat_from_excel(
         detail,
         concurrency,
     )
-

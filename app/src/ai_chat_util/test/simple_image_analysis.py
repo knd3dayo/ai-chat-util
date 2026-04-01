@@ -1,10 +1,10 @@
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util.base.llm.llm_client_util import LLMClientUtil
+from ai_chat_util.analysis import AnalysisService
 
 async def main(files):
     client = LLMFactory.create_llm_client()
 
-    result = await LLMClientUtil.analyze_image_files(
+    result = await AnalysisService.analyze_image_files(
         client,
         file_list=files,
         prompt="この画像の内容を説明してください。",

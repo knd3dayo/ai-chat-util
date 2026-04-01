@@ -5,8 +5,8 @@ import asyncio
 import json
 from typing import Iterable
 from ai_chat_util.base.agent.agent_client_factory import AgentFactory
+from ai_chat_util.analysis import AnalysisService
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ..base.llm.llm_client_util import LLMClientUtil
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 
 
@@ -370,28 +370,28 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await LLMClientUtil.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
+        response = await AnalysisService.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await LLMClientUtil.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
+        response = await AnalysisService.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await LLMClientUtil.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
+        response = await AnalysisService.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = LLMFactory.create_llm_client()
-        response = await LLMClientUtil.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
+        response = await AnalysisService.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
         print(response.output)
         return
 

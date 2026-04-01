@@ -4,7 +4,7 @@ from fastapi import APIRouter, FastAPI, Request
 from ai_chat_util.common.config.runtime import init_runtime
 from ai_chat_util.common.model.request_headers import RequestHeaders, bind_current_request_headers
 
-from ai_chat_util.base.core.resource_app import (
+from ai_chat_util.core.resource_app import (
     use_custom_pdf_analyzer,
     get_completion_model,
     get_loaded_config_info,
@@ -21,7 +21,7 @@ from ai_chat_util.base.core.resource_app import (
     create_multi_format_contents_from_file,
 )
 
-from ai_chat_util.base.core.app import (
+from ai_chat_util.core.app import (
     run_chat,
     run_agent_chat,
     run_deepagent_chat,
@@ -35,7 +35,7 @@ from ai_chat_util.base.core.app import (
     run_deepagent_batch_chat_from_excel,
 )
 
-from ai_chat_util.base.core.tool_app import (
+from ai_chat_util.core.tool_app import (
     analyze_image_files,
     analyze_pdf_files,
     analyze_office_files,

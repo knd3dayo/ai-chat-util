@@ -5,7 +5,7 @@ from typing import Any
 
 from ai_chat_util.api.api_server import router
 from ai_chat_util.base.agent.agent_client_factory import AgentFactory
-from ai_chat_util.base.core.app import run_deepagent_chat, run_deepagent_batch_chat, run_deepagent_batch_chat_from_excel
+from ai_chat_util.core.app import run_deepagent_chat, run_deepagent_batch_chat, run_deepagent_batch_chat_from_excel
 from ai_chat_util.cli.__main__ import build_parser
 from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse
 import ai_chat_util.mcp.mcp_server as mcp_server_mod
@@ -63,7 +63,7 @@ def test_run_deepagent_batch_chat_uses_deepagent_batch_client(monkeypatch) -> No
             called["concurrency"] = concurrency
             return [(i, ChatResponse(status="completed", messages=[])) for i, _ in enumerate(chat_requests)]
 
-    monkeypatch.setattr("ai_chat_util.base.core.app.DeepAgentBatchClient", _FakeBatchClient)
+    monkeypatch.setattr("ai_chat_util.core.app.DeepAgentBatchClient", _FakeBatchClient)
 
     response = asyncio.run(run_deepagent_batch_chat([_build_chat_request("a"), _build_chat_request("b")], concurrency=3))
 
@@ -84,7 +84,7 @@ def test_run_deepagent_batch_chat_from_excel_uses_deepagent_batch_client(monkeyp
         async def run_batch_chat_from_excel(self, *args: Any) -> None:
             called["args"] = args
 
-    monkeypatch.setattr("ai_chat_util.base.core.app.DeepAgentBatchClient", _FakeBatchClient)
+    monkeypatch.setattr("ai_chat_util.core.app.DeepAgentBatchClient", _FakeBatchClient)
 
     asyncio.run(
         run_deepagent_batch_chat_from_excel(

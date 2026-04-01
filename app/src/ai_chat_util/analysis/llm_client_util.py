@@ -1,26 +1,32 @@
 from __future__ import annotations
 
 import time
-from .abstract_llm_client import AbstractLLMClient
 
+from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
 from ai_chat_util.common.model.ai_chatl_util_models import (
-    ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
-    ChatContent, WebRequestModel, ChatRequest
+    ChatContent,
+    ChatHistory,
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    WebRequestModel,
 )
-
 from file_util.model import FileUtilDocument
 
 import ai_chat_util.log.log_settings as log_settings
+
 logger = log_settings.getLogger(__name__)
 
+
 class LLMClientUtil:
-
-
     @classmethod
-    async def analyze_image_files(cls, llm_client: AbstractLLMClient, file_list: list[str], prompt: str, detail: str) -> ChatResponse:
-        '''
-        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_image_files(
+        cls,
+        llm_client: AbstractLLMClient,
+        file_list: list[str],
+        prompt: str,
+        detail: str,
+    ) -> ChatResponse:
         started = time.perf_counter()
         logger.info(
             "IMAGE_ANALYZE_START images=%d detail=%s prompt_len=%d",
@@ -49,7 +55,8 @@ class LLMClientUtil:
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         chat_started = time.perf_counter()
         logger.info("IMAGE_CHAT_START")
         chat_response: ChatResponse = await llm_client.chat(chat_request)
@@ -59,31 +66,38 @@ class LLMClientUtil:
             int((time.perf_counter() - started) * 1000),
         )
         return chat_response
-    
+
     @classmethod
-    async def analyze_image_urls(cls, llm_client: AbstractLLMClient, image_url_list: list[WebRequestModel], prompt: str, detail: str) -> ChatResponse:
-        '''
-        複数の画像URLとプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_image_urls(
+        cls,
+        llm_client: AbstractLLMClient,
+        image_url_list: list[WebRequestModel],
+        prompt: str,
+        detail: str,
+    ) -> ChatResponse:
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
         image_content_list: list[ChatContent] = []
         for image_url in image_url_list:
-            image_contents = await llm_client.get_message_factory().create_image_content_from_url_async(image_url, detail)
+            image_contents = await llm_client.get_message_factory().create_image_content_from_url_async(
+                image_url, detail
+            )
             image_content_list.extend(image_contents)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response
 
     @classmethod
-    async def analyze_pdf_files(cls, llm_client: AbstractLLMClient, file_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の画像とプロンプトから画像解析を行う。各画像のテキスト抽出、各画像の説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_pdf_files(
+        cls,
+        llm_client: AbstractLLMClient,
+        file_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
         pdf_content_list = []
         config = llm_client.get_config()
@@ -101,70 +115,77 @@ class LLMClientUtil:
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(
-                messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response
 
     @classmethod
-    async def analyze_office_files(cls, llm_client: AbstractLLMClient, file_path_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_office_files(
+        cls,
+        llm_client: AbstractLLMClient,
+        file_path_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
         office_contents: list[ChatContent] = []
         for file_path in file_path_list:
-            # Officeドキュメントを一時的にPDFに変換する
             pdf_content = llm_client.get_message_factory().create_office_content_from_file(
-                file_path, detail=detail)
-
+                file_path, detail=detail
+            )
             office_contents.extend(pdf_content)
 
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         response: ChatResponse = await llm_client.chat(chat_request)
         return response
 
     @classmethod
-    async def analyze_documents_data(cls, llm_client: AbstractLLMClient, document_type_list: list[FileUtilDocument], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_documents_data(
+        cls,
+        llm_client: AbstractLLMClient,
+        document_type_list: list[FileUtilDocument],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
         content_list = []
         for document_type in document_type_list:
             contents = llm_client.get_message_factory().create_multi_format_content(
-                document_type, detail=detail)
+                document_type, detail=detail
+            )
             content_list.extend(contents)
 
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response
 
     @classmethod
-    async def analyze_files(cls, llm_client: AbstractLLMClient, file_path_list: list[str], prompt: str, detail: str = "auto"
-            ) -> ChatResponse:
-        '''
-        複数の形式のドキュメントとプロンプトからドキュメント解析を行う。
-        各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
+    async def analyze_files(
+        cls,
+        llm_client: AbstractLLMClient,
+        file_path_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
         content_list = []
         for file_path in file_path_list:
             contents = llm_client.get_message_factory().create_multi_format_contents_from_file(
-                file_path, detail=detail)
+                file_path, detail=detail
+            )
             content_list.extend(contents)
 
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
         chat_request: ChatRequest = ChatRequest(
-            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None)
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response

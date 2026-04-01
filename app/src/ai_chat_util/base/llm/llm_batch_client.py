@@ -176,13 +176,3 @@ class LLMBatchClient(BatchClientBase):
         return LLMFactory.create_llm_client(llm_config)
 
 
-class MCPBatchClient(BatchClientBase):
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
-        return LLMFactory.create_mcp_client(llm_config)
-
-
-class DeepAgentBatchClient(BatchClientBase):
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
-        return LLMFactory.create_deepagent_client(llm_config)
-
-

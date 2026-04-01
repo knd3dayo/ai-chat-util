@@ -1,6 +1,8 @@
 from .agent_builder import AgentBuilder
+from .agent_batch_client import DeepAgentBatchClient, MCPBatchClient
+from .agent_client_factory import AgentFactory
 from .tool_limits import ToolLimits
-from .mcp_client import MCPClient
+from .mcp_client import DeepAgentMCPClient, MCPClient
 from .mcp_client_util import MCPClientUtil
 from .prompts import CodingAgentPrompts
 from .supervisor_support import (
@@ -14,9 +16,13 @@ from .supervisor_support import (
 
 __all__ = [
     "AgentBuilder",
+    "AgentFactory",
     "AuditContext",
     "CodingAgentPrompts",
+    "DeepAgentBatchClient",
+    "DeepAgentMCPClient",
     "EvidenceSummary",
+    "MCPBatchClient",
     "MCPClient",
     "MCPClientUtil",
     "RouteCandidate",

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 from typing import Iterable
+from ai_chat_util.base.agent.agent_client_factory import AgentFactory
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ..base.llm.llm_client_util import LLMClientUtil
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
@@ -301,13 +302,13 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "agent_chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_mcp_client()
+        llm_client = AgentFactory.create_mcp_client()
         trace_id: str | None = None
         return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
 
     if args.command == "run_deepagent_chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_deepagent_client()
+        llm_client = AgentFactory.create_deepagent_client()
         trace_id: str | None = None
         return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
     
@@ -332,7 +333,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "agent_batch_chat":
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.llm.llm_batch_client import MCPBatchClient
+        from ai_chat_util.base.agent.agent_batch_client import MCPBatchClient
 
         llm_batch_client = MCPBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -350,7 +351,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.llm.llm_batch_client import DeepAgentBatchClient
+        from ai_chat_util.base.agent.agent_batch_client import DeepAgentBatchClient
 
         llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(

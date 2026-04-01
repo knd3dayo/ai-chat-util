@@ -1,8 +1,10 @@
 from typing import Annotated, Literal
 from pydantic import Field
+from ai_chat_util.base.agent.agent_batch_client import MCPBatchClient, DeepAgentBatchClient
 from ai_chat_util.common.model.ai_chatl_util_models import ChatHistory, ChatResponse, WebRequestModel, ChatRequest, ChatMessage, ChatContent
+from ai_chat_util.base.agent.agent_client_factory import AgentFactory
 from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient, MCPBatchClient, DeepAgentBatchClient
+from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_chat_asyncを呼び出すラッパー関数を定義
@@ -22,7 +24,7 @@ async def run_agent_chat(
     """
     This function processes a chat request with the MCP-backed agent client.
     """
-    client = LLMFactory.create_mcp_client()
+    client = AgentFactory.create_mcp_client()
     return await client.chat(chat_request)
 
 
@@ -32,7 +34,7 @@ async def run_deepagent_chat(
     """
     This function processes a chat request with the MCP-backed DeepAgent client.
     """
-    client = LLMFactory.create_deepagent_client()
+    client = AgentFactory.create_deepagent_client()
     return await client.chat(chat_request)
 
 

@@ -17,7 +17,6 @@ from ai_chat_util.common.model.request_headers import get_current_request_header
 from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from ai_chat_util.base.llm.llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
-from ai_chat_util.base.llm.prompts import PromptsBase
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 

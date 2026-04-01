@@ -4,8 +4,8 @@ import asyncio
 from typing import Any
 
 from ai_chat_util.api.api_server import router
+from ai_chat_util.base.agent.agent_client_factory import AgentFactory
 from ai_chat_util.base.core.app import run_deepagent_chat, run_deepagent_batch_chat, run_deepagent_batch_chat_from_excel
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
 from ai_chat_util.cli.__main__ import build_parser
 from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse
 import ai_chat_util.mcp.mcp_server as mcp_server_mod
@@ -35,7 +35,7 @@ def test_run_deepagent_chat_uses_deepagent_factory(monkeypatch) -> None:
         called["factory"] += 1
         return _FakeClient()
 
-    monkeypatch.setattr(LLMFactory, "create_deepagent_client", _fake_create_deepagent_client)
+    monkeypatch.setattr(AgentFactory, "create_deepagent_client", _fake_create_deepagent_client)
 
     response = asyncio.run(run_deepagent_chat(_build_chat_request()))
 

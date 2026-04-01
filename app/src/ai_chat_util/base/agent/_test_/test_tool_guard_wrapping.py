@@ -23,7 +23,7 @@ fake_sessions_module = types.ModuleType("langchain_mcp_adapters.sessions")
 fake_sessions_module.Connection = dict[str, Any] # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
-import ai_chat_util.base.agent.agent as agent_mod
+import ai_chat_util.base.agent.agent_builder as agent_mod
 import ai_chat_util.base.agent.mcp_client_util as llm_mcp_client_util_mod
 from ai_chat_util.base.agent.agent_builder import AgentBuilder
 from ai_chat_util.base.agent.tool_limits import ToolLimits

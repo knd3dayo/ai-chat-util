@@ -57,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプト文字列",
     )
+    deepagent_chat_parser = subparsers.add_parser("run_deepagent_chat", help="DeepAgents を使用してテキストでチャットします")
+    deepagent_chat_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプト文字列",
+    )
     # batch_chat
     batch_chat_parser = subparsers.add_parser(
         "batch_chat", help="LLM へテキストでバッチチャットします"
@@ -78,8 +86,28 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプトテンプレート文字列",
     )
+    deepagent_batch_chat_parser = subparsers.add_parser(
+        "run_deepagent_batch_chat", help="DeepAgents を使用してテキストでバッチチャットします"
+    )
+    deepagent_batch_chat_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプトテンプレート文字列",
+    )
+    deepagent_batch_alias_parser = subparsers.add_parser(
+        "deepagent_batch_chat", help="DeepAgents を使用してテキストでバッチチャットします"
+    )
+    deepagent_batch_alias_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプトテンプレート文字列",
+    )
 
-    for current_batch_parser in (batch_chat_parser, agent_batch_chat_parser):
+    for current_batch_parser in (batch_chat_parser, agent_batch_chat_parser, deepagent_batch_chat_parser, deepagent_batch_alias_parser):
         current_batch_parser.add_argument(
             "-i",
             "--input_excel_path",
@@ -276,6 +304,12 @@ async def main(argv: Iterable[str] | None = None) -> None:
         llm_client = LLMFactory.create_mcp_client()
         trace_id: str | None = None
         return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+
+    if args.command == "run_deepagent_chat":
+        _validate_non_empty(args.prompt, parser)
+        llm_client = LLMFactory.create_deepagent_client()
+        trace_id: str | None = None
+        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
     
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
@@ -301,6 +335,24 @@ async def main(argv: Iterable[str] | None = None) -> None:
         from ai_chat_util.base.llm.llm_batch_client import MCPBatchClient
 
         llm_batch_client = MCPBatchClient()
+        await llm_batch_client.run_batch_chat_from_excel(
+            input_excel_path=args.input_excel_path,
+            output_excel_path=args.output_excel_path,
+            prompt=args.prompt,
+            content_column=args.content_column,
+            file_path_column=args.file_path_column,
+            output_column=args.output_column,
+            concurrency=args.concurrency,
+            detail=args.image_detail,
+        )
+        print(f"Batch chat completed. Results saved to {args.output_excel_path}")
+        return
+
+    if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
+        _validate_non_empty(args.prompt, parser)
+        from ai_chat_util.base.llm.llm_batch_client import DeepAgentBatchClient
+
+        llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,
             output_excel_path=args.output_excel_path,

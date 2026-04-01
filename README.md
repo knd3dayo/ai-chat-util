@@ -17,6 +17,7 @@
 - LLM（大規模言語モデル）との自然な会話をサポート。
 - コンテキストを保持した継続的な会話が可能。
 - OpenAI / Azure OpenAI / Anthropic をサポート（`ai-chat-util-config.yml` の `llm.provider` で切り替え）
+- 実験的に、Supervisor ではなく DeepAgents を明示的に起動する `run_deepagent_chat` 入口を CLI / API / FastMCP から利用可能。
 
 ### ⚙️ バッチクライアント
 - 複数の入力をまとめてAIに処理させるバッチ実行機能。
@@ -196,6 +197,20 @@ pip install -e ".[deepagents]"
 ```
 
 `features.enable_deep_agent: true` を設定したのに `deepagents` が未導入の場合、`deep_agent route requires the deepagents package` という明示エラーになります。
+
+明示的に DeepAgents を使う検証入口:
+
+- CLI: `ai-chat-util run_deepagent_chat -p "..."`
+- CLI(batch): `ai-chat-util run_deepagent_batch_chat -p "..." -i input.xlsx -o output.xlsx`
+- CLI(batch alias): `ai-chat-util deepagent_batch_chat -p "..." -i input.xlsx -o output.xlsx`
+- API: `POST /api/ai_chat_util/run_deepagent_chat`
+- API(batch): `POST /api/ai_chat_util/run_deepagent_batch_chat` / `POST /api/ai_chat_util/run_deepagent_batch_chat_from_excel`
+- API(batch alias): `POST /api/ai_chat_util/deepagent_batch_chat` / `POST /api/ai_chat_util/deepagent_batch_chat_from_excel`
+- FastMCP tool: `run_deepagent_chat`
+- FastMCP tool(batch): `run_deepagent_batch_chat` / `run_deepagent_batch_chat_from_excel`
+- FastMCP tool(batch alias): `deepagent_batch_chat` / `deepagent_batch_chat_from_excel`
+
+この入口は既存の `agent_chat` とは別で、Supervisor を経由せず DeepAgent route を強制するための実験用 API です。`trace_id`、pause/resume、audit event の外部契約は既存経路をできる限り維持します。
 ## 設定（ai-chat-util-config.yml + .env）
 
 本プロジェクトは、

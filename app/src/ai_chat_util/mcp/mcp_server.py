@@ -14,10 +14,13 @@ from ai_chat_util.base.core.resource_app import get_loaded_config_info
 
 from ai_chat_util.base.core.app import (
     run_chat,
+    run_deepagent_chat,
     run_simple_chat,
     run_batch_chat,
+    run_deepagent_batch_chat,
     run_simple_batch_chat,
     run_batch_chat_from_excel,
+    run_deepagent_batch_chat_from_excel,
 )
 
 from ai_chat_util.base.core.tool_app import (
@@ -232,10 +235,15 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "convert_pdf_files_to_images": convert_pdf_files_to_images,
         # chat/batch
         "run_chat": run_chat,
+        "run_deepagent_chat": run_deepagent_chat,
         "run_simple_chat": run_simple_chat,
         "run_batch_chat": run_batch_chat,
+        "run_deepagent_batch_chat": run_deepagent_batch_chat,
+        "deepagent_batch_chat": run_deepagent_batch_chat,
         "run_simple_batch_chat": run_simple_batch_chat,
         "run_batch_chat_from_excel": run_batch_chat_from_excel,
+        "run_deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
+        "deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
         # debug helper
         "get_loaded_config_info": get_loaded_config_info,
     }

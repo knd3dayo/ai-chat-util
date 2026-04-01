@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, Literal, Mapping, Sequence, cast
 
 import contextlib
 import uuid
@@ -31,6 +31,9 @@ class MCPClient(AbstractLLMClient):
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
         self.message_factory = LLMMessageContentFactory(config=runtime_config)
+
+    def _forced_route(self) -> Literal["deep_agent"] | None:
+        return None
 
 
     @staticmethod
@@ -144,6 +147,10 @@ class MCPClient(AbstractLLMClient):
 
             force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
             force_deep_agent_route = MCPClientUtil.explicitly_requests_deep_agent(lc_messages)
+            forced_route = self._forced_route()
+            if forced_route == "deep_agent":
+                force_coding_agent_route = False
+                force_deep_agent_route = True
             explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
             requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
             expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
@@ -210,6 +217,7 @@ class MCPClient(AbstractLLMClient):
                     "next_action": routing_decision.next_action,
                     "explicit_user_file_paths": list(explicit_user_file_paths),
                     "route_tool_catalog": route_tool_catalog,
+                    "forced_route": forced_route,
                 },
             )
             if expects_tool_catalog_response and route_tool_catalog:
@@ -774,6 +782,11 @@ class MCPClient(AbstractLLMClient):
         LLMClientの設定を返す.
         '''
         return self.runtime_config
+
+
+class DeepAgentMCPClient(MCPClient):
+    def _forced_route(self) -> Literal["deep_agent"] | None:
+        return "deep_agent"
 
 if __name__ == "__main__":
     runtime_config = get_runtime_config()  # ここは適宜、実際の設定に合わせて初期化してください

@@ -23,10 +23,10 @@ from .supervisor_support import create_audit_context
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
-from .mcp_client_util import MCPClientUtil
+from .agent_client_util import AgentClientUtil
 from .tool_limits import ToolLimits
 
-class MCPClient(AbstractChatClient):
+class AgentClient(AbstractChatClient):
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
         self.message_factory = LLMMessageContentFactory(config=runtime_config)
@@ -111,12 +111,12 @@ class MCPClient(AbstractChatClient):
         )
         pending_response: dict[str, Any] | None = None
         pending_workflow_results: list[Any] = []
-        checkpoint_db_path = MCPClientUtil._default_checkpoint_db_path(self.runtime_config)
+        checkpoint_db_path = AgentClientUtil._default_checkpoint_db_path(self.runtime_config)
         
 
         async with contextlib.AsyncExitStack() as exit_stack:
 
-            checkpointer = await MCPClientUtil._create_sqlite_checkpointer(
+            checkpointer = await AgentClientUtil._create_sqlite_checkpointer(
                 checkpoint_db_path,
                 exit_stack=exit_stack,
             )
@@ -144,21 +144,21 @@ class MCPClient(AbstractChatClient):
                 },
             )
 
-            force_coding_agent_route = MCPClientUtil.explicitly_requests_coding_agent(lc_messages)
-            force_deep_agent_route = MCPClientUtil.explicitly_requests_deep_agent(lc_messages)
+            force_coding_agent_route = AgentClientUtil.explicitly_requests_coding_agent(lc_messages)
+            force_deep_agent_route = AgentClientUtil.explicitly_requests_deep_agent(lc_messages)
             forced_route = self._forced_route()
             if forced_route == "deep_agent":
                 force_coding_agent_route = False
                 force_deep_agent_route = True
-            explicit_user_file_paths = MCPClientUtil.extract_explicit_user_file_paths(lc_messages)
-            requested_heading_count = MCPClientUtil.extract_requested_heading_count(lc_messages)
-            expects_heading_response = MCPClientUtil.requests_heading_response(lc_messages)
-            expects_evaluation_response = MCPClientUtil.requests_evaluation_response(lc_messages)
-            expects_tool_catalog_response = MCPClientUtil.requests_tool_catalog_response(lc_messages)
-            expects_tool_catalog_details = MCPClientUtil.requests_tool_catalog_details(lc_messages)
+            explicit_user_file_paths = AgentClientUtil.extract_explicit_user_file_paths(lc_messages)
+            requested_heading_count = AgentClientUtil.extract_requested_heading_count(lc_messages)
+            expects_heading_response = AgentClientUtil.requests_heading_response(lc_messages)
+            expects_evaluation_response = AgentClientUtil.requests_evaluation_response(lc_messages)
+            expects_tool_catalog_response = AgentClientUtil.requests_tool_catalog_response(lc_messages)
+            expects_tool_catalog_details = AgentClientUtil.requests_tool_catalog_details(lc_messages)
             workflow_messages = list(lc_messages)
             config_preflight_payload: dict[str, Any] | None = None
-            if force_deep_agent_route and not MCPClientUtil.deep_agent_route_enabled(self.runtime_config):
+            if force_deep_agent_route and not AgentClientUtil.deep_agent_route_enabled(self.runtime_config):
                 response_text = (
                     "deep_agent route が要求されましたが、現在は利用できません。\n"
                     "- features.enable_deep_agent を有効にしてください。\n"
@@ -177,7 +177,7 @@ class MCPClient(AbstractChatClient):
                     input_tokens=0,
                     output_tokens=0,
                 )
-            route_tool_inventory = await MCPClientUtil.resolve_route_tool_inventory(
+            route_tool_inventory = await AgentClientUtil.resolve_route_tool_inventory(
                 runtime_config=self.runtime_config,
             )
             route_tool_catalog = {
@@ -188,7 +188,7 @@ class MCPClient(AbstractChatClient):
                 ]
                 for route_name, tools in route_tool_inventory.items()
             }
-            route_backend_metadata = MCPClientUtil.build_route_backend_metadata(
+            route_backend_metadata = AgentClientUtil.build_route_backend_metadata(
                 route_tool_inventory=route_tool_inventory,
                 runtime_config=self.runtime_config,
             )
@@ -197,7 +197,7 @@ class MCPClient(AbstractChatClient):
                 for tool_names in route_tool_catalog.values()
                 for tool_name in tool_names
             ]
-            routing_decision = await MCPClientUtil.decide_route(
+            routing_decision = await AgentClientUtil.decide_route(
                 runtime_config=self.runtime_config,
                 prompts=prompts,
                 messages=lc_messages,
@@ -226,7 +226,7 @@ class MCPClient(AbstractChatClient):
                 },
             )
             if expects_tool_catalog_response and route_tool_catalog:
-                tool_catalog_payload = MCPClientUtil.build_route_tool_catalog_payload(
+                tool_catalog_payload = AgentClientUtil.build_route_tool_catalog_payload(
                     route_tool_inventory,
                     runtime_config=self.runtime_config,
                 )
@@ -235,7 +235,7 @@ class MCPClient(AbstractChatClient):
                     route_name=routing_decision.selected_route,
                     payload=tool_catalog_payload,
                 )
-                response_text = MCPClientUtil.build_tool_catalog_response_text(
+                response_text = AgentClientUtil.build_tool_catalog_response_text(
                     route_tool_inventory,
                     include_details=expects_tool_catalog_details,
                 )
@@ -244,8 +244,8 @@ class MCPClient(AbstractChatClient):
                     "tool_catalog": tool_catalog_payload["tool_catalog"],
                 }
                 if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
-                    summary = MCPClientUtil.build_evidence_summary(evidence)
-                    final_sufficiency = MCPClientUtil.judge_sufficiency(
+                    summary = AgentClientUtil.build_evidence_summary(evidence)
+                    final_sufficiency = AgentClientUtil.judge_sufficiency(
                         response_text=response_text,
                         resp_type="complete",
                         hitl_kind=None,
@@ -302,13 +302,13 @@ class MCPClient(AbstractChatClient):
                     input_tokens=0,
                     output_tokens=0,
                 )
-            if routing_decision.selected_route in {"coding_agent", "deep_agent"} and MCPClientUtil.should_run_config_preflight(lc_messages):
-                config_preflight_payload = await MCPClientUtil.run_config_preflight(
+            if routing_decision.selected_route in {"coding_agent", "deep_agent"} and AgentClientUtil.should_run_config_preflight(lc_messages):
+                config_preflight_payload = await AgentClientUtil.run_config_preflight(
                     runtime_config=self.runtime_config,
                     tool_limits=tool_limits,
                     audit_context=audit_context,
                 )
-                preflight_message = MCPClientUtil.build_config_preflight_message(config_preflight_payload or {})
+                preflight_message = AgentClientUtil.build_config_preflight_message(config_preflight_payload or {})
                 if preflight_message:
                     workflow_messages.append(SystemMessage(content=preflight_message))
                     audit_context.emit(
@@ -319,7 +319,7 @@ class MCPClient(AbstractChatClient):
                             "config_path": (config_preflight_payload or {}).get("config_path"),
                         },
                     )
-            app = await MCPClientUtil.create_workflow(
+            app = await AgentClientUtil.create_workflow(
                 self.runtime_config,
                 prompts=prompts,
                 checkpointer=checkpointer,
@@ -344,15 +344,15 @@ class MCPClient(AbstractChatClient):
                 workflow_results.append(result)
             except GraphRecursionError as e:
                 logger.warning("MCP supervisor hit recursion limit: trace_id=%s", run_trace_id, exc_info=True)
-                checkpoint_results = await MCPClientUtil.collect_checkpoint_results(
+                checkpoint_results = await AgentClientUtil.collect_checkpoint_results(
                     app=app,
                     run_trace_id=run_trace_id,
                 )
                 workflow_results.extend(checkpoint_results)
-                evidence = MCPClientUtil.extract_successful_tool_evidence(workflow_results)
-                evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
+                evidence = AgentClientUtil.extract_successful_tool_evidence(workflow_results)
+                evidence = AgentClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
                 msg = str(e).strip() or type(e).__name__
-                user_text = MCPClientUtil.build_recursion_limit_fallback_text(msg, evidence)
+                user_text = AgentClientUtil.build_recursion_limit_fallback_text(msg, evidence)
                 return ChatResponse(
                     status=cast(Any, "completed"),
                     trace_id=run_trace_id,
@@ -393,13 +393,13 @@ class MCPClient(AbstractChatClient):
                 )
             logger.debug("Extracting output and usage from agent result: %s", result)
 
-            output_text, input_tokens, output_tokens = MCPClientUtil._extract_output_and_usage(result)
+            output_text, input_tokens, output_tokens = AgentClientUtil._extract_output_and_usage(result)
 
-            resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
+            resp_type, extracted_text, hitl_kind, hitl_tool = AgentClientUtil._parse_supervisor_xml(output_text)
             user_text = extracted_text or output_text
 
             # Fallback: if the model ignored/misused the XML contract, infer HITL from plain text.
-            inferred_kind, inferred_tool = MCPClientUtil._infer_hitl_from_plain_text(user_text)
+            inferred_kind, inferred_tool = AgentClientUtil._infer_hitl_from_plain_text(user_text)
 
             if inferred_kind is not None:
                 # If the model asked a question but didn't specify HITL_KIND, still tag it.
@@ -413,15 +413,15 @@ class MCPClient(AbstractChatClient):
                     hitl_tool = inferred_tool
 
             budget_exhausted = (
-                MCPClientUtil.contains_tool_budget_exceeded_signal(output_text)
-                or MCPClientUtil.contains_tool_budget_exceeded_signal(user_text)
+                AgentClientUtil.contains_tool_budget_exceeded_signal(output_text)
+                or AgentClientUtil.contains_tool_budget_exceeded_signal(user_text)
             )
             if budget_exhausted:
                 logger.warning(
                     "MCP supervisor hit tool call budget; requesting graceful completion without additional tools: trace_id=%s",
                     run_trace_id,
                 )
-                user_text, resp_type, hitl_kind, hitl_tool, add_in, add_out = await MCPClientUtil.force_graceful_completion_after_budget_exhaustion(
+                user_text, resp_type, hitl_kind, hitl_tool, add_in, add_out = await AgentClientUtil.force_graceful_completion_after_budget_exhaustion(
                     app=app,
                     run_trace_id=run_trace_id,
                     recursion_limit=recursion_limit,
@@ -446,11 +446,11 @@ class MCPClient(AbstractChatClient):
                         config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                     )
                     workflow_results.append(result)
-                    output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
+                    output_text, add_in, add_out = AgentClientUtil._extract_output_and_usage(result)
                     input_tokens += add_in
                     output_tokens += add_out
 
-                    resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
+                    resp_type, extracted_text, hitl_kind, hitl_tool = AgentClientUtil._parse_supervisor_xml(output_text)
                     user_text = extracted_text or output_text
                     if resp_type != "question":
                         break
@@ -468,22 +468,22 @@ class MCPClient(AbstractChatClient):
                     config={"configurable": {"thread_id": run_trace_id}, "recursion_limit": recursion_limit},
                 )
                 workflow_results.append(result)
-                output_text, add_in, add_out = MCPClientUtil._extract_output_and_usage(result)
-                resp_type, extracted_text, hitl_kind, hitl_tool = MCPClientUtil._parse_supervisor_xml(output_text)
+                output_text, add_in, add_out = AgentClientUtil._extract_output_and_usage(result)
+                resp_type, extracted_text, hitl_kind, hitl_tool = AgentClientUtil._parse_supervisor_xml(output_text)
 
                 # 後続処理で使用する。
                 input_tokens += add_in
                 output_tokens += add_out
                 user_text = extracted_text or output_text
 
-            evidence_results = await MCPClientUtil.collect_evidence_results(
+            evidence_results = await AgentClientUtil.collect_evidence_results(
                 app=app,
                 run_trace_id=run_trace_id,
                 workflow_results=workflow_results,
                 checkpoint_db_path=checkpoint_db_path,
             )
-            evidence = MCPClientUtil.extract_successful_tool_evidence(evidence_results)
-            evidence = MCPClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
+            evidence = AgentClientUtil.extract_successful_tool_evidence(evidence_results)
+            evidence = AgentClientUtil.merge_preflight_evidence(evidence, config_preflight_payload)
             evidence = dict(evidence)
             evidence["expects_heading_response"] = expects_heading_response
             evidence["expects_tool_catalog_response"] = expects_tool_catalog_response
@@ -494,17 +494,17 @@ class MCPClient(AbstractChatClient):
                 }
                 for route_name, tool_names in route_tool_catalog.items()
             ]
-            evidence_summary = MCPClientUtil.build_evidence_summary(evidence)
+            evidence_summary = AgentClientUtil.build_evidence_summary(evidence)
             if requested_heading_count is not None:
                 evidence["requested_heading_count"] = requested_heading_count
             followup_task_error_detected = (
-                MCPClientUtil.contains_followup_task_error_signal(output_text)
-                or MCPClientUtil.contains_followup_task_error_signal(user_text)
+                AgentClientUtil.contains_followup_task_error_signal(output_text)
+                or AgentClientUtil.contains_followup_task_error_signal(user_text)
             )
-            contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(user_text, evidence)
-            missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
+            contradicts_evidence = AgentClientUtil.final_text_contradicts_evidence(user_text, evidence)
+            missing_concrete_evidence = AgentClientUtil.final_text_missing_concrete_evidence(user_text, evidence)
             if followup_task_error_detected:
-                fallback_text = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+                fallback_text = AgentClientUtil.build_evidence_reflected_final_text(evidence)
                 if fallback_text:
                     logger.warning(
                         "Supervisor output contained invalid/stale follow-up task signal; forcing evidence-based completion: trace_id=%s",
@@ -517,11 +517,11 @@ class MCPClient(AbstractChatClient):
                     contradicts_evidence = False
                     missing_concrete_evidence = False
             if not contradicts_evidence and missing_concrete_evidence:
-                augmented_text = MCPClientUtil.augment_final_text_with_evidence(user_text, evidence)
+                augmented_text = AgentClientUtil.augment_final_text_with_evidence(user_text, evidence)
                 if (
                     augmented_text
-                    and not MCPClientUtil.final_text_contradicts_evidence(augmented_text, evidence)
-                    and not MCPClientUtil.final_text_missing_concrete_evidence(augmented_text, evidence)
+                    and not AgentClientUtil.final_text_contradicts_evidence(augmented_text, evidence)
+                    and not AgentClientUtil.final_text_missing_concrete_evidence(augmented_text, evidence)
                 ):
                     logger.info(
                         "Augmented supervisor final text with concrete tool evidence: trace_id=%s",
@@ -535,7 +535,7 @@ class MCPClient(AbstractChatClient):
                     "Supervisor final text did not faithfully reflect successful tool evidence; applying evidence-based fallback: trace_id=%s",
                     run_trace_id,
                 )
-                fallback_text = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+                fallback_text = AgentClientUtil.build_evidence_reflected_final_text(evidence)
                 if fallback_text:
                     user_text = fallback_text
                     resp_type = "complete"
@@ -543,7 +543,7 @@ class MCPClient(AbstractChatClient):
                     hitl_tool = None
 
             if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
-                sufficiency_decision = MCPClientUtil.judge_sufficiency(
+                sufficiency_decision = AgentClientUtil.judge_sufficiency(
                     response_text=user_text,
                     resp_type=resp_type,
                     hitl_kind=hitl_kind,
@@ -608,13 +608,13 @@ class MCPClient(AbstractChatClient):
         postclose_evidence_results: list[Any] = list(pending_workflow_results)
         postclose_evidence: Mapping[str, Any] = {}
         for attempt in range(15):
-            write_results = MCPClientUtil.collect_checkpoint_write_results(
+            write_results = AgentClientUtil.collect_checkpoint_write_results(
                 checkpoint_db_path=checkpoint_db_path,
                 run_trace_id=run_trace_id,
             )
             postclose_evidence_results = list(pending_workflow_results)
             postclose_evidence_results.extend(write_results)
-            postclose_evidence = MCPClientUtil.extract_successful_tool_evidence(postclose_evidence_results)
+            postclose_evidence = AgentClientUtil.extract_successful_tool_evidence(postclose_evidence_results)
 
             headings = postclose_evidence.get("headings")
             has_headings = isinstance(headings, Sequence) and any(isinstance(v, str) and str(v).strip() for v in headings)
@@ -631,19 +631,19 @@ class MCPClient(AbstractChatClient):
             response_text = str(response_message.content[0].params.get("text") or "")
 
         if not postclose_evidence.get("config_path"):
-            config_path_from_text = MCPClientUtil.extract_config_path_from_text(response_text)
+            config_path_from_text = AgentClientUtil.extract_config_path_from_text(response_text)
             if config_path_from_text:
                 postclose_evidence = dict(postclose_evidence)
                 postclose_evidence["config_path"] = config_path_from_text
 
         if not postclose_evidence.get("config_path"):
-            runtime_config_path = MCPClientUtil.get_loaded_runtime_config_path()
+            runtime_config_path = AgentClientUtil.get_loaded_runtime_config_path()
             if runtime_config_path:
                 postclose_evidence = dict(postclose_evidence)
                 postclose_evidence["config_path"] = runtime_config_path
         else:
-            runtime_config_path = MCPClientUtil.get_loaded_runtime_config_path()
-            better_config_path = MCPClientUtil._choose_better_config_path(
+            runtime_config_path = AgentClientUtil.get_loaded_runtime_config_path()
+            better_config_path = AgentClientUtil._choose_better_config_path(
                 cast(str | None, postclose_evidence.get("config_path")),
                 runtime_config_path,
             )
@@ -651,7 +651,7 @@ class MCPClient(AbstractChatClient):
                 postclose_evidence = dict(postclose_evidence)
                 postclose_evidence["config_path"] = better_config_path
 
-        exact_file_headings = MCPClientUtil.extract_markdown_heading_lines_from_files(explicit_user_file_paths)
+        exact_file_headings = AgentClientUtil.extract_markdown_heading_lines_from_files(explicit_user_file_paths)
         if expects_heading_response and len(exact_file_headings) >= 3:
             postclose_evidence = dict(postclose_evidence)
             postclose_evidence["headings"] = exact_file_headings
@@ -670,7 +670,7 @@ class MCPClient(AbstractChatClient):
         ]
 
         if routing_decision.selected_route == "coding_agent" and expects_heading_response and not (postclose_evidence.get("headings") or []):
-            rescue_evidence = await MCPClientUtil.run_direct_coding_agent_heading_rescue(
+            rescue_evidence = await AgentClientUtil.run_direct_coding_agent_heading_rescue(
                 runtime_config=self.runtime_config,
                 messages=lc_messages,
                 run_trace_id=run_trace_id,
@@ -698,8 +698,8 @@ class MCPClient(AbstractChatClient):
                     merged_postclose_evidence["latest_task_id"] = rescue_evidence.get("latest_task_id")
                 postclose_evidence = merged_postclose_evidence
 
-        contradicts_evidence = MCPClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
-        missing_concrete_evidence = MCPClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
+        contradicts_evidence = AgentClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
+        missing_concrete_evidence = AgentClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
         logger.info(
             "Post-close evidence check: trace_id=%s contradicts=%s missing=%s headings=%s config_path=%s",
             run_trace_id,
@@ -709,8 +709,8 @@ class MCPClient(AbstractChatClient):
             postclose_evidence.get("config_path"),
         )
 
-        if MCPClientUtil.should_prefer_deterministic_evidence_response(response_text, postclose_evidence):
-            fallback_text = MCPClientUtil.build_evidence_reflected_final_text(postclose_evidence)
+        if AgentClientUtil.should_prefer_deterministic_evidence_response(response_text, postclose_evidence):
+            fallback_text = AgentClientUtil.build_evidence_reflected_final_text(postclose_evidence)
             if fallback_text:
                 logger.info(
                     "Using deterministic evidence response from post-close evidence: trace_id=%s",
@@ -724,11 +724,11 @@ class MCPClient(AbstractChatClient):
                 missing_concrete_evidence = False
 
         if not contradicts_evidence and missing_concrete_evidence:
-            augmented_text = MCPClientUtil.augment_final_text_with_evidence(response_text, postclose_evidence)
+            augmented_text = AgentClientUtil.augment_final_text_with_evidence(response_text, postclose_evidence)
             if (
                 augmented_text
-                and not MCPClientUtil.final_text_contradicts_evidence(augmented_text, postclose_evidence)
-                and not MCPClientUtil.final_text_missing_concrete_evidence(augmented_text, postclose_evidence)
+                and not AgentClientUtil.final_text_contradicts_evidence(augmented_text, postclose_evidence)
+                and not AgentClientUtil.final_text_missing_concrete_evidence(augmented_text, postclose_evidence)
             ):
                 logger.info(
                     "Augmented final text with post-close checkpoint write evidence: trace_id=%s",
@@ -739,7 +739,7 @@ class MCPClient(AbstractChatClient):
                 response_text = augmented_text
 
         if contradicts_evidence or missing_concrete_evidence:
-            fallback_text = MCPClientUtil.build_evidence_reflected_final_text(postclose_evidence)
+            fallback_text = AgentClientUtil.build_evidence_reflected_final_text(postclose_evidence)
             if fallback_text:
                 logger.warning(
                     "Applied post-close evidence-based fallback from checkpoint writes: trace_id=%s",
@@ -750,8 +750,8 @@ class MCPClient(AbstractChatClient):
                 pending_response["hitl"] = None
 
         if bool(getattr(self.runtime_config.features, "sufficiency_check_enabled", False)):
-            postclose_summary = MCPClientUtil.build_evidence_summary(postclose_evidence)
-            final_sufficiency = MCPClientUtil.judge_sufficiency(
+            postclose_summary = AgentClientUtil.build_evidence_summary(postclose_evidence)
+            final_sufficiency = AgentClientUtil.judge_sufficiency(
                 response_text=str(response_message.content[0].params.get("text") or ""),
                 resp_type="question" if pending_response.get("status") == "paused" else "complete",
                 hitl_kind=(getattr(pending_response.get("hitl"), "kind", None) if pending_response.get("hitl") is not None else None),
@@ -792,11 +792,11 @@ class MCPClient(AbstractChatClient):
         return self.runtime_config
 
 
-class DeepAgentMCPClient(MCPClient):
+class DeepAgentMCPClient(AgentClient):
     def _forced_route(self) -> Literal["deep_agent"] | None:
         return "deep_agent"
 
 if __name__ == "__main__":
     runtime_config = get_runtime_config()  # ここは適宜、実際の設定に合わせて初期化してください
     chat_request = ChatRequest(chat_history=ChatHistory(messages=[ChatMessage(role="user", content=[ChatContent(params={"type": "text", "text": "3 と 5 を足して"})])]))
-    asyncio.run(MCPClient(runtime_config).chat(chat_request))
+    asyncio.run(AgentClient(runtime_config).chat(chat_request))

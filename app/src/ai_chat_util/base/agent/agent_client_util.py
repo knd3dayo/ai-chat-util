@@ -42,7 +42,7 @@ import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 
-class MCPClientUtil:
+class AgentClientUtil:
 
     _TOOL_CATALOG_DETAIL_PATTERNS: tuple[str, ...] = (
         r"ツールの名称",

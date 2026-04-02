@@ -1,7 +1,7 @@
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.base.chat import AbstractChatClient
 
-from .mcp_client import DeepAgentMCPClient, MCPClient
+from .agent_client import DeepAgentMCPClient, AgentClient
 
 
 class AgentFactory:
@@ -11,7 +11,7 @@ class AgentFactory:
 	) -> AbstractChatClient:
 		if llm_config is None:
 			llm_config = get_runtime_config()
-		return MCPClient(llm_config)
+		return AgentClient(llm_config)
 
 	@classmethod
 	def create_deepagent_client(

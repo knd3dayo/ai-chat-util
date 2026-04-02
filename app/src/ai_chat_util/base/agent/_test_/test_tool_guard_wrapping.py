@@ -24,11 +24,11 @@ fake_sessions_module.Connection = dict[str, Any] # type: ignore
 sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 
 import ai_chat_util.base.agent.agent_builder as agent_mod
-import ai_chat_util.base.agent.mcp_client_util as llm_mcp_client_util_mod
+import ai_chat_util.base.agent.agent_client_util as llm_mcp_client_util_mod
 from ai_chat_util.base.agent.agent_builder import AgentBuilder
 from ai_chat_util.base.agent.tool_limits import ToolLimits
 from ai_chat_util.base.agent.prompts import CodingAgentPrompts
-from ai_chat_util.base.agent.mcp_client_util import MCPClientUtil
+from ai_chat_util.base.agent.agent_client_util import AgentClientUtil
 from ai_chat_util.base.agent.supervisor_support import RouteCandidate, RoutingDecision
 from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
 from ai_chat_util.common.config.runtime import (
@@ -80,7 +80,7 @@ def test_sync_tool_budget_exceeded_returns_guard_output() -> None:
 
     tool = _FakeTool("sync_budget", response_format="content", func=_func)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=1,
@@ -103,7 +103,7 @@ def test_sync_tool_exception_is_converted_to_normal_output() -> None:
 
     tool = _FakeTool("sync_error", response_format="content_and_artifact", func=_boom)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=1,
@@ -146,7 +146,7 @@ def test_async_tool_timeout_retries_then_succeeds() -> None:
 
         tool = _FakeTool("async_timeout", response_format="content", coroutine=_coro)
 
-        MCPClientUtil._apply_tool_execution_guards(
+        AgentClientUtil._apply_tool_execution_guards(
             [tool],
             tool_call_state=state,
             tool_call_limit_int=0,
@@ -187,7 +187,7 @@ def test_followup_tools_use_separate_budget_from_general_tools() -> None:
     execute_tool = _FakeTool("execute", response_format="content", func=lambda task_id: f"executed:{task_id}")
     status_tool = _FakeTool("status", response_format="content", func=lambda task_id: f"running:{task_id}")
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [execute_tool, status_tool],
         tool_call_state=state,
         tool_call_limit_int=1,
@@ -239,7 +239,7 @@ def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spe
 
     tool = _FakeTool("get_loaded_config_info", response_format="content", func=_func)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=1,
@@ -272,7 +272,7 @@ def test_followup_tool_does_not_reuse_cached_result() -> None:
 
     tool = _FakeTool("status", response_format="content", func=_status)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=0,
@@ -305,7 +305,7 @@ def test_get_result_reuses_cached_result_for_same_task() -> None:
 
     tool = _FakeTool("get_result", response_format="content", func=_get_result)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=0,
@@ -339,7 +339,7 @@ def test_execute_prompt_is_augmented_with_single_explicit_user_file_path() -> No
 
     tool = _FakeTool("execute", response_format="content", func=_execute)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=4,
@@ -372,7 +372,7 @@ def test_execute_prompt_is_not_augmented_when_prompt_already_contains_path() -> 
 
     tool = _FakeTool("execute", response_format="content", func=_execute)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=4,
@@ -401,7 +401,7 @@ def test_execute_prompt_is_not_augmented_when_prompt_already_contains_path() -> 
 
         tool = _FakeTool("execute", response_format="content", func=_execute)
 
-        MCPClientUtil._apply_tool_execution_guards(
+        AgentClientUtil._apply_tool_execution_guards(
             [tool],
             tool_call_state=state,
             tool_call_limit_int=4,
@@ -438,7 +438,7 @@ def test_execute_prompt_is_not_augmented_when_prompt_already_contains_path() -> 
 
         tool = _FakeTool("execute", response_format="content", func=_execute)
 
-        MCPClientUtil._apply_tool_execution_guards(
+        AgentClientUtil._apply_tool_execution_guards(
             [tool],
             tool_call_state=state,
             tool_call_limit_int=4,
@@ -472,7 +472,7 @@ def test_invalid_followup_task_id_is_blocked_after_first_404() -> None:
 
     status_tool = _FakeTool("status", response_format="content", func=_status)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [status_tool],
         tool_call_state=state,
         tool_call_limit_int=4,
@@ -505,7 +505,7 @@ def test_invalid_followup_task_id_404_does_not_log_stack_trace_sync(caplog: pyte
 
     status_tool = _FakeTool("status", response_format="content", func=_status)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [status_tool],
         tool_call_state=state,
         tool_call_limit_int=4,
@@ -537,7 +537,7 @@ def test_invalid_followup_task_id_404_does_not_log_stack_trace_async(caplog: pyt
 
         status_tool = _FakeTool("status", response_format="content", coroutine=_status)
 
-        MCPClientUtil._apply_tool_execution_guards(
+        AgentClientUtil._apply_tool_execution_guards(
             [status_tool],
             tool_call_state=state,
             tool_call_limit_int=4,
@@ -575,7 +575,7 @@ def test_followup_with_stale_task_id_is_blocked_before_invocation() -> None:
 
     status_tool = _FakeTool("status", response_format="content", func=_status)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [execute_tool, status_tool],
         tool_call_state=state,
         tool_call_limit_int=4,
@@ -626,7 +626,7 @@ def test_duplicate_error_result_is_not_cached_and_still_hits_budget() -> None:
 
     tool = _FakeTool("get_loaded_config_info", response_format="content", func=_func)
 
-    MCPClientUtil._apply_tool_execution_guards(
+    AgentClientUtil._apply_tool_execution_guards(
         [tool],
         tool_call_state=state,
         tool_call_limit_int=1,
@@ -912,7 +912,7 @@ def test_mcp_client_forces_graceful_completion_after_budget_exhaustion(monkeypat
     )
 
     final_text, resp_type, hitl_kind, hitl_tool, add_in, add_out = asyncio.run(
-        MCPClientUtil.force_graceful_completion_after_budget_exhaustion(
+        AgentClientUtil.force_graceful_completion_after_budget_exhaustion(
             app=fake_app,
             run_trace_id="1234567890abcdef1234567890abcdef",
             recursion_limit=50,
@@ -940,7 +940,7 @@ def test_extract_successful_tool_evidence_collects_config_path_and_stdout() -> N
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
     assert evidence["stdout_blocks"] == ["# Overview\n## Setup\n## Troubleshooting"]
@@ -957,7 +957,7 @@ def test_extract_successful_tool_evidence_prefers_heading_exact_lines() -> None:
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["headings"] == ["### 1. 接続成立", "### 2. MCP サーバー化", "### 3. 検証結果"]
 
@@ -976,7 +976,7 @@ def test_extract_successful_tool_evidence_prefers_exact_block_over_noisy_fallbac
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["headings"] == [
         "### 1. MCP サーバーとしての正常起動",
@@ -999,7 +999,7 @@ def test_extract_successful_tool_evidence_prefers_most_complete_exact_block() ->
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["headings"] == [
         "### 1. MCP サーバーとしての正常起動",
@@ -1026,7 +1026,7 @@ def test_extract_successful_tool_evidence_uses_raw_text_when_stdout_is_absent() 
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
     assert evidence["headings"] == [
@@ -1055,7 +1055,7 @@ def test_extract_successful_tool_evidence_ignores_descriptive_bullets_in_raw_tex
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["headings"] == [
         "検証目的",
@@ -1092,7 +1092,7 @@ def test_extract_successful_tool_evidence_reads_stdout_log_from_artifact_metadat
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["stdout_blocks"] == [
         "HEADING_LINE_EXACT: # コーディングエージェントのMCPサーバー化検証\n"
@@ -1116,7 +1116,7 @@ def test_extract_successful_tool_evidence_extracts_config_path_from_stdout_block
         ]
     }
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence([result])
+    evidence = AgentClientUtil.extract_successful_tool_evidence([result])
 
     assert evidence["config_path"] == "/tmp/ai-chat-util-config.yml"
     assert evidence["headings"] == ["## 検証目的"]
@@ -1146,7 +1146,7 @@ def test_collect_checkpoint_write_results_reads_tool_messages(tmp_path: Path) ->
     conn.commit()
     conn.close()
 
-    results = MCPClientUtil.collect_checkpoint_write_results(
+    results = AgentClientUtil.collect_checkpoint_write_results(
         checkpoint_db_path=db_path,
         run_trace_id="trace-1",
     )
@@ -1155,7 +1155,7 @@ def test_collect_checkpoint_write_results_reads_tool_messages(tmp_path: Path) ->
     messages = results[0]["messages"]
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
-    assert MCPClientUtil.extract_successful_tool_evidence(results)["headings"] == ["## 検証目的"]
+    assert AgentClientUtil.extract_successful_tool_evidence(results)["headings"] == ["## 検証目的"]
 
 
 def test_final_text_contradicts_evidence_for_stdout_missing_message() -> None:
@@ -1165,7 +1165,7 @@ def test_final_text_contradicts_evidence_for_stdout_missing_message() -> None:
         "headings": ["## 検証目的"],
     }
 
-    assert MCPClientUtil.final_text_contradicts_evidence(
+    assert AgentClientUtil.final_text_contradicts_evidence(
         "stdout に明記された結果が返ってきませんでした。見出しの具体的な内容は不明です。",
         evidence,
     )
@@ -1178,7 +1178,7 @@ def test_final_text_contradicts_evidence_for_failure_preface_with_real_headings(
         "headings": ["## 検証目的"],
     }
 
-    assert MCPClientUtil.final_text_contradicts_evidence(
+    assert AgentClientUtil.final_text_contradicts_evidence(
         "指定された Markdown ファイルから見出しを抽出するプロセスで問題が発生しました。再度試行し、正確な見出しの抽出を行いたい場合は、具体的なエラー分析が必要です。",
         evidence,
     )
@@ -1195,7 +1195,7 @@ def test_final_text_contradicts_evidence_when_leading_heading_differs_from_evide
         ],
     }
 
-    assert MCPClientUtil.final_text_contradicts_evidence(
+    assert AgentClientUtil.final_text_contradicts_evidence(
         "設定ファイルの場所は /tmp/ai-chat-util-config.yml です。\n- HEADING_LINE_EXACT: # 概要\n- HEADING_LINE_EXACT: ## 検証目的\n文書内の重要な見出し:\n# コーディングエージェントのMCPサーバー化検証\n## 検証目的",
         evidence,
     )
@@ -1212,7 +1212,7 @@ def test_should_prefer_deterministic_evidence_response_for_complete_heading_set(
         ],
     }
 
-    assert MCPClientUtil.should_prefer_deterministic_evidence_response(
+    assert AgentClientUtil.should_prefer_deterministic_evidence_response(
         "設定ファイルの場所は /tmp/ai-chat-util-config.yml です。",
         evidence,
     )
@@ -1226,12 +1226,12 @@ def test_evidence_reflection_overrides_negative_final_text() -> None:
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
 
-    assert MCPClientUtil.final_text_contradicts_evidence(
+    assert AgentClientUtil.final_text_contradicts_evidence(
         "get_loaded_config_info の正しい情報が取得できなかった。重要な見出しを確認できなかった。",
         evidence,
     )
 
-    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+    fallback = AgentClientUtil.build_evidence_reflected_final_text(evidence)
 
     assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
     assert "# Overview" in fallback
@@ -1247,7 +1247,7 @@ def test_final_text_missing_concrete_evidence_detects_missing_path_and_headings(
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
 
-    assert MCPClientUtil.final_text_missing_concrete_evidence(
+    assert AgentClientUtil.final_text_missing_concrete_evidence(
         "get_loaded_config_info を使って確認しました。重要な見出しは概要、設定、トラブルシュートです。",
         evidence,
     )
@@ -1261,7 +1261,7 @@ def test_augment_final_text_with_evidence_preserves_text_and_adds_exact_values()
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
 
-    augmented = MCPClientUtil.augment_final_text_with_evidence(
+    augmented = AgentClientUtil.augment_final_text_with_evidence(
         "確認しました。重要な見出しを以下に示します。",
         evidence,
     )
@@ -1271,7 +1271,7 @@ def test_augment_final_text_with_evidence_preserves_text_and_adds_exact_values()
     assert "# Overview" in augmented
     assert "## Setup" in augmented
     assert "## Troubleshooting" in augmented
-    assert not MCPClientUtil.final_text_missing_concrete_evidence(augmented, evidence)
+    assert not AgentClientUtil.final_text_missing_concrete_evidence(augmented, evidence)
 
 
 def test_augment_final_text_with_evidence_does_not_duplicate_existing_values() -> None:
@@ -1291,7 +1291,7 @@ def test_build_evidence_reflected_final_text_for_judgment_prompt_does_not_dump_h
         "headings": ["# Overview", "## Setup", "## Troubleshooting"],
     }
 
-    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+    fallback = AgentClientUtil.build_evidence_reflected_final_text(evidence)
 
     assert "設定ファイルの場所: /tmp/ai-chat-util-config.yml" in fallback
     assert "判断に必要な追加確認事項" in fallback
@@ -1305,7 +1305,7 @@ def test_build_evidence_reflected_final_text_for_judgment_prompt_does_not_dump_h
         "## Troubleshooting"
     )
 
-    augmented = MCPClientUtil.augment_final_text_with_evidence(original, evidence)
+    augmented = AgentClientUtil.augment_final_text_with_evidence(original, evidence)
     assert "判断に必要な追加確認事項" in augmented
     assert augmented.count("# Overview") == 1
 
@@ -1339,17 +1339,17 @@ def test_supervisor_prompt_requires_coding_agent_when_explicitly_requested() -> 
 
 
 def test_contains_followup_task_error_signal_detects_guard_errors() -> None:
-    assert MCPClientUtil.contains_followup_task_error_signal(
+    assert AgentClientUtil.contains_followup_task_error_signal(
         "ERROR: follow-up task_id is invalid. error=invalid_followup_task_id tool=status task_id=abc"
     )
-    assert MCPClientUtil.contains_followup_task_error_signal(
+    assert AgentClientUtil.contains_followup_task_error_signal(
         "ERROR: follow-up task_id is stale. error=stale_followup_task_id tool=get_result task_id=old latest_task_id=new"
     )
-    assert not MCPClientUtil.contains_followup_task_error_signal("ERROR: tool_call_budget_exceeded")
+    assert not AgentClientUtil.contains_followup_task_error_signal("ERROR: tool_call_budget_exceeded")
 
 
 def test_explicitly_requests_coding_agent_detects_user_instruction() -> None:
-    assert MCPClientUtil.explicitly_requests_coding_agent(
+    assert AgentClientUtil.explicitly_requests_coding_agent(
         [
             {
                 "role": "user",
@@ -1360,7 +1360,7 @@ def test_explicitly_requests_coding_agent_detects_user_instruction() -> None:
 
 
 def test_explicitly_requests_deep_agent_detects_user_instruction() -> None:
-    assert MCPClientUtil.explicitly_requests_deep_agent(
+    assert AgentClientUtil.explicitly_requests_deep_agent(
         [
             {
                 "role": "user",
@@ -1371,7 +1371,7 @@ def test_explicitly_requests_deep_agent_detects_user_instruction() -> None:
 
 
 def test_default_routing_prefers_deep_agent_for_explicit_request_when_enabled() -> None:
-    decision = MCPClientUtil._build_default_routing_decision(
+    decision = AgentClientUtil._build_default_routing_decision(
         force_coding_agent_route=False,
         force_deep_agent_route=True,
         deep_agent_enabled=True,
@@ -1384,7 +1384,7 @@ def test_default_routing_prefers_deep_agent_for_explicit_request_when_enabled() 
 
 
 def test_default_routing_does_not_select_deep_agent_when_disabled() -> None:
-    decision = MCPClientUtil._build_default_routing_decision(
+    decision = AgentClientUtil._build_default_routing_decision(
         force_coding_agent_route=False,
         force_deep_agent_route=True,
         deep_agent_enabled=False,
@@ -1396,7 +1396,7 @@ def test_default_routing_does_not_select_deep_agent_when_disabled() -> None:
 
 
 def test_should_run_config_preflight_detects_ordered_request() -> None:
-    assert MCPClientUtil.should_run_config_preflight(
+    assert AgentClientUtil.should_run_config_preflight(
         [
             {
                 "role": "user",
@@ -1407,7 +1407,7 @@ def test_should_run_config_preflight_detects_ordered_request() -> None:
 
 
 def test_should_run_config_preflight_ignores_unordered_mentions() -> None:
-    assert not MCPClientUtil.should_run_config_preflight(
+    assert not AgentClientUtil.should_run_config_preflight(
         [
             {
                 "role": "user",
@@ -1431,7 +1431,7 @@ def test_stale_followup_task_text_discourages_new_execute() -> None:
 
 
 def test_build_config_preflight_message_contains_reuse_instruction() -> None:
-    message = MCPClientUtil.build_config_preflight_message(
+    message = AgentClientUtil.build_config_preflight_message(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
             "text": "{'path': '/tmp/ai-chat-util-config.yml'}",
@@ -1474,7 +1474,7 @@ def test_run_config_preflight_invokes_general_tool_once(monkeypatch: pytest.Monk
     monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
 
     payload = asyncio.run(
-        MCPClientUtil.run_config_preflight(
+        AgentClientUtil.run_config_preflight(
             runtime_config=runtime_config,
             tool_limits=None,
             audit_context=None,
@@ -1487,7 +1487,7 @@ def test_run_config_preflight_invokes_general_tool_once(monkeypatch: pytest.Monk
 
 
 def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:
-    assert not MCPClientUtil.explicitly_requests_coding_agent(
+    assert not AgentClientUtil.explicitly_requests_coding_agent(
         [
             {
                 "role": "assistant",
@@ -1498,7 +1498,7 @@ def test_explicitly_requests_coding_agent_ignores_non_user_mentions() -> None:
 
 
 def test_explicitly_requests_deep_agent_ignores_non_user_mentions() -> None:
-    assert not MCPClientUtil.explicitly_requests_deep_agent(
+    assert not AgentClientUtil.explicitly_requests_deep_agent(
         [
             {
                 "role": "assistant",
@@ -1509,7 +1509,7 @@ def test_explicitly_requests_deep_agent_ignores_non_user_mentions() -> None:
 
 
 def test_explicitly_requests_coding_agent_ignores_path_only_match() -> None:
-    assert not MCPClientUtil.explicitly_requests_coding_agent(
+    assert not AgentClientUtil.explicitly_requests_coding_agent(
         [
             {
                 "role": "user",
@@ -1523,7 +1523,7 @@ def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) 
     target = tmp_path / "doc.md"
     target.write_text("# Title\n", encoding="utf-8")
 
-    paths = MCPClientUtil.extract_explicit_user_file_paths(
+    paths = AgentClientUtil.extract_explicit_user_file_paths(
         [{"role": "user", "content": f"Please inspect {target.as_posix()} and summarize headings."}]
     )
 
@@ -1531,7 +1531,7 @@ def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) 
 
 
 def test_extract_requested_heading_count_detects_user_constraint() -> None:
-    assert MCPClientUtil.extract_requested_heading_count(
+    assert AgentClientUtil.extract_requested_heading_count(
         [
             {
                 "role": "user",
@@ -1542,7 +1542,7 @@ def test_extract_requested_heading_count_detects_user_constraint() -> None:
 
 
 def test_requests_heading_response_detects_heading_intent() -> None:
-    assert MCPClientUtil.requests_heading_response(
+    assert AgentClientUtil.requests_heading_response(
         [
             {
                 "role": "user",
@@ -1553,7 +1553,7 @@ def test_requests_heading_response_detects_heading_intent() -> None:
 
 
 def test_requests_heading_response_ignores_judgment_prompt() -> None:
-    assert not MCPClientUtil.requests_heading_response(
+    assert not AgentClientUtil.requests_heading_response(
         [
             {
                 "role": "user",
@@ -1564,7 +1564,7 @@ def test_requests_heading_response_ignores_judgment_prompt() -> None:
 
 
 def test_requests_heading_response_ignores_negative_heading_instruction() -> None:
-    assert not MCPClientUtil.requests_heading_response(
+    assert not AgentClientUtil.requests_heading_response(
         [
             {
                 "role": "user",
@@ -1587,7 +1587,7 @@ def test_select_headings_for_response_prefers_numbered_heading_block() -> None:
         "requested_heading_count": 3,
     }
 
-    assert MCPClientUtil.select_headings_for_response(evidence) == [
+    assert AgentClientUtil.select_headings_for_response(evidence) == [
         "### 1. MCP サーバーとしての正常起動",
         "### 2. スーパーバイザーからの接続成立",
         "### 3. 委譲と統合の正常系",
@@ -1595,7 +1595,7 @@ def test_select_headings_for_response_prefers_numbered_heading_block() -> None:
 
 
 def test_build_evidence_reflected_final_text_respects_requested_heading_count() -> None:
-    fallback = MCPClientUtil.build_evidence_reflected_final_text(
+    fallback = AgentClientUtil.build_evidence_reflected_final_text(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
             "expects_heading_response": True,
@@ -1634,7 +1634,7 @@ def test_final_text_missing_concrete_evidence_uses_requested_heading_subset() ->
         "requested_heading_count": 3,
     }
 
-    assert not MCPClientUtil.final_text_missing_concrete_evidence(
+    assert not AgentClientUtil.final_text_missing_concrete_evidence(
         "設定ファイルの場所: /tmp/ai-chat-util-config.yml\n"
         "文書内の重要な見出し:\n"
         "### 1. MCP サーバーとしての正常起動\n"
@@ -1645,18 +1645,18 @@ def test_final_text_missing_concrete_evidence_uses_requested_heading_subset() ->
 
 
 def test_should_include_general_agent_forced_coding_route_with_explicit_file_is_false() -> None:
-    assert not MCPClientUtil.should_include_general_agent(
+    assert not AgentClientUtil.should_include_general_agent(
         force_coding_agent_route=True,
         explicit_user_file_paths=["/tmp/work/doc.md"],
     )
 
 
 def test_should_include_general_agent_without_explicit_file_is_true() -> None:
-    assert MCPClientUtil.should_include_general_agent(
+    assert AgentClientUtil.should_include_general_agent(
         force_coding_agent_route=True,
         explicit_user_file_paths=None,
     )
-    assert MCPClientUtil.should_include_general_agent(
+    assert AgentClientUtil.should_include_general_agent(
         force_coding_agent_route=False,
         explicit_user_file_paths=["/tmp/work/doc.md"],
     )
@@ -1672,7 +1672,7 @@ def test_get_loaded_runtime_config_path_returns_existing_config(
         lambda: config_file,
     )
 
-    assert MCPClientUtil.get_loaded_runtime_config_path() == config_file.resolve().as_posix()
+    assert AgentClientUtil.get_loaded_runtime_config_path() == config_file.resolve().as_posix()
 
 
 def test_get_loaded_runtime_config_path_returns_none_for_missing_config(
@@ -1684,27 +1684,27 @@ def test_get_loaded_runtime_config_path_returns_none_for_missing_config(
         lambda: missing,
     )
 
-    assert MCPClientUtil.get_loaded_runtime_config_path() is None
+    assert AgentClientUtil.get_loaded_runtime_config_path() is None
 
 
 def test_choose_better_config_path_prefers_concrete_file_over_glob(tmp_path) -> None:
     config_file = tmp_path / "ai-chat-util-config.poc.yml"
     config_file.write_text("llm: {}\n", encoding="utf-8")
 
-    assert MCPClientUtil._choose_better_config_path(
+    assert AgentClientUtil._choose_better_config_path(
         f"{tmp_path.as_posix()}/*.yml",
         config_file.as_posix(),
     ) == config_file.as_posix()
 
 
 def test_extract_config_path_from_text_ignores_glob_path() -> None:
-    assert MCPClientUtil.extract_config_path_from_text(
+    assert AgentClientUtil.extract_config_path_from_text(
         "設定ファイルの場所: /tmp/example/*.yml"
     ) is None
 
 
 def test_extract_successful_tool_evidence_prefers_concrete_path_over_glob() -> None:
-    evidence = MCPClientUtil.extract_successful_tool_evidence(
+    evidence = AgentClientUtil.extract_successful_tool_evidence(
         [
             {
                 "messages": [
@@ -1728,7 +1728,7 @@ def test_extract_markdown_heading_lines_from_files_reads_exact_heading_lines(tmp
         encoding="utf-8",
     )
 
-    assert MCPClientUtil.extract_markdown_heading_lines_from_files([doc.as_posix()]) == [
+    assert AgentClientUtil.extract_markdown_heading_lines_from_files([doc.as_posix()]) == [
         "# Title",
         "## Section",
         "### 1. 単体起動",
@@ -1736,7 +1736,7 @@ def test_extract_markdown_heading_lines_from_files_reads_exact_heading_lines(tmp
 
 
 def test_extract_successful_tool_evidence_ignores_ai_only_heading_claims() -> None:
-    evidence = MCPClientUtil.extract_successful_tool_evidence(
+    evidence = AgentClientUtil.extract_successful_tool_evidence(
         [
             {
                 "messages": [
@@ -1767,10 +1767,10 @@ def test_collect_checkpoint_results_reads_latest_state_and_history() -> None:
         async def aget_state_history(self, config: Any, limit: int | None = None):
             yield SimpleNamespace(values={"messages": [{"role": "tool", "content": '{"stdout": "hello"}'}]})
 
-    results = asyncio.run(MCPClientUtil.collect_checkpoint_results(app=_FakeApp(), run_trace_id="abc"))
+    results = asyncio.run(AgentClientUtil.collect_checkpoint_results(app=_FakeApp(), run_trace_id="abc"))
 
     assert len(results) == 2
-    evidence = MCPClientUtil.extract_successful_tool_evidence(results)
+    evidence = AgentClientUtil.extract_successful_tool_evidence(results)
     assert evidence["config_path"] == "/tmp/a.yml"
     assert evidence["stdout_blocks"] == ["hello"]
 
@@ -1805,24 +1805,24 @@ def test_collect_evidence_results_merges_checkpoint_history_for_headings() -> No
                 yield None
 
     results = asyncio.run(
-        MCPClientUtil.collect_evidence_results(
+        AgentClientUtil.collect_evidence_results(
             app=_FakeApp(),
             run_trace_id="abc",
             workflow_results=workflow_results,
         )
     )
 
-    evidence = MCPClientUtil.extract_successful_tool_evidence(results)
+    evidence = AgentClientUtil.extract_successful_tool_evidence(results)
 
     assert evidence["headings"] == ["## 概要", "### MCP サーバー"]
 
-    fallback = MCPClientUtil.build_evidence_reflected_final_text(evidence)
+    fallback = AgentClientUtil.build_evidence_reflected_final_text(evidence)
     assert "## 概要" in fallback
     assert "### MCP サーバー" in fallback
 
 
 def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
-    text = MCPClientUtil.build_recursion_limit_fallback_text(
+    text = AgentClientUtil.build_recursion_limit_fallback_text(
         "Recursion limit of 50 reached without hitting a stop condition",
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
@@ -1840,7 +1840,7 @@ def test_build_recursion_limit_fallback_text_prefers_evidence() -> None:
 
 
 def test_build_evidence_reflected_final_text_includes_all_headings() -> None:
-    fallback = MCPClientUtil.build_evidence_reflected_final_text(
+    fallback = AgentClientUtil.build_evidence_reflected_final_text(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
             "expects_heading_response": True,
@@ -1868,14 +1868,14 @@ def test_should_prefer_deterministic_evidence_response_for_heading_report() -> N
         "stdout_blocks": ["HEADING_LINE_EXACT: # Overview\nHEADING_LINE_EXACT: ## Setup"],
     }
 
-    assert MCPClientUtil.should_prefer_deterministic_evidence_response(
+    assert AgentClientUtil.should_prefer_deterministic_evidence_response(
         "文書内の見出しは以下です。\n- HEADING_LINE_EXACT: # Wrong",
         evidence,
     )
 
 
 def test_build_evidence_summary_does_not_mark_heading_extraction_for_evaluation_prompt() -> None:
-    summary = MCPClientUtil.build_evidence_summary(
+    summary = AgentClientUtil.build_evidence_summary(
         {
             "config_path": "/tmp/ai-chat-util-config.yml",
             "expects_heading_response": False,
@@ -1889,7 +1889,7 @@ def test_build_evidence_summary_does_not_mark_heading_extraction_for_evaluation_
 
 
 def test_extract_successful_tool_evidence_ignores_synthetic_headings_by_file_block() -> None:
-    evidence = MCPClientUtil.extract_successful_tool_evidence(
+    evidence = AgentClientUtil.extract_successful_tool_evidence(
         [
             {
                 "messages": [
@@ -1906,7 +1906,7 @@ def test_extract_successful_tool_evidence_ignores_synthetic_headings_by_file_blo
 
 
 def test_extract_successful_tool_evidence_parses_heading_table_rows() -> None:
-    evidence = MCPClientUtil.extract_successful_tool_evidence(
+    evidence = AgentClientUtil.extract_successful_tool_evidence(
         [
             {
                 "messages": [
@@ -1923,7 +1923,7 @@ def test_extract_successful_tool_evidence_parses_heading_table_rows() -> None:
 
 
 def test_build_evidence_reflected_final_text_includes_tool_catalog_when_requested() -> None:
-    text = MCPClientUtil.build_evidence_reflected_final_text(
+    text = AgentClientUtil.build_evidence_reflected_final_text(
         {
             "expects_tool_catalog_response": True,
             "tool_catalog": [
@@ -1940,7 +1940,7 @@ def test_build_evidence_reflected_final_text_includes_tool_catalog_when_requeste
 
 
 def test_final_text_missing_concrete_evidence_detects_missing_tool_catalog_listing() -> None:
-    assert MCPClientUtil.final_text_missing_concrete_evidence(
+    assert AgentClientUtil.final_text_missing_concrete_evidence(
         "利用可能ツールは確認しました。",
         {
             "expects_tool_catalog_response": True,
@@ -1955,7 +1955,7 @@ def test_final_text_missing_concrete_evidence_detects_missing_tool_catalog_listi
 
 
 def test_requests_tool_catalog_response_detects_tool_list_intent() -> None:
-    assert MCPClientUtil.requests_tool_catalog_response(
+    assert AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -1966,7 +1966,7 @@ def test_requests_tool_catalog_response_detects_tool_list_intent() -> None:
 
 
 def test_requests_tool_catalog_response_detects_detailed_tool_list_intent() -> None:
-    assert MCPClientUtil.requests_tool_catalog_response(
+    assert AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -1977,7 +1977,7 @@ def test_requests_tool_catalog_response_detects_detailed_tool_list_intent() -> N
 
 
 def test_requests_tool_catalog_details_detects_description_and_args_request() -> None:
-    assert MCPClientUtil.requests_tool_catalog_details(
+    assert AgentClientUtil.requests_tool_catalog_details(
         [
             {
                 "role": "user",
@@ -1988,7 +1988,7 @@ def test_requests_tool_catalog_details_detects_description_and_args_request() ->
 
 
 def test_requests_tool_catalog_response_does_not_match_general_tool_summary_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -1999,7 +1999,7 @@ def test_requests_tool_catalog_response_does_not_match_general_tool_summary_prom
 
 
 def test_requests_tool_catalog_response_does_not_match_exact_shared_general_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -2010,7 +2010,7 @@ def test_requests_tool_catalog_response_does_not_match_exact_shared_general_prom
 
 
 def test_requests_tool_catalog_response_does_not_match_evaluation_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -2021,7 +2021,7 @@ def test_requests_tool_catalog_response_does_not_match_evaluation_prompt() -> No
 
 
 def test_requests_tool_catalog_response_does_not_match_exact_shared_evaluation_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -2032,7 +2032,7 @@ def test_requests_tool_catalog_response_does_not_match_exact_shared_evaluation_p
 
 
 def test_requests_tool_catalog_response_does_not_match_hitl_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -2043,7 +2043,7 @@ def test_requests_tool_catalog_response_does_not_match_hitl_prompt() -> None:
 
 
 def test_requests_tool_catalog_response_does_not_match_exact_shared_hitl_prompt() -> None:
-    assert not MCPClientUtil.requests_tool_catalog_response(
+    assert not AgentClientUtil.requests_tool_catalog_response(
         [
             {
                 "role": "user",
@@ -2064,7 +2064,7 @@ def test_requests_tool_catalog_details_does_not_match_general_supervisor_prompts
     ]
 
     for prompt in prompts:
-        assert not MCPClientUtil.requests_tool_catalog_details(
+        assert not AgentClientUtil.requests_tool_catalog_details(
             [
                 {
                     "role": "user",
@@ -2075,7 +2075,7 @@ def test_requests_tool_catalog_details_does_not_match_general_supervisor_prompts
 
 
 def test_build_tool_catalog_response_text_formats_agent_names() -> None:
-    text = MCPClientUtil.build_tool_catalog_response_text(
+    text = AgentClientUtil.build_tool_catalog_response_text(
         {
             "coding_agent": [
                 {"name": "execute", "description": "tool:execute", "primary_args": ["prompt", "workspace_path"]},
@@ -2095,7 +2095,7 @@ def test_build_tool_catalog_response_text_formats_agent_names() -> None:
 
 
 def test_build_tool_catalog_response_text_includes_details_when_requested() -> None:
-    text = MCPClientUtil.build_tool_catalog_response_text(
+    text = AgentClientUtil.build_tool_catalog_response_text(
         {
             "coding_agent": [
                 {"name": "execute", "description": "非同期でタスクを実行する", "primary_args": ["prompt", "workspace_path", "timeout"]},
@@ -2119,7 +2119,7 @@ def test_build_route_tool_catalog_payload_includes_route_backend_metadata() -> N
     runtime_config = _build_runtime_config()
     runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
 
-    payload = MCPClientUtil.build_route_tool_catalog_payload(
+    payload = AgentClientUtil.build_route_tool_catalog_payload(
         {
             "coding_agent": [
                 {"name": "execute", "description": "tool:execute", "primary_args": ["prompt"]},
@@ -2145,7 +2145,7 @@ def test_build_route_tool_catalog_payload_includes_route_backend_metadata() -> N
 
 
 def test_build_available_routes_text_includes_visible_tools() -> None:
-    text = MCPClientUtil._build_available_routes_text(
+    text = AgentClientUtil._build_available_routes_text(
         has_coding_agent=True,
         has_deep_agent=True,
         has_general_agent=True,
@@ -2162,7 +2162,7 @@ def test_build_available_routes_text_includes_visible_tools() -> None:
 
 
 def test_build_routing_context_text_includes_route_tool_catalog() -> None:
-    text = MCPClientUtil._build_routing_context_text(
+    text = AgentClientUtil._build_routing_context_text(
         force_coding_agent_route=False,
         force_deep_agent_route=False,
         explicit_user_file_paths=[],
@@ -2181,7 +2181,7 @@ def test_build_routing_context_text_includes_route_tool_catalog() -> None:
 
 
 def test_extract_task_id_from_tool_result_supports_text_part_list() -> None:
-    task_id = MCPClientUtil._extract_task_id_from_tool_result(
+    task_id = AgentClientUtil._extract_task_id_from_tool_result(
         [{"type": "text", "text": '{"task_id":"task-123"}'}]
     )
 
@@ -2216,7 +2216,7 @@ def test_resolve_route_tool_catalog_splits_coding_and_general_tools(monkeypatch:
     monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
 
     catalog = asyncio.run(
-        MCPClientUtil.resolve_route_tool_catalog(
+        AgentClientUtil.resolve_route_tool_catalog(
             runtime_config=runtime_config,
         )
     )
@@ -2313,7 +2313,7 @@ def test_resolve_route_tool_inventory_collects_description_and_primary_args(monk
     monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
 
     inventory = asyncio.run(
-        MCPClientUtil.resolve_route_tool_inventory(
+        AgentClientUtil.resolve_route_tool_inventory(
             runtime_config=runtime_config,
         )
     )
@@ -2361,7 +2361,7 @@ def test_resolve_route_tool_inventory_uses_configured_coding_agent_server_key(mo
     runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
     monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("deepagent", "general-tools"))
 
-    inventory = asyncio.run(MCPClientUtil.resolve_route_tool_inventory(runtime_config=runtime_config))
+    inventory = asyncio.run(AgentClientUtil.resolve_route_tool_inventory(runtime_config=runtime_config))
 
     assert inventory == {
         "coding_agent": [
@@ -2413,7 +2413,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
             recorded_events.append({"event_type": event_type, **kwargs})
 
     async def _fake_create_sqlite_checkpointer(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         checkpoint_db_path: Path | None,
         *,
         exit_stack: Any,
@@ -2421,7 +2421,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         return None
 
     async def _fake_resolve_route_tool_inventory(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         runtime_config: AiChatUtilConfig,
     ) -> dict[str, list[dict[str, Any]]]:
@@ -2435,7 +2435,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         }
 
     async def _fake_decide_route(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         runtime_config: AiChatUtilConfig,
         prompts: Any,
@@ -2467,7 +2467,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         )
 
     async def _fake_create_deep_agent_workflow(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         runtime_config: AiChatUtilConfig,
         *,
         checkpointer: Any | None = None,
@@ -2486,7 +2486,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         return _FakeSupervisorApp([response]), ["analyze_files", "get_loaded_config_info"]
 
     async def _fake_collect_evidence_results(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         app: Any,
         run_trace_id: str,
@@ -2502,15 +2502,15 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(llm_mcp_client_mod, "create_audit_context", lambda *args, **kwargs: _FakeAuditContext())
     monkeypatch.setattr(llm_mcp_client_util_mod, "deepagents_available", lambda: True)
-    monkeypatch.setattr(MCPClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
-    monkeypatch.setattr(MCPClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
-    monkeypatch.setattr(MCPClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
-    monkeypatch.setattr(MCPClientUtil, "decide_route", classmethod(_fake_decide_route))
-    monkeypatch.setattr(MCPClientUtil, "create_deep_agent_workflow", classmethod(_fake_create_deep_agent_workflow))
-    monkeypatch.setattr(MCPClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
-    monkeypatch.setattr(MCPClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
-    monkeypatch.setattr(MCPClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
-    monkeypatch.setattr(MCPClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(AgentClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+    monkeypatch.setattr(AgentClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
+    monkeypatch.setattr(AgentClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
+    monkeypatch.setattr(AgentClientUtil, "decide_route", classmethod(_fake_decide_route))
+    monkeypatch.setattr(AgentClientUtil, "create_deep_agent_workflow", classmethod(_fake_create_deep_agent_workflow))
+    monkeypatch.setattr(AgentClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
+    monkeypatch.setattr(AgentClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
+    monkeypatch.setattr(AgentClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(AgentClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
     monkeypatch.setattr(llm_mcp_client_mod.asyncio, "sleep", _fake_sleep)
 
     runtime_config = _build_runtime_config()
@@ -2578,7 +2578,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
                 recorded_events.append({"event_type": event_type, **kwargs})
 
         async def _fake_create_sqlite_checkpointer(
-            cls: type[MCPClientUtil],
+            cls: type[AgentClientUtil],
             checkpoint_db_path: Path | None,
             *,
             exit_stack: Any,
@@ -2586,7 +2586,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             return None
 
         async def _fake_resolve_route_tool_inventory(
-            cls: type[MCPClientUtil],
+            cls: type[AgentClientUtil],
             *,
             runtime_config: AiChatUtilConfig,
         ) -> dict[str, list[dict[str, Any]]]:
@@ -2596,7 +2596,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             }
 
         async def _fake_decide_route(
-            cls: type[MCPClientUtil],
+            cls: type[AgentClientUtil],
             *,
             runtime_config: AiChatUtilConfig,
             prompts: Any,
@@ -2628,7 +2628,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             )
 
         async def _fake_create_workflow(
-            cls: type[MCPClientUtil],
+            cls: type[AgentClientUtil],
             runtime_config: AiChatUtilConfig,
             prompts: Any,
             *,
@@ -2648,7 +2648,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
                 audit_context.emit(
                     "tool_catalog_resolved",
                     route_name="coding_agent",
-                    payload=MCPClientUtil.build_route_tool_catalog_payload(
+                    payload=AgentClientUtil.build_route_tool_catalog_payload(
                         {
                             "coding_agent": [{"name": "execute", "description": "run coding job", "primary_args": ["prompt"]}],
                             "general_tool_agent": [{"name": "analyze_files", "description": "analyze files", "primary_args": ["file_path_list", "prompt"]}],
@@ -2667,7 +2667,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             return _FakeSupervisorApp([response])
 
         async def _fake_collect_evidence_results(
-            cls: type[MCPClientUtil],
+            cls: type[AgentClientUtil],
             *,
             app: Any,
             run_trace_id: str,
@@ -2682,15 +2682,15 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             return None
 
         monkeypatch.setattr(llm_mcp_client_mod, "create_audit_context", lambda *args, **kwargs: _FakeAuditContext())
-        monkeypatch.setattr(MCPClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
-        monkeypatch.setattr(MCPClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
-        monkeypatch.setattr(MCPClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
-        monkeypatch.setattr(MCPClientUtil, "decide_route", classmethod(_fake_decide_route))
-        monkeypatch.setattr(MCPClientUtil, "create_workflow", classmethod(_fake_create_workflow))
-        monkeypatch.setattr(MCPClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
-        monkeypatch.setattr(MCPClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
-        monkeypatch.setattr(MCPClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
-        monkeypatch.setattr(MCPClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
+        monkeypatch.setattr(AgentClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+        monkeypatch.setattr(AgentClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
+        monkeypatch.setattr(AgentClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
+        monkeypatch.setattr(AgentClientUtil, "decide_route", classmethod(_fake_decide_route))
+        monkeypatch.setattr(AgentClientUtil, "create_workflow", classmethod(_fake_create_workflow))
+        monkeypatch.setattr(AgentClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
+        monkeypatch.setattr(AgentClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
+        monkeypatch.setattr(AgentClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
+        monkeypatch.setattr(AgentClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
         monkeypatch.setattr(llm_mcp_client_mod.asyncio, "sleep", _fake_sleep)
 
         runtime_config = _build_runtime_config()
@@ -2767,7 +2767,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
             recorded_events.append({"event_type": event_type, **kwargs})
 
     async def _fake_create_sqlite_checkpointer(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         checkpoint_db_path: Path | None,
         *,
         exit_stack: Any,
@@ -2775,7 +2775,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         return None
 
     async def _fake_resolve_route_tool_inventory(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         runtime_config: AiChatUtilConfig,
     ) -> dict[str, list[dict[str, Any]]]:
@@ -2789,7 +2789,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         }
 
     async def _fake_decide_route(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         runtime_config: AiChatUtilConfig,
         prompts: Any,
@@ -2823,7 +2823,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         )
 
     async def _fake_create_deep_agent_workflow(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         runtime_config: AiChatUtilConfig,
         *,
         checkpointer: Any | None = None,
@@ -2842,7 +2842,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         return _FakeSupervisorApp([response]), ["analyze_files", "get_loaded_config_info"]
 
     async def _fake_collect_evidence_results(
-        cls: type[MCPClientUtil],
+        cls: type[AgentClientUtil],
         *,
         app: Any,
         run_trace_id: str,
@@ -2858,15 +2858,15 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
 
     monkeypatch.setattr(llm_mcp_client_mod, "create_audit_context", lambda *args, **kwargs: _FakeAuditContext())
     monkeypatch.setattr(llm_mcp_client_util_mod, "deepagents_available", lambda: True)
-    monkeypatch.setattr(MCPClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
-    monkeypatch.setattr(MCPClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
-    monkeypatch.setattr(MCPClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
-    monkeypatch.setattr(MCPClientUtil, "decide_route", classmethod(_fake_decide_route))
-    monkeypatch.setattr(MCPClientUtil, "create_deep_agent_workflow", classmethod(_fake_create_deep_agent_workflow))
-    monkeypatch.setattr(MCPClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
-    monkeypatch.setattr(MCPClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
-    monkeypatch.setattr(MCPClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
-    monkeypatch.setattr(MCPClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(AgentClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+    monkeypatch.setattr(AgentClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
+    monkeypatch.setattr(AgentClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
+    monkeypatch.setattr(AgentClientUtil, "decide_route", classmethod(_fake_decide_route))
+    monkeypatch.setattr(AgentClientUtil, "create_deep_agent_workflow", classmethod(_fake_create_deep_agent_workflow))
+    monkeypatch.setattr(AgentClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
+    monkeypatch.setattr(AgentClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
+    monkeypatch.setattr(AgentClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(AgentClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
     monkeypatch.setattr(llm_mcp_client_mod.asyncio, "sleep", _fake_sleep)
 
     runtime_config = _build_runtime_config()
@@ -2935,7 +2935,7 @@ def test_run_direct_coding_agent_heading_rescue_returns_headings(monkeypatch: py
     monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent"))
 
     evidence = asyncio.run(
-        MCPClientUtil.run_direct_coding_agent_heading_rescue(
+        AgentClientUtil.run_direct_coding_agent_heading_rescue(
             runtime_config=runtime_config,
             messages=[{"role": "user", "content": "作業対象は /tmp/workspace です。必ず coding agent を使って docs/11_検証 配下の Markdown を調査し、共通している見出しを 3 点に整理してください。"}],
             run_trace_id="trace-1",
@@ -2948,13 +2948,13 @@ def test_run_direct_coding_agent_heading_rescue_returns_headings(monkeypatch: py
 
 
 def test_extract_config_path_from_text_returns_yaml_path() -> None:
-    assert MCPClientUtil.extract_config_path_from_text(
+    assert AgentClientUtil.extract_config_path_from_text(
         "設定ファイルのパスは /tmp/ai-chat-util-config.yml です。"
     ) == "/tmp/ai-chat-util-config.yml"
 
 
 def test_build_recursion_limit_fallback_text_without_evidence_returns_error() -> None:
-    text = MCPClientUtil.build_recursion_limit_fallback_text(
+    text = AgentClientUtil.build_recursion_limit_fallback_text(
         "Recursion limit of 50 reached without hitting a stop condition",
         {"config_path": None, "stdout_blocks": []},
     )

@@ -1,8 +1,8 @@
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
+from ai_chat_util.base.batch import BatchClient
 
 async def main():
 
-    batch = LLMBatchClient()
+    batch = BatchClient()
     prompt = "英語に翻訳してください"
     messages = [
         "今日はどんな日？",

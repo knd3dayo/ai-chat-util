@@ -1,4 +1,4 @@
-from ai_chat_util.base.llm.prompts import PromptsBase
+from .prompts_base import PromptsBase
 
 class CodingAgentPrompts(PromptsBase):
 

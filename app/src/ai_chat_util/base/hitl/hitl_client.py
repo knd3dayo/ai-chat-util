@@ -1,11 +1,14 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import os
-from ai_chat_util.base.llm.llm_client import LLMClient
-from .abstract_llm_client import AbstractLLMClient
+import sys
+
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
 from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
-import sys
+
+from ..chat.abstract_chat_client import AbstractChatClient
+
 
 class IOManagerBase(ABC):
     @abstractmethod
@@ -15,6 +18,7 @@ class IOManagerBase(ABC):
     @abstractmethod
     def write_output(self, output: str) -> None:
         pass
+
 
 class StdIOManager(IOManagerBase):
     def read_input(self, prompt: str) -> str:
@@ -29,8 +33,9 @@ class StdIOManager(IOManagerBase):
     def write_output(self, output: str) -> None:
         print(output)
 
+
 class HITLClientBase(ABC):
-    def __init__(self, llm_client: AbstractLLMClient, runtime_config: AiChatUtilConfig, trace_id: str | None = None):
+    def __init__(self, llm_client: AbstractChatClient, runtime_config: AiChatUtilConfig, trace_id: str | None = None):
         self.llm_client = llm_client
         self.trace_id = trace_id
         self.runtime_config = runtime_config
@@ -69,7 +74,7 @@ class HITLClientBase(ABC):
 
         # Only MCP workflow returns paused today; still safe to handle generically.
         while getattr(chat_response, "status", "completed") == "paused":
-            self.trace_id = getattr(chat_response, "trace_id", None) 
+            self.trace_id = getattr(chat_response, "trace_id", None)
             prompt = None
             hitl = getattr(chat_response, "hitl", None)
             hitl_kind = getattr(hitl, "kind", None) if hitl is not None else None
@@ -103,6 +108,7 @@ class HITLClientBase(ABC):
             io_manager.write_output(chat_response.output)
 
         return
+
 
 class StdIOHITLClient(HITLClientBase):
     def get_io_manager(self) -> IOManagerBase:

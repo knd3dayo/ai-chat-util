@@ -1,8 +1,8 @@
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
+from ai_chat_util.base.batch import BatchClient
 
 async def main(input_file: str, output_file: str):
 
-    batch = LLMBatchClient()
+    batch = BatchClient()
     prompt = "要約してください"
     await batch.run_batch_chat_from_excel(
         prompt=prompt,

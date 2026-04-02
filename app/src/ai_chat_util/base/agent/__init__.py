@@ -4,6 +4,7 @@ from .agent_client_factory import AgentFactory
 from .tool_limits import ToolLimits
 from .mcp_client import DeepAgentMCPClient, MCPClient
 from .mcp_client_util import MCPClientUtil
+from .prompts_base import PromptsBase
 from .prompts import CodingAgentPrompts
 from .supervisor_support import (
     AuditContext,
@@ -25,6 +26,7 @@ __all__ = [
     "MCPBatchClient",
     "MCPClient",
     "MCPClientUtil",
+    "PromptsBase",
     "RouteCandidate",
     "RoutingDecision",
     "SufficiencyDecision",

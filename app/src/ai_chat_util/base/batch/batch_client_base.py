@@ -1,27 +1,28 @@
 import os
 import asyncio
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+
 from tqdm.asyncio import tqdm_asyncio
+import pandas as pd
 
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
-from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
-
+from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.model.ai_chatl_util_models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
 
-import pandas as pd
-
 import ai_chat_util.log.log_settings as log_settings
+
+from .abstract_batch_client import AbstractBatchClient
+
 logger = log_settings.getLogger(__name__)
 
-class BatchClientBase(ABC):
+
+class BatchClientBase(AbstractBatchClient):
     def __init__(self, llm_config: AiChatUtilConfig | None = None) -> None:
-        self.llm_client: AbstractLLMClient = self._create_client(llm_config)
+        self.llm_client: AbstractChatClient = self._create_client(llm_config)
 
     @abstractmethod
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
+    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractChatClient:
         raise NotImplementedError
-
 
     async def _run_one_(self, i: int, chat_history: ChatRequest, sem: asyncio.Semaphore, progress: tqdm_asyncio) -> tuple[int, ChatResponse]:
         # Semaphore is effective only when each task acquires it.
@@ -58,7 +59,6 @@ class BatchClientBase(ABC):
         progress.update(1)  # Update progress after processing the row
         return (row_num, chat_response)
 
-
     async def run_batch_chat(
             self, chat_requests: list[ChatRequest], concurrency: int = 5
             ) -> list[tuple[int, ChatResponse]]:
@@ -81,7 +81,7 @@ class BatchClientBase(ABC):
             responses = await asyncio.gather(*tasks)
         finally:
             progress.close()
-    
+
         # Sort responses by row number to maintain order
         responses.sort(key=lambda x: x[0])
         return responses
@@ -101,15 +101,14 @@ class BatchClientBase(ABC):
         response_messages = []
         for _, chat_response in responses:
             response_messages.append(chat_response.output)
-    
+
         return response_messages
-    
-    # Excelファイルからデータを読み込み、結果をExcelファイルに書き込むメソッド
+
     async def run_batch_chat_from_excel(
-            self, prompt: str, 
+            self, prompt: str,
             input_excel_path: str, output_excel_path: str = "output.xlsx",
-            content_column: str = "content", 
-            file_path_column: str = "file_path", 
+            content_column: str = "content",
+            file_path_column: str = "file_path",
             output_column: str = "output",
             detail: str = "auto",
             concurrency: int = 16,
@@ -149,7 +148,7 @@ class BatchClientBase(ABC):
             if os.path.isfile(file_path):
                 logger.info(f"Processing file: {file_path}")
                 file_content = self.llm_client.get_message_factory().create_multi_format_contents_from_file(
-                    file_path=file_path, 
+                    file_path=file_path,
                     detail=detail
                 )
                 contents.extend(file_content)
@@ -165,14 +164,7 @@ class BatchClientBase(ABC):
         results = await self.run_batch_chat(chat_requests, concurrency)
 
         # 結果を指定された出力列に追加
-        df[output_column] = [ response.output for _, response in results ]
+        df[output_column] = [response.output for _, response in results]
 
         # 結果を新しいExcelファイルに保存
         df.to_excel(output_excel_path, index=False)
-
-
-class LLMBatchClient(BatchClientBase):
-    def _create_client(self, llm_config: AiChatUtilConfig | None = None) -> AbstractLLMClient:
-        return LLMFactory.create_llm_client(llm_config)
-
-

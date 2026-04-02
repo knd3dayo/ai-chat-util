@@ -6,7 +6,8 @@ import json
 from typing import Iterable
 from ai_chat_util.base.agent.agent_client_factory import AgentFactory
 from ai_chat_util.analysis import AnalysisService
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.base.chat import create_llm_client
+from ai_chat_util.base.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 
 
@@ -296,28 +297,28 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = create_llm_client()
         trace_id: str | None = None
-        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
 
     if args.command == "agent_chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = AgentFactory.create_mcp_client()
         trace_id: str | None = None
-        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
 
     if args.command == "run_deepagent_chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = AgentFactory.create_deepagent_client()
         trace_id: str | None = None
-        return await LLMFactory.create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
     
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
         # Heavy deps (e.g., pandas) are only needed for batch_chat.
-        from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
+        from ai_chat_util.base.batch import BatchClient
 
-        llm_batch_client = LLMBatchClient()
+        llm_batch_client = BatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,
             output_excel_path=args.output_excel_path,
@@ -333,7 +334,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "agent_batch_chat":
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.agent.agent_batch_client import MCPBatchClient
+        from ai_chat_util.base.agent import MCPBatchClient
 
         llm_batch_client = MCPBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -351,7 +352,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.agent.agent_batch_client import DeepAgentBatchClient
+        from ai_chat_util.base.agent import DeepAgentBatchClient
 
         llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -369,28 +370,28 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = create_llm_client()
         response = await AnalysisService.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = create_llm_client()
         response = await AnalysisService.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = create_llm_client()
         response = await AnalysisService.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = LLMFactory.create_llm_client()
+        llm_client = create_llm_client()
         response = await AnalysisService.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
         print(response.output)
         return

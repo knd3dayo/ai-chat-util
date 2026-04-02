@@ -2,10 +2,10 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from ai_chat_util.base.agent.agent_batch_client import DeepAgentBatchClient, MCPBatchClient
+from ai_chat_util.base.agent import DeepAgentBatchClient, MCPBatchClient
 from ai_chat_util.base.agent.agent_client_factory import AgentFactory
-from ai_chat_util.base.llm.llm_batch_client import LLMBatchClient
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.base.batch import BatchClient
+from ai_chat_util.base.chat import create_llm_client
 from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse, WebRequestModel
 
 
@@ -15,7 +15,7 @@ async def run_chat(
     """
     This function processes a chat request with the standard LLM client.
     """
-    client = LLMFactory.create_llm_client()
+    client = create_llm_client()
     return await client.chat(chat_request)
 
 
@@ -45,7 +45,7 @@ async def run_simple_chat(
     """
     This function processes a simple chat with the specified prompt and returns the chat response.
     """
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     response = await llm_client.simple_chat(prompt)
     return response
 
@@ -58,7 +58,7 @@ async def run_simple_batch_chat(
     """
     This function processes a simple batch chat with the specified prompt and messages, and returns the list of chat responses.
     """
-    batch_client = LLMBatchClient()
+    batch_client = BatchClient()
     results = await batch_client.run_simple_batch_chat(prompt, messages, concurrency)
     return results
 
@@ -70,7 +70,7 @@ async def run_batch_chat(
     """
     This function processes a batch of chat histories with the standard LLM client.
     """
-    batch_client = LLMBatchClient()
+    batch_client = BatchClient()
     results = await batch_client.run_batch_chat(chat_requests, concurrency)
     return [response for _, response in results]
 
@@ -112,7 +112,7 @@ async def run_batch_chat_from_excel(
     """
     This function reads chat histories from an Excel file, processes them in batch with the standard LLM client, and writes the responses to a new Excel file.
     """
-    batch_client = LLMBatchClient()
+    batch_client = BatchClient()
     await batch_client.run_batch_chat_from_excel(
         prompt,
         input_excel_path,

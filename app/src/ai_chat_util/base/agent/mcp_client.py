@@ -14,9 +14,9 @@ from ai_chat_util.common.config.runtime import (
 )
 from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
 from ai_chat_util.common.model.request_headers import get_current_request_headers
-from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
+from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
-from ai_chat_util.base.llm.llm_client import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from ai_chat_util.base.chat import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 
@@ -26,7 +26,7 @@ logger = log_settings.getLogger(__name__)
 from .mcp_client_util import MCPClientUtil
 from .tool_limits import ToolLimits
 
-class MCPClient(AbstractLLMClient):
+class MCPClient(AbstractChatClient):
     def __init__(self, runtime_config: AiChatUtilConfig):
         self.runtime_config = runtime_config
         self.message_factory = LLMMessageContentFactory(config=runtime_config)

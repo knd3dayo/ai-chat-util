@@ -6,7 +6,7 @@ from ai_chat_util.common.model.ai_chatl_util_models import (
 from .llm_message_content_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
 
-class AbstractLLMClient(ABC):
+class AbstractChatClient(ABC):
 
     @abstractmethod
     async def simple_chat(self, prompt: str,) -> str:

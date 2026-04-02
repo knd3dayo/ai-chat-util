@@ -1,8 +1,8 @@
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.base.chat import create_llm_client
 
 async def main():
 
-    client = LLMFactory.create_llm_client()
+    client = create_llm_client()
     response = await client.simple_chat("こんにちは、今日の天気は？")
     print(response)
 

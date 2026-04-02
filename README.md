@@ -134,6 +134,17 @@ app/src/
 - LLM 非依存のファイル処理は `file_util` に置きます。
 - LLM 固有のメッセージ組み立てや chat workflow は `ai_chat_util` に置きます。
 
+### import 方針
+
+- package 配下に `__init__.py` の公開 export がある場合は、利用側は原則として package import を使います。
+  - 例: `from ai_chat_util.base.chat import AbstractChatClient`
+  - 例: `from ai_chat_util.base.batch import BatchClient`
+  - 例: `from ai_chat_util.base.llm import LLMFactory`
+  - 例: `from ai_chat_util.base.hitl import HITLClientBase`
+- `abstract_*.py` は純粋抽象、`*_base.py` は部分実装、具体実装は機能名の module に置く方針です。
+- 個別 module 直 import は、その module 自体を編集している最中か、まだ package export を用意していない場合に限ります。
+- 再編中に import 経路を変える場合でも、呼び出し側はできるだけ package export 側へ寄せ、内部ファイル名変更の影響を局所化します。
+
 依存関係のイメージ:
 
 ```
@@ -173,6 +184,11 @@ ai_chat_util.analysis / ai_chat_util.core / ai_chat_util.base / ai_chat_util.age
 - coding-agent の自動テストは `ai_chat_util/agent/coding/_test_` に配置
 
 `ai_chat_util/base/util` の file util shim は削除済みです。`ai_chat_util/base/core` と `ai_chat_util/base/analysis` もトップレベルへ移動済みです。
+chat / batch は `abstract_*` / `*_base` / concrete module の 3 層構成へ整理済みです。
+`ai_chat_util.base.hitl` を新設し、CLI 向けの HITL 対話ループは `llm` から分離済みです。
+`chat` / `batch` / `llm` / `hitl` は package `__init__.py` からの公開 import を持ち、利用側は package import を優先します。
+`LLMFactory` は現状 `ai_chat_util.base.llm` に維持します。理由は、LiteLLM ベースの `LLMClient` 生成が主責務であり、`core` / `cli` / `test` から使われる内部実装ファクトリとしての性格が強いためです。
+ただし `create_stdio_hitl_client()` は HITL 側責務も含むため、将来 Web/UI 向けの別 HITL 実装が増える場合は factory 分割を再検討します。
 
 ### 次の移動候補
 

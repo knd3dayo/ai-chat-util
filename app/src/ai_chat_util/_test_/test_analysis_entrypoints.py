@@ -69,7 +69,7 @@ def test_tool_app_analyze_files_uses_analysis_service(monkeypatch) -> None:
         }
         return ChatResponse(status="completed", messages=[])
 
-    monkeypatch.setattr(tool_app.LLMFactory, "create_llm_client", lambda: _FakeClient())
+    monkeypatch.setattr(tool_app, "create_llm_client", lambda: _FakeClient())
     monkeypatch.setattr(AnalysisService, "resolve_existing_file_paths", lambda paths: ["/resolved/a.txt"])
     monkeypatch.setattr(AnalysisService, "analyze_files", classmethod(_fake_analyze_files))
 
@@ -105,7 +105,7 @@ def test_tool_app_analyze_image_files_retries_timeout(monkeypatch) -> None:
             raise asyncio.TimeoutError()
         return ChatResponse(status="completed", messages=[])
 
-    monkeypatch.setattr(tool_app.LLMFactory, "create_llm_client", lambda: _FakeClient())
+    monkeypatch.setattr(tool_app, "create_llm_client", lambda: _FakeClient())
     monkeypatch.setattr(AnalysisService, "resolve_existing_file_paths", lambda paths: ["/resolved/image.png"])
     monkeypatch.setattr(AnalysisService, "tool_timeout_seconds", lambda: 0.01)
     monkeypatch.setattr(AnalysisService, "tool_timeout_retries", lambda: 1)

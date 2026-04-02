@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import (
-    ChatHistory, ChatRequestContext, ChatMessage, 
+    ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent, WebRequestModel
 )
 from file_util.model import FileUtilDocument
@@ -42,7 +42,7 @@ class LLMMessageContentFactoryBase(ABC):
 
     def is_image_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "image_url"
-    
+
     def is_file_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "file"
 
@@ -66,19 +66,20 @@ class LLMMessageContentFactoryBase(ABC):
             role=self.get_assistant_role_name(),
             content=chat_content_list
         )
-    
+
     def create_system_message(self, chat_content_list: list[ChatContent]) -> ChatMessage:
         return ChatMessage(
             role=self.get_system_role_name(),
             content=chat_content_list
         )
+
     def create_text_content(self, text: str) -> "ChatContent":
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
 
     def create_image_content(self, file_data: FileUtilDocument, detail: str) -> list["ChatContent"]:
         return self._create_image_content_(file_data, detail)
-    
+
     def create_image_content_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
         return self._create_image_content_(FileUtilDocument.from_file(file_path), detail)
 
@@ -105,12 +106,12 @@ class LLMMessageContentFactoryBase(ABC):
                 ca_bundle=ca_bundle,
             )
             return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
-    
+
     def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
         config = self.get_config()
         if not config:
             raise ValueError("LLMClientの設定が取得できませんでした。")
-        
+
         use_custom = config.features.use_custom_pdf_analyzer
         if use_custom:
             return self._create_custom_pdf_content_(document_type, detail=detail)
@@ -140,7 +141,7 @@ class LLMMessageContentFactoryBase(ABC):
         with open(file_path, "rb") as pdf_file:
             document_type = FileUtilDocument(data=pdf_file.read(), identifier=file_path)
         return self._create_custom_pdf_content_(document_type, detail=detail)
-    
+
     def _create_custom_pdf_content_(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
@@ -159,7 +160,7 @@ class LLMMessageContentFactoryBase(ABC):
                 pdf_contents.extend(image_content)
 
         return pdf_contents
-    
+
     def create_office_content(self, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
@@ -185,7 +186,6 @@ class LLMMessageContentFactoryBase(ABC):
 
         return pdf_contents
 
-
     def create_office_content_from_file(
             self, file_path: str, detail: str = "auto"
             ) -> list["ChatContent"]:
@@ -195,7 +195,6 @@ class LLMMessageContentFactoryBase(ABC):
         with open(file_path, "rb") as office_file:
             document_type = FileUtilDocument(data=office_file.read(), identifier=file_path)
         return self.create_office_content(document_type, detail=detail)
-  
 
     def create_office_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
         '''
@@ -220,7 +219,6 @@ class LLMMessageContentFactoryBase(ABC):
 
         return office_contents
 
-
     def create_multi_format_content(
             self, document_type: FileUtilDocument, detail: str = "auto"
             ) -> list["ChatContent"]:
@@ -240,8 +238,8 @@ class LLMMessageContentFactoryBase(ABC):
 
         if document_type.is_office_document():
             return self.create_office_content(document_type, detail=detail)
-        
-        raise ValueError(f"Unsupported document type for file: {document_type.identifier}")    
+
+        raise ValueError(f"Unsupported document type for file: {document_type.identifier}")
 
     def create_multi_format_contents_from_file(
             self, file_path: str, detail: str = "auto"
@@ -249,7 +247,7 @@ class LLMMessageContentFactoryBase(ABC):
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-            
+
         document_type = FileUtilDocument.from_file(document_path=file_path)
 
         if document_type.is_text():
@@ -265,8 +263,8 @@ class LLMMessageContentFactoryBase(ABC):
 
         if document_type.is_office_document():
             return self.create_office_content_from_file(file_path, detail=detail)
-        
-        raise ValueError(f"Unsupported document type for file: {file_path}")    
+
+        raise ValueError(f"Unsupported document type for file: {file_path}")
 
     def create_multi_format_contents_from_url(
             self, file_url: str, detail: str = "auto"
@@ -303,9 +301,9 @@ class LLMMessageContentFactoryBase(ABC):
                 if message.role in [self.get_system_role_name(), self.get_assistant_role_name()]:
                     break
         return last_user_messages, previous_messages
-    
+
     def __preprocess_text_message__(
-            self, 
+            self,
             chat_message_list: list[ChatMessage],
             request_context: ChatRequestContext
         ) -> list[ChatMessage]:
@@ -345,9 +343,8 @@ class LLMMessageContentFactoryBase(ABC):
             # 分割しない設定の場合はそのまま返す
             return __insert_prompt_template__(chat_message_list, request_context)
 
-
         # textタイプのcontentを抽出する
-        text_type_contents = [ 
+        text_type_contents = [
             content for chat_message in chat_message_list for content in chat_message.content if self.is_text_content(content)
             ]
         if len(text_type_contents) == 0:
@@ -358,9 +355,9 @@ class LLMMessageContentFactoryBase(ABC):
             content for chat_message in chat_message_list for content in chat_message.content if not self.is_text_content(content)
         ]
 
-        text_result_chat_message_list: list[ChatMessage] = []        
+        text_result_chat_message_list: list[ChatMessage] = []
         # textを結合
-        combined_text = "\n".join([text_content.params.get("text", "") for text_content in text_type_contents] )
+        combined_text = "\n".join([text_content.params.get("text", "") for text_content in text_type_contents])
         # 文字数で分割する
         for i in range(0, len(combined_text), split_message_length):
             split_text = combined_text[i:i + split_message_length]
@@ -376,7 +373,7 @@ class LLMMessageContentFactoryBase(ABC):
 
                 text_result_chat_message_list.append(chat_message)
 
-        return text_result_chat_message_list        
+        return text_result_chat_message_list
 
     def __preprocess_image_urls__(
         self,
@@ -426,7 +423,7 @@ class LLMMessageContentFactoryBase(ABC):
             base_contents = text_contents + other_contents
 
             for i in range(0, len(image_url_contents), max_images):
-                split_image_url_contents: list[ChatContent] = image_url_contents[i : i + max_images]
+                split_image_url_contents: list[ChatContent] = image_url_contents[i: i + max_images]
                 split_contents = base_contents + split_image_url_contents
 
                 split_chat_message = ChatMessage(role=chat_message.role, content=split_contents)
@@ -446,6 +443,7 @@ class LLMMessageContentFactoryBase(ABC):
     def get_config(self) -> AiChatUtilConfig | None:
         pass
 
+
 class LLMMessageContentFactory(LLMMessageContentFactoryBase):
 
     def __init__(self, config: Optional[AiChatUtilConfig] = None):
@@ -453,15 +451,15 @@ class LLMMessageContentFactory(LLMMessageContentFactoryBase):
 
     def get_config(self) -> AiChatUtilConfig | None:
         return self.config
-    
+
     def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
         base64_image = base64.b64encode(document_type.data).decode('utf-8')
         image_url = f"data:image/png;base64,{base64_image}"
         params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
         return [ChatContent(params=params)]
-    
+
     def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
         base64_file = base64.b64encode(document_type.data).decode('utf-8')
-        file_url = f"data:application/pdf;base64,{base64_file}"    
+        file_url = f"data:application/pdf;base64,{base64_file}"
         params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
         return [ChatContent(params=params)]

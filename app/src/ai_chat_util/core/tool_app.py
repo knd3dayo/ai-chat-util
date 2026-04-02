@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import Field
 
 from ai_chat_util.analysis import AnalysisService, LLMClientUtil
-from ai_chat_util.base.llm.llm_client_factory import LLMFactory
+from ai_chat_util.base.chat import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import WebRequestModel
 from file_util.model import FileUtilDocument
@@ -100,7 +100,7 @@ async def analyze_image_urls(
         detail,
         AnalysisService.prompt_len(prompt),
     )
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     try:
         response = await LLMClientUtil.analyze_image_urls(llm_client, image_path_urls, prompt, detail)
         return response.output
@@ -124,7 +124,7 @@ async def analyze_image_files(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     resolved_paths = _resolve_existing_file_paths(file_list)
     return await AnalysisService.run_analysis_tool(
         tool_name="analyze_image_files",
@@ -177,7 +177,7 @@ async def analyze_pdf_urls(
     )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     try:
         requests_verify, ca_bundle = _get_network_download_options()
         path_list = DownLoader.download_files(
@@ -222,7 +222,7 @@ async def analyze_pdf_files(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     resolved_paths = _resolve_existing_file_paths(pdf_path_list)
     return await AnalysisService.run_analysis_tool(
         tool_name="analyze_pdf_files",
@@ -268,7 +268,7 @@ async def analyze_office_urls(
     )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     try:
         requests_verify, ca_bundle = _get_network_download_options()
         path_list = DownLoader.download_files(
@@ -313,7 +313,7 @@ async def analyze_office_files(
     """
     This function analyzes multiple Office documents using the specified prompt and returns the analysis result.
     """ 
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     resolved_paths = _resolve_existing_file_paths(office_path_list)
     return await AnalysisService.run_analysis_tool(
         tool_name="analyze_office_files",
@@ -491,7 +491,7 @@ async def analyze_urls(
     )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     try:
         requests_verify, ca_bundle = _get_network_download_options()
         path_list = DownLoader.download_files(
@@ -536,7 +536,7 @@ async def analyze_files(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     resolved_paths = _resolve_existing_file_paths(file_path_list)
     return await AnalysisService.run_analysis_tool(
         tool_name="analyze_files",
@@ -571,7 +571,7 @@ async def analyze_documents_data(
     """
     This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
     """
-    llm_client = LLMFactory.create_llm_client()
+    llm_client = create_llm_client()
     return await AnalysisService.run_analysis_tool(
         tool_name="analyze_documents_data",
         prompt=prompt,

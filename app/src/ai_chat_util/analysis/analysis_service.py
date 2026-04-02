@@ -4,7 +4,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-from ai_chat_util.base.llm.abstract_llm_client import AbstractLLMClient
+from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import ChatResponse
 from file_util.model import FileUtilDocument
@@ -151,7 +151,7 @@ class AnalysisService:
     @classmethod
     async def analyze_image_files(
         cls,
-        llm_client: AbstractLLMClient,
+        llm_client: AbstractChatClient,
         file_list: list[str],
         prompt: str,
         detail: str,
@@ -164,7 +164,7 @@ class AnalysisService:
     @classmethod
     async def analyze_pdf_files(
         cls,
-        llm_client: AbstractLLMClient,
+        llm_client: AbstractChatClient,
         file_list: list[str],
         prompt: str,
         detail: str = "auto",
@@ -177,7 +177,7 @@ class AnalysisService:
     @classmethod
     async def analyze_office_files(
         cls,
-        llm_client: AbstractLLMClient,
+        llm_client: AbstractChatClient,
         file_path_list: list[str],
         prompt: str,
         detail: str = "auto",
@@ -190,7 +190,7 @@ class AnalysisService:
     @classmethod
     async def analyze_files(
         cls,
-        llm_client: AbstractLLMClient,
+        llm_client: AbstractChatClient,
         file_path_list: list[str],
         prompt: str,
         detail: str = "auto",
@@ -203,7 +203,7 @@ class AnalysisService:
     @classmethod
     async def analyze_documents_data(
         cls,
-        llm_client: AbstractLLMClient,
+        llm_client: AbstractChatClient,
         document_type_list: list[FileUtilDocument],
         prompt: str,
         detail: str = "auto",

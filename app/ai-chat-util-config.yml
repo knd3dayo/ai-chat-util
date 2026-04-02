@@ -65,7 +65,9 @@ ai_chat_util_config:
     extra_headers: null
 
     coding_agent_endpoint:
-      # MCPサーバー名（ai_chat_util_config.mcp.mcp_config_pathで指定されたJSONのキーと一致させる必要があります）
+      # coding-agent 系 route に割り当てる MCP サーバー key
+      # ai_chat_util_config.mcp.mcp_config_path で指定された JSON のキーと一致させます
+      # 既定値は coding-agent ですが、deepagent など任意 key に差し替え可能です
       mcp_server_name: coding-agent
 
   file_server:

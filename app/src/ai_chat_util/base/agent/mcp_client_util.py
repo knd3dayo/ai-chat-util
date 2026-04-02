@@ -1425,11 +1425,13 @@ class MCPClientUtil:
     def build_route_tool_catalog_payload(
         cls,
         route_tool_inventory: Mapping[str, Sequence[Mapping[str, Any]]],
+        *,
+        runtime_config: AiChatUtilConfig | None = None,
     ) -> dict[str, Any]:
-        label_map = {
-            "coding_agent": "tool_agent_coding",
-            "general_tool_agent": "tool_agent_general",
-        }
+        route_backend_metadata = cls.build_route_backend_metadata(
+            route_tool_inventory=route_tool_inventory,
+            runtime_config=runtime_config,
+        )
         tool_catalog: list[dict[str, Any]] = []
         tool_agent_names: list[str] = []
 
@@ -1437,11 +1439,17 @@ class MCPClientUtil:
             normalized_tools = [tool for tool in tools if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()]
             if not normalized_tools:
                 continue
-            agent_name = label_map.get(str(route_name).strip(), str(route_name).strip() or "tool_agent")
+            route_name_str = str(route_name).strip()
+            backend_metadata = route_backend_metadata.get(route_name_str, {})
+            agent_name = str(backend_metadata.get("agent_name") or cls.build_tool_agent_label(route_name_str))
             tool_agent_names.append(agent_name)
             tool_catalog.append(
                 {
                     "agent_name": agent_name,
+                    "agent_family": backend_metadata.get("agent_family"),
+                    "selected_server_key": backend_metadata.get("selected_server_key"),
+                    "server_keys": backend_metadata.get("server_keys") or [],
+                    "backend_kind": backend_metadata.get("backend_kind"),
                     "tool_names": [str(tool.get("name") or "").strip() for tool in normalized_tools],
                     "tools": [
                         {
@@ -1461,6 +1469,7 @@ class MCPClientUtil:
         return {
             "tool_agent_names": tool_agent_names,
             "tool_catalog": tool_catalog,
+            "route_backends": route_backend_metadata,
         }
 
     @classmethod
@@ -1471,15 +1480,11 @@ class MCPClientUtil:
         include_details: bool = False,
     ) -> str:
         lines = ["supervisor が参照した利用可能ツール一覧:"]
-        label_map = {
-            "coding_agent": "tool_agent_coding",
-            "general_tool_agent": "tool_agent_general",
-        }
         for route_name, tools in route_tool_inventory.items():
             normalized_tools = [tool for tool in tools if isinstance(tool, Mapping) and str(tool.get("name") or "").strip()]
             if not normalized_tools:
                 continue
-            label = label_map.get(str(route_name).strip(), str(route_name).strip() or "tool_agent")
+            label = cls.build_tool_agent_label(str(route_name).strip())
             if not include_details:
                 lines.append(
                     f"- {label}: {', '.join(str(tool.get('name') or '').strip() for tool in normalized_tools)}"
@@ -1561,6 +1566,81 @@ class MCPClientUtil:
         }
 
     @classmethod
+    def get_coding_agent_server_name(cls, runtime_config: AiChatUtilConfig) -> str:
+        return str(runtime_config.mcp.coding_agent_endpoint.mcp_server_name).strip()
+
+    @classmethod
+    def build_tool_agent_label(cls, route_name: str | None) -> str:
+        normalized_route_name = str(route_name or "").strip()
+        label_map = {
+            "coding_agent": "tool_agent_coding",
+            "general_tool_agent": "tool_agent_general",
+        }
+        return label_map.get(normalized_route_name, normalized_route_name or "tool_agent")
+
+    @classmethod
+    def build_route_backend_metadata(
+        cls,
+        *,
+        route_tool_inventory: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+        runtime_config: AiChatUtilConfig | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        known_routes = {
+            str(route_name).strip()
+            for route_name in (route_tool_inventory or {}).keys()
+            if str(route_name).strip()
+        }
+        metadata: dict[str, dict[str, Any]] = {}
+
+        if "coding_agent" in known_routes:
+            selected_server_key = cls.get_coding_agent_server_name(runtime_config) if runtime_config is not None else None
+            metadata["coding_agent"] = {
+                "agent_name": cls.build_tool_agent_label("coding_agent"),
+                "agent_family": "coding_agent",
+                "selected_server_key": selected_server_key,
+                "server_keys": [selected_server_key] if selected_server_key else [],
+                "backend_kind": "mcp_async_task",
+            }
+
+        if "general_tool_agent" in known_routes:
+            server_keys: list[str] = []
+            if runtime_config is not None:
+                general_mcp_config = runtime_config.get_mcp_server_config().filter(
+                    exclude_name=cls.get_coding_agent_server_name(runtime_config)
+                )
+                server_keys = sorted(str(name).strip() for name in general_mcp_config.servers.keys() if str(name).strip())
+            metadata["general_tool_agent"] = {
+                "agent_name": cls.build_tool_agent_label("general_tool_agent"),
+                "agent_family": "general_tool_agent",
+                "selected_server_key": server_keys[0] if len(server_keys) == 1 else None,
+                "server_keys": server_keys,
+                "backend_kind": "mcp_tools",
+            }
+
+        if "deep_agent" in known_routes:
+            metadata["deep_agent"] = {
+                "agent_name": cls.build_tool_agent_label("deep_agent"),
+                "agent_family": "deep_agent",
+                "selected_server_key": None,
+                "server_keys": [],
+                "backend_kind": "deepagents",
+            }
+
+        for route_name in sorted(known_routes):
+            metadata.setdefault(
+                route_name,
+                {
+                    "agent_name": cls.build_tool_agent_label(route_name),
+                    "agent_family": route_name,
+                    "selected_server_key": None,
+                    "server_keys": [],
+                    "backend_kind": None,
+                },
+            )
+
+        return metadata
+
+    @classmethod
     async def run_config_preflight(
         cls,
         *,
@@ -1569,7 +1649,7 @@ class MCPClientUtil:
         audit_context: AuditContext | None,
     ) -> dict[str, Any] | None:
         mcp_config = runtime_config.get_mcp_server_config()
-        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        coding_agent_server_name = cls.get_coding_agent_server_name(runtime_config)
         general_mcp_config = mcp_config.filter(exclude_name=coding_agent_server_name)
         if len(general_mcp_config.servers) == 0:
             return None
@@ -2633,7 +2713,7 @@ class MCPClientUtil:
         runtime_config: AiChatUtilConfig,
     ) -> dict[str, list[dict[str, Any]]]:
         mcp_config = runtime_config.get_mcp_server_config()
-        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        coding_agent_server_name = cls.get_coding_agent_server_name(runtime_config)
         route_configs = {
             "coding_agent": mcp_config.filter(include_name=coding_agent_server_name),
             "general_tool_agent": mcp_config.filter(exclude_name=coding_agent_server_name),
@@ -2889,7 +2969,7 @@ class MCPClientUtil:
             return default_decision
 
         mcp_config = runtime_config.get_mcp_server_config()
-        coding_agent_server_name = runtime_config.mcp.coding_agent_endpoint.mcp_server_name
+        coding_agent_server_name = cls.get_coding_agent_server_name(runtime_config)
         has_coding_agent = len(mcp_config.filter(include_name=coding_agent_server_name).servers) > 0
         has_deep_agent = cls.deep_agent_route_enabled(runtime_config)
         has_general_agent = len(mcp_config.filter(exclude_name=coding_agent_server_name).servers) > 0

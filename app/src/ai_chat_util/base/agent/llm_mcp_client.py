@@ -181,6 +181,10 @@ class MCPClient(AbstractLLMClient):
                 ]
                 for route_name, tools in route_tool_inventory.items()
             }
+            route_backend_metadata = MCPClientUtil.build_route_backend_metadata(
+                route_tool_inventory=route_tool_inventory,
+                runtime_config=self.runtime_config,
+            )
             available_tool_names = [
                 tool_name
                 for tool_names in route_tool_catalog.values()
@@ -209,10 +213,15 @@ class MCPClient(AbstractLLMClient):
                     "next_action": routing_decision.next_action,
                     "explicit_user_file_paths": list(explicit_user_file_paths),
                     "route_tool_catalog": route_tool_catalog,
+                    "route_backends": route_backend_metadata,
+                    "selected_route_backend": route_backend_metadata.get(routing_decision.selected_route),
                 },
             )
             if expects_tool_catalog_response and route_tool_catalog:
-                tool_catalog_payload = MCPClientUtil.build_route_tool_catalog_payload(route_tool_inventory)
+                tool_catalog_payload = MCPClientUtil.build_route_tool_catalog_payload(
+                    route_tool_inventory,
+                    runtime_config=self.runtime_config,
+                )
                 audit_context.emit(
                     "tool_catalog_resolved",
                     route_name=routing_decision.selected_route,

@@ -476,7 +476,7 @@ class PathsSection(BaseModel):
 
 
 class CodingAgentEndpointSection(BaseModel):
-    """Endpoint selector for the dedicated coding-agent MCP server."""
+    """Selector for the MCP server key assigned to the coding-agent-family route."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -502,7 +502,7 @@ class MCPSection(BaseModel):
 
     coding_agent_endpoint: CodingAgentEndpointSection = Field(
         default_factory=CodingAgentEndpointSection,
-        description="coding-agent 用の MCP サーバー名（mcp.json の mcpServers.<name>）",
+        description="coding-agent 系 route に割り当てる MCP サーバー名（mcp.json の mcpServers.<name>）",
     )
 
     # Optional: extra headers/env forwarding for MCP transports ONLY.

@@ -828,6 +828,25 @@ def test_create_sub_agents_keeps_general_when_coding_agent_is_missing(monkeypatc
     assert [agent.get_agent_name() for agent in agents] == ["tool_agent_general"]
 
 
+def test_create_sub_agents_uses_configured_coding_agent_server_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _patch_agent_creation(monkeypatch)
+    runtime_config = _build_runtime_config()
+    runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
+
+    agents = asyncio.run(
+        AgentBuilder.create_sub_agents(
+            runtime_config=runtime_config,
+            mcp_config=_build_mcp_config("deepagent", "general-tools"),
+            llm=object(), # type: ignore
+            prompts=CodingAgentPrompts(),
+            tool_limits=None,
+        )
+    )
+
+    assert [name for name, _, _ in created] == ["tool_agent_coding", "tool_agent_general"]
+    assert [agent.get_agent_name() for agent in agents] == ["tool_agent_coding", "tool_agent_general"]
+
+
 @pytest.mark.parametrize(
     ("server_names", "expected_name"),
     [
@@ -2096,6 +2115,35 @@ def test_build_tool_catalog_response_text_includes_details_when_requested() -> N
     assert "analyze_files" in text
 
 
+def test_build_route_tool_catalog_payload_includes_route_backend_metadata() -> None:
+    runtime_config = _build_runtime_config()
+    runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
+
+    payload = MCPClientUtil.build_route_tool_catalog_payload(
+        {
+            "coding_agent": [
+                {"name": "execute", "description": "tool:execute", "primary_args": ["prompt"]},
+            ],
+            "general_tool_agent": [
+                {"name": "analyze_files", "description": "tool:analyze_files", "primary_args": ["file_path_list", "prompt"]},
+            ],
+        },
+        runtime_config=runtime_config,
+    )
+
+    assert payload["tool_agent_names"] == ["tool_agent_coding", "tool_agent_general"]
+    assert payload["route_backends"]["coding_agent"] == {
+        "agent_name": "tool_agent_coding",
+        "agent_family": "coding_agent",
+        "selected_server_key": "deepagent",
+        "server_keys": ["deepagent"],
+        "backend_kind": "mcp_async_task",
+    }
+    assert payload["tool_catalog"][0]["agent_name"] == "tool_agent_coding"
+    assert payload["tool_catalog"][0]["selected_server_key"] == "deepagent"
+    assert payload["tool_catalog"][0]["agent_family"] == "coding_agent"
+
+
 def test_build_available_routes_text_includes_visible_tools() -> None:
     text = MCPClientUtil._build_available_routes_text(
         has_coding_agent=True,
@@ -2295,6 +2343,44 @@ def test_resolve_route_tool_inventory_collects_description_and_primary_args(monk
     }
 
 
+def test_resolve_route_tool_inventory_uses_configured_coding_agent_server_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeCatalogClient:
+        def __init__(self, config: dict[str, Any]) -> None:
+            self._config = config
+
+        async def get_tools(self) -> list[Any]:
+            servers = sorted(self._config.keys())
+            if servers == ["deepagent"]:
+                return [_NamedTool("execute", description="run deepagent task")]
+            if servers == ["general-tools"]:
+                return [_NamedTool("analyze_files", description="analyze files")]
+            return []
+
+    monkeypatch.setattr(llm_mcp_client_util_mod, "MultiServerMCPClient", _FakeCatalogClient)
+    runtime_config = _build_runtime_config()
+    runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("deepagent", "general-tools"))
+
+    inventory = asyncio.run(MCPClientUtil.resolve_route_tool_inventory(runtime_config=runtime_config))
+
+    assert inventory == {
+        "coding_agent": [
+            {
+                "name": "execute",
+                "description": "run deepagent task",
+                "primary_args": [],
+            }
+        ],
+        "general_tool_agent": [
+            {
+                "name": "analyze_files",
+                "description": "analyze files",
+                "primary_args": [],
+            }
+        ],
+    }
+
+
 def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded_events: list[dict[str, Any]] = []
 
@@ -2462,6 +2548,191 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
     final_validated_event = next(event for event in recorded_events if event["event_type"] == "final_answer_validated")
     assert final_validated_event["final_status"] == "completed"
     assert final_validated_event["reason_code"] == "audit.validation_passed"
+
+
+def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded_events: list[dict[str, Any]] = []
+
+    original_llm_client_module = sys.modules.get("ai_chat_util.base.llm.llm_client")
+    sys.modules.pop("ai_chat_util.base.agent.mcp_client", None)
+
+    stub_llm_client_module = types.ModuleType("ai_chat_util.base.llm.llm_client")
+
+    class _StubMessageFactoryBase:
+        pass
+
+    class _StubMessageFactory(_StubMessageFactoryBase):
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+    setattr(stub_llm_client_module, "LLMMessageContentFactoryBase", _StubMessageFactoryBase)
+    setattr(stub_llm_client_module, "LLMMessageContentFactory", _StubMessageFactory)
+    sys.modules["ai_chat_util.base.llm.llm_client"] = stub_llm_client_module
+
+    llm_mcp_client_mod = importlib.import_module("ai_chat_util.base.agent.mcp_client")
+    MCPClient = llm_mcp_client_mod.MCPClient
+
+    try:
+        class _FakeAuditContext:
+            def emit(self, event_type: str, **kwargs: Any) -> None:
+                recorded_events.append({"event_type": event_type, **kwargs})
+
+        async def _fake_create_sqlite_checkpointer(
+            cls: type[MCPClientUtil],
+            checkpoint_db_path: Path | None,
+            *,
+            exit_stack: Any,
+        ) -> None:
+            return None
+
+        async def _fake_resolve_route_tool_inventory(
+            cls: type[MCPClientUtil],
+            *,
+            runtime_config: AiChatUtilConfig,
+        ) -> dict[str, list[dict[str, Any]]]:
+            return {
+                "coding_agent": [{"name": "execute", "description": "run coding job", "primary_args": ["prompt"]}],
+                "general_tool_agent": [{"name": "analyze_files", "description": "analyze files", "primary_args": ["file_path_list", "prompt"]}],
+            }
+
+        async def _fake_decide_route(
+            cls: type[MCPClientUtil],
+            *,
+            runtime_config: AiChatUtilConfig,
+            prompts: Any,
+            messages: Any,
+            force_coding_agent_route: bool,
+            force_deep_agent_route: bool,
+            explicit_user_file_paths: Any,
+            available_tool_names: list[str],
+            route_tool_catalog: dict[str, list[str]],
+            audit_context: Any,
+        ) -> RoutingDecision:
+            candidate = RouteCandidate(
+                route_name="coding_agent",
+                score=0.99,
+                reason_code="route.explicit_coding_agent_request",
+                tool_hints=["execute"],
+                blocking_issues=[],
+            )
+            return RoutingDecision(
+                selected_route="coding_agent",
+                candidate_routes=[candidate],
+                reason_code="route.explicit_coding_agent_request",
+                confidence=0.99,
+                missing_information=[],
+                next_action="execute_selected_route",
+                requires_hitl=False,
+                requires_clarification=False,
+                notes="configured coding-agent-family backend",
+            )
+
+        async def _fake_create_workflow(
+            cls: type[MCPClientUtil],
+            runtime_config: AiChatUtilConfig,
+            prompts: Any,
+            *,
+            llm: Any | None = None,
+            checkpointer: Any | None = None,
+            tool_limits: ToolLimits | None = None,
+            explicit_user_file_paths: Any = None,
+            routing_decision: Any = None,
+            audit_context: Any | None = None,
+            config_preflight_payload: Any | None = None,
+            force_coding_agent_route: bool = False,
+            force_deep_agent_route: bool = False,
+            expects_heading_response: bool = False,
+            expects_evaluation_response: bool = False,
+        ) -> _FakeSupervisorApp:
+            if audit_context is not None:
+                audit_context.emit(
+                    "tool_catalog_resolved",
+                    route_name="coding_agent",
+                    payload=MCPClientUtil.build_route_tool_catalog_payload(
+                        {
+                            "coding_agent": [{"name": "execute", "description": "run coding job", "primary_args": ["prompt"]}],
+                            "general_tool_agent": [{"name": "analyze_files", "description": "analyze files", "primary_args": ["file_path_list", "prompt"]}],
+                        },
+                        runtime_config=runtime_config,
+                    ),
+                )
+            response = {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "<RESPONSE_TYPE>complete</RESPONSE_TYPE><TEXT>coding agent response</TEXT>",
+                    }
+                ]
+            }
+            return _FakeSupervisorApp([response])
+
+        async def _fake_collect_evidence_results(
+            cls: type[MCPClientUtil],
+            *,
+            app: Any,
+            run_trace_id: str,
+            workflow_results: Any,
+            checkpoint_db_path: Path | None = None,
+        ) -> list[Any]:
+            if isinstance(workflow_results, list):
+                return list(workflow_results)
+            return [workflow_results]
+
+        async def _fake_sleep(_seconds: float) -> None:
+            return None
+
+        monkeypatch.setattr(llm_mcp_client_mod, "create_audit_context", lambda *args, **kwargs: _FakeAuditContext())
+        monkeypatch.setattr(MCPClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+        monkeypatch.setattr(MCPClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
+        monkeypatch.setattr(MCPClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
+        monkeypatch.setattr(MCPClientUtil, "decide_route", classmethod(_fake_decide_route))
+        monkeypatch.setattr(MCPClientUtil, "create_workflow", classmethod(_fake_create_workflow))
+        monkeypatch.setattr(MCPClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
+        monkeypatch.setattr(MCPClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
+        monkeypatch.setattr(MCPClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
+        monkeypatch.setattr(MCPClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
+        monkeypatch.setattr(llm_mcp_client_mod.asyncio, "sleep", _fake_sleep)
+
+        runtime_config = _build_runtime_config()
+        runtime_config.mcp.coding_agent_endpoint.mcp_server_name = "deepagent"
+        monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("deepagent", "general-tools"))
+
+        chat_request = ChatRequest(
+            chat_history=ChatHistory(
+                messages=[
+                    ChatMessage(
+                        role="user",
+                        content=[ChatContent(params={"type": "text", "text": "複数ステップで調査してください"})],
+                    )
+                ]
+            )
+        )
+
+        response = asyncio.run(MCPClient(runtime_config).chat(chat_request))
+
+        assert response.status == "completed"
+        assert response.output == "coding agent response"
+
+        route_decided_event = next(event for event in recorded_events if event["event_type"] == "route_decided")
+        assert route_decided_event["route_name"] == "coding_agent"
+        assert route_decided_event["payload"]["selected_route_backend"] == {
+            "agent_name": "tool_agent_coding",
+            "agent_family": "coding_agent",
+            "selected_server_key": "deepagent",
+            "server_keys": ["deepagent"],
+            "backend_kind": "mcp_async_task",
+        }
+
+        tool_catalog_event = next(event for event in recorded_events if event["event_type"] == "tool_catalog_resolved")
+        assert tool_catalog_event["route_name"] == "coding_agent"
+        assert tool_catalog_event["payload"]["route_backends"]["coding_agent"]["selected_server_key"] == "deepagent"
+        assert tool_catalog_event["payload"]["tool_catalog"][0]["agent_name"] == "tool_agent_coding"
+        assert tool_catalog_event["payload"]["tool_catalog"][0]["selected_server_key"] == "deepagent"
+    finally:
+        if original_llm_client_module is not None:
+            sys.modules["ai_chat_util.base.llm.llm_client"] = original_llm_client_module
+        else:
+            sys.modules.pop("ai_chat_util.base.llm.llm_client", None)
 
 
 def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pytest.MonkeyPatch) -> None:

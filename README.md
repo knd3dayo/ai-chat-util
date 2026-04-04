@@ -31,6 +31,11 @@
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
 - Chat、PDF解析、画像解析などのMCPツールを提供。
 
+### 🗺️ Markdown 駆動の WF 型ワークフロー
+- Markdown 内の mermaid 図をもとに WF 型ワークフローを構築し、LangGraph で実行可能。
+- 実行前に Markdown 本文と利用可能 MCP ツール一覧から mermaid 図を補正できる。
+- plan モードでは更新済み Markdown を返して承認待ちにできる。
+
 ### 🤖 コーディングエージェント実行（coding-agent-util）
 - コーディングエージェント実行タスクの起動・進捗確認・キャンセルを提供（HTTP API / MCP サーバ / CLI）。
 - 設定は `ai-chat-util-config.yml`（`coding_agent_util:` セクションで統合）、秘密情報は `.env` / 環境変数で管理。
@@ -92,6 +97,41 @@
 5. Supervisor が結果を統合し、最終応答を返す
 
 このため、本アプリは「単一の supervisor のみ」でも「単純な router のみ」でもなく、router + supervisor + tool agents のハイブリッド構成として整理できます。
+
+---
+
+## Workflow 機能
+
+WF 型 workflow は Mermaid 単体ではなく Markdown 全体を入力にします。
+
+- Markdown には mermaid block をちょうど 1 つだけ含めてください。
+- Markdown 本文と利用可能な MCP ツール説明をもとに、実行前に Mermaid 図を補正します。
+- LangGraph のノードプロンプトは、補正後 Markdown とノードごとの関連ツール候補を使って生成されます。
+- plan モードでは実行せず、更新済み Markdown を approval HITL として返します。
+
+### 制約
+
+- 1 Markdown に複数の mermaid block がある場合はエラーになります。
+- 現在のノード別 MCP 実行は、要承認ツールを除外した候補ツールに限定しています。
+- 将来的な複数 Mermaid 対応は未実装です。
+
+### CLI 実行例
+
+通常実行:
+
+```bash
+cd app
+uv run ai-chat-util run_workflow -f src/ai_chat_util/workflow/samples/data/sample2.md -m "work ディレクトリを確認してください"
+```
+
+plan モード:
+
+```bash
+cd app
+uv run ai-chat-util run_workflow -f src/ai_chat_util/workflow/samples/data/sample2.md -m "work ディレクトリを確認してください" --plan-mode
+```
+
+plan モードでは、CLI は既存の HITL ループを使って更新済み Markdown を表示し、`APPROVE` を受けると同じ trace_id で実行を再開します。
 
 ---
 

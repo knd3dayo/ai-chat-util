@@ -1396,8 +1396,34 @@ class AgentClientUtil:
 
     @classmethod
     def _normalize_tool_description(cls, description: Any) -> str:
-        text = re.sub(r"\s+", " ", str(description or "")).strip()
+        text = cls._strip_tool_metadata(description)
+        text = re.sub(r"\s+", " ", text).strip()
         return text or "(説明なし)"
+
+    @classmethod
+    def _extract_tool_metadata(cls, description: Any) -> dict[str, str]:
+        text = str(description or "")
+        match = re.search(r"\[MCP_META\](.*)$", text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return {}
+
+        metadata: dict[str, str] = {}
+        for raw_line in match.group(1).splitlines():
+            line = raw_line.strip()
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            normalized_key = str(key).strip().lower()
+            normalized_value = str(value).strip()
+            if normalized_key:
+                metadata[normalized_key] = normalized_value
+        return metadata
+
+    @classmethod
+    def _strip_tool_metadata(cls, description: Any) -> str:
+        text = str(description or "")
+        stripped = re.sub(r"\n?\[MCP_META\].*$", "", text, flags=re.IGNORECASE | re.DOTALL)
+        return stripped.strip()
 
     @classmethod
     def _extract_primary_arg_names(cls, args_schema: Any) -> list[str]:
@@ -1499,9 +1525,20 @@ class AgentClientUtil:
                     for arg_name in cast(Sequence[Any], tool.get("primary_args") or [])
                     if str(arg_name).strip()
                 ]
+                tool_metadata = tool.get("tool_metadata") if isinstance(tool.get("tool_metadata"), Mapping) else {}
                 lines.append(f"{index}. {tool_name}")
                 lines.append(f"   - 説明: {description}")
                 lines.append(f"   - 主要な引数: {', '.join(primary_args) if primary_args else 'なし'}")
+                if tool_metadata:
+                    action_kind = str(tool_metadata.get("action_kind") or "").strip()
+                    requires_approval = str(tool_metadata.get("requires_approval") or "").strip().lower()
+                    usage_guidance = str(tool_metadata.get("usage_guidance") or "").strip()
+                    if action_kind:
+                        lines.append(f"   - 操作種別: {action_kind}")
+                    if requires_approval:
+                        lines.append(f"   - 承認要否: {requires_approval}")
+                    if usage_guidance:
+                        lines.append(f"   - 利用ガイダンス: {usage_guidance}")
         return "\n".join(lines)
 
     @classmethod
@@ -2731,6 +2768,7 @@ class AgentClientUtil:
                         "name": str(getattr(tool, "name", "")).strip(),
                         "description": cls._normalize_tool_description(getattr(tool, "description", "")),
                         "primary_args": cls._extract_primary_arg_names(getattr(tool, "args_schema", None)),
+                        "tool_metadata": cls._extract_tool_metadata(getattr(tool, "description", "")),
                     }
                     for tool in tools
                     if str(getattr(tool, "name", "")).strip()
@@ -2747,6 +2785,7 @@ class AgentClientUtil:
                         "name": str(getattr(tool, "name", "")).strip(),
                         "description": cls._normalize_tool_description(getattr(tool, "description", "")),
                         "primary_args": cls._extract_primary_arg_names(getattr(tool, "args_schema", None)),
+                        "tool_metadata": cls._extract_tool_metadata(getattr(tool, "description", "")),
                     }
                     for tool in tools
                     if str(getattr(tool, "name", "")).strip()

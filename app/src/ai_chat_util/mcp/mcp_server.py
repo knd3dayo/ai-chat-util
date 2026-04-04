@@ -15,6 +15,9 @@ from ai_chat_util.core.resource_app import get_loaded_config_info
 from ai_chat_util.core.app import (
     run_chat,
     run_deepagent_chat,
+    run_durable_workflow_from_file,
+    run_mermaid_workflow_from_file,
+    resume_durable_workflow,
     run_simple_chat,
     run_batch_chat,
     run_deepagent_batch_chat,
@@ -244,6 +247,9 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "run_batch_chat_from_excel": run_batch_chat_from_excel,
         "run_deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
         "deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
+        "run_mermaid_workflow_from_file": run_mermaid_workflow_from_file,
+        "run_durable_workflow_from_file": run_durable_workflow_from_file,
+        "resume_durable_workflow": resume_durable_workflow,
         # debug helper
         "get_loaded_config_info": get_loaded_config_info,
     }

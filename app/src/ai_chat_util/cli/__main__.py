@@ -9,6 +9,8 @@ from ai_chat_util.analysis import AnalysisService
 from ai_chat_util.base.chat import create_llm_client
 from ai_chat_util.base.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
+from ai_chat_util.core.app import run_mermaid_workflow_from_file
+from ai_chat_util.workflow import WorkflowChatClient
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
@@ -271,6 +273,60 @@ def build_parser() -> argparse.ArgumentParser:
         help="実際に読み込まれた設定ファイルのパスと内容を表示します",
     )
 
+    workflow_parser = subparsers.add_parser(
+        "run_workflow",
+        help="Markdown で定義されたWF型ワークフローを同期ワンショットで実行します",
+    )
+    workflow_parser.add_argument(
+        "-f",
+        "--file",
+        type=str,
+        required=True,
+        help="mermaid ブロックをちょうど1つ含む Markdown ファイルのパス",
+    )
+    workflow_parser.add_argument(
+        "-m",
+        "--message",
+        type=str,
+        default="",
+        help="ワークフローへ渡す初期入力",
+    )
+    workflow_parser.add_argument(
+        "--max-node-visits",
+        type=int,
+        default=8,
+        help="ループ安全弁として同一ノードの最大実行回数を指定します",
+    )
+    durable_workflow_parser = subparsers.add_parser(
+        "run_workflow_durable",
+        help="Markdown で定義されたWF型ワークフローを durable pause/resume 付きで実行します",
+    )
+    durable_workflow_parser.add_argument(
+        "-f",
+        "--file",
+        type=str,
+        required=True,
+        help="mermaid ブロックをちょうど1つ含む Markdown ファイルのパス",
+    )
+    durable_workflow_parser.add_argument(
+        "-m",
+        "--message",
+        type=str,
+        default="",
+        help="ワークフローへ渡す初期入力",
+    )
+    durable_workflow_parser.add_argument(
+        "--max-node-visits",
+        type=int,
+        default=8,
+        help="ループ安全弁として同一ノードの最大実行回数を指定します",
+    )
+    durable_workflow_parser.add_argument(
+        "--plan-mode",
+        action="store_true",
+        help="実行前に Markdown と Mermaid を補正し、承認待ちで停止します",
+    )
+
     return parser
 
 
@@ -399,6 +455,27 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "show_config":
         print(json.dumps(get_runtime_config_info(), ensure_ascii=False, indent=2))
         return
+
+    if args.command == "run_workflow":
+        response = await run_mermaid_workflow_from_file(
+            workflow_file_path=args.file,
+            message=args.message,
+            max_node_visits=args.max_node_visits,
+            durable=False,
+            enable_tool_approval_nodes=False,
+        )
+        print(response.final_output)
+        return
+
+    if args.command == "run_workflow_durable":
+        workflow_client = WorkflowChatClient(
+            args.file,
+            max_node_visits=args.max_node_visits,
+            plan_mode=args.plan_mode,
+            durable=True,
+        )
+        trace_id: str | None = None
+        return await create_stdio_hitl_client(workflow_client, trace_id=trace_id).run(args.message)
 
     parser.print_help()
     raise SystemExit(1)

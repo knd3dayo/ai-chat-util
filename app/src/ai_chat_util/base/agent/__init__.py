@@ -2,7 +2,7 @@ from .agent_builder import AgentBuilder
 from .agent_batch_client import DeepAgentBatchClient, MCPBatchClient
 from .agent_client_factory import AgentFactory
 from .tool_limits import ToolLimits
-from .agent_client import DeepAgentMCPClient, AgentClient
+from .agent_client import CodingAgentMCPClient, DeepAgentMCPClient, AgentClient
 from .agent_client_util import AgentClientUtil
 from .prompts_base import PromptsBase
 from .prompts import CodingAgentPrompts
@@ -20,6 +20,7 @@ __all__ = [
     "AgentFactory",
     "AuditContext",
     "CodingAgentPrompts",
+    "CodingAgentMCPClient",
     "DeepAgentBatchClient",
     "DeepAgentMCPClient",
     "EvidenceSummary",

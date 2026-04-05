@@ -14,6 +14,7 @@ from ai_chat_util.core.resource_app import get_loaded_config_info
 
 from ai_chat_util.core.app import (
     run_chat,
+    run_coordinated_chat,
     run_deepagent_chat,
     run_durable_workflow_from_file,
     run_mermaid_workflow_from_file,
@@ -238,6 +239,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "convert_pdf_files_to_images": convert_pdf_files_to_images,
         # chat/batch
         "run_chat": run_chat,
+        "run_coordinated_chat": run_coordinated_chat,
         "run_deepagent_chat": run_deepagent_chat,
         "run_simple_chat": run_simple_chat,
         "run_batch_chat": run_batch_chat,

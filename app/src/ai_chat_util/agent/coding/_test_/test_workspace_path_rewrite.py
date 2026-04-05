@@ -92,6 +92,66 @@ def test_init_coding_runtime_propagates_ai_chat_util_config_env_on_cli_config(tm
     assert os.getenv("AI_CHAT_UTIL_CONFIG") == str(cfg_path)
 
 
+def test_init_coding_runtime_expands_home_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    data = {
+        "ai_chat_util_config": {},
+        "coding_agent_util": {
+            "paths": {
+                "workspace_root": "${HOME}/workspace",
+                "host_projects_root": "${HOME}/projects",
+                "executor_allowed_workspace_root": "${HOME}/workspace",
+                "workspace_path_rewrites": [
+                    {"from": "${HOME}/workspace", "to": "${HOME}/executor"}
+                ],
+            },
+            "compose": {
+                "directory": "${HOME}/compose",
+                "file": "${HOME}/compose/docker-compose.yml",
+                "service_name": "svc",
+                "command": "echo ok",
+            },
+            "process": {"command": "echo ok"},
+        },
+    }
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    _reset_runtime(monkeypatch, cfg_path)
+    cfg = runtime_mod.get_coding_runtime_config()
+
+    assert cfg.paths.workspace_root == f"{tmp_path.as_posix()}/workspace"
+    assert cfg.paths.host_projects_root == f"{tmp_path.as_posix()}/projects"
+    assert cfg.paths.executor_allowed_workspace_root == f"{tmp_path.as_posix()}/workspace"
+    assert cfg.paths.workspace_path_rewrites[0].from_prefix == f"{tmp_path.as_posix()}/workspace"
+    assert cfg.paths.workspace_path_rewrites[0].to_prefix == f"{tmp_path.as_posix()}/executor"
+    assert cfg.compose.directory == f"{tmp_path.as_posix()}/compose"
+    assert cfg.compose.file == f"{tmp_path.as_posix()}/compose/docker-compose.yml"
+
+
+def test_init_coding_runtime_rejects_unresolved_home_path(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    data = {
+        "ai_chat_util_config": {},
+        "coding_agent_util": {
+            "paths": {
+                "workspace_root": "${UNSET_HOME}/workspace",
+            },
+            "process": {"command": "echo ok"},
+        },
+    }
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    monkeypatch.delenv("UNSET_HOME", raising=False)
+    monkeypatch.delenv("CODING_AGENT_UTIL_CONFIG", raising=False)
+    monkeypatch.setenv("AI_CHAT_UTIL_CONFIG", str(cfg_path))
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
+
+    from ai_chat_util.common.config.config_util import ConfigError
+
+    with pytest.raises(ConfigError):
+        runtime_mod.init_coding_runtime(None)
+
+
 @dataclass
 class _FakeRunner:
     st: TaskStatus

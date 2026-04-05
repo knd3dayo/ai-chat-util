@@ -103,6 +103,26 @@ ai_chat_util_config:
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false
+    # 上位の型選択 Coordinator。disabled のままなら従来入口だけを使います。
+    type_selection_mode: disabled
+    # 明確なシグナルがない場合の既定ルート。
+    type_selection_default_route: supervisor
+    # workflow を選ぶには request 側で workflow_file_path を指定することを要求します。
+    type_selection_workflow_requires_definition: true
+    # workflow 定義がある場合は WF 型を優先します。
+    type_selection_prefer_workflow_when_definition_available: true
+    # predictability / approval_frequency / side effects を WF 型判定へ使う設定です。
+    type_selection_workflow_on_high_predictability: true
+    type_selection_workflow_on_high_approval_frequency: true
+    type_selection_workflow_on_side_effects: true
+    # coding/deep の明示要求や高探索性を自律型判定へ使う設定です。
+    type_selection_autonomous_on_explicit_coding_request: true
+    type_selection_autonomous_on_explicit_deep_request: true
+    type_selection_autonomous_on_high_exploration: true
+    # WF が適しそうだが workflow 定義が未指定の場合は clarification を返します。
+    type_selection_require_clarification_on_missing_workflow_definition: true
+    # 上位候補のスコア差が小さい場合に clarification を返す閾値です。
+    type_selection_ambiguity_gap: 0.1
     routing_mode: legacy
     routing_confidence_threshold: 0.6
     # DeepAgents route を使う場合に true にします。

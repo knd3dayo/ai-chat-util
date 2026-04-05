@@ -107,6 +107,74 @@
 
 このため、本アプリは「単一の supervisor のみ」でも「単純な router のみ」でもなく、router + supervisor + tool agents のハイブリッド構成として整理できます。
 
+### Cross-type Coordinator
+
+A-01-01 対応として、WF型 / SV型 / 自律型の first-stage 選択を行う Coordinator を追加しています。
+
+- 入口:
+  - CLI: coordinated_chat
+  - API: POST /api/ai_chat_util/coordinated_chat
+  - MCP: run_coordinated_chat
+- 実装の中心:
+  - [app/src/ai_chat_util/core/app.py](app/src/ai_chat_util/core/app.py) の run_coordinated_chat
+  - [app/src/ai_chat_util/core/app.py](app/src/ai_chat_util/core/app.py) の CoordinatorChatClient
+- 判定対象:
+  - workflow: LangGraph ベースの WF 型 workflow
+  - supervisor: 既存の SV 型 agent_chat
+  - autonomous: coding_agent / deep_agent へ直行する自律型
+
+責務の分離は次の 2 段階です。
+
+1. Coordinator が WF型 / SV型 / 自律型を選ぶ
+2. SV 型が選ばれた場合だけ、既存 structured routing で coding_agent / general_tool_agent / deep_agent を選ぶ
+
+この構造により、workflow を supervisor 内の route 候補へ直接混ぜずに、上位型選択と SV 型内部 routing を分離しています。
+
+#### first-stage の deterministic policy
+
+Coordinator は LLM routing ではなく、現在は deterministic policy で型を選びます。主に次の信号を見ます。
+
+- workflow_file_path の有無
+- predictability
+- approval_frequency
+- exploration_level
+- has_side_effects
+- ユーザーが明示的に coding agent / deep agent を要求したか
+
+設定は features 配下の type_selection_* で行います。典型的な考え方は次のとおりです。
+
+- workflow_file_path があり、予見性や承認頻度が高い要求は WF 型を優先
+- coding_agent / deep_agent の明示要求や高探索性は自律型を優先
+- それ以外は supervisor を既定ルートにする
+
+#### clarification の扱い
+
+Coordinator は次の条件で clarification を返します。
+
+- WF 型が適しそうだが workflow_file_path が未指定
+- workflow と autonomous など複数候補のスコア差が小さい
+
+この場合は ChatResponse.status="paused" と hitl.source="coordinator:routing" を返し、同じ trace_id で再入力を受け付けます。
+
+#### 監査イベント
+
+上位型選択は既存の supervisor audit sink を再利用し、trace_id 単位で JSONL に記録します。
+
+- cross_type_route_decided:
+  first-stage の型選択結果。candidate_routes、request_hints、policy_snapshot、selected_backend を含みます。
+- cross_type_route_clarification_requested:
+  clarification が必要になった理由と不足情報を記録します。
+- route_decided:
+  supervisor が選ばれた後の second-stage routing 結果です。
+
+そのため、1 つの trace_id について「上位型選択」と「SV 型内部 route 選択」の両方を監査できます。
+
+#### API / CLI / MCP の使い分け
+
+- CLI の coordinated_chat は StdIO HITL ループに乗るため、clarification や workflow approval を対話的に継続できます。
+- API の coordinated_chat は paused 応答をそのまま返すため、呼び出し側が trace_id を保持して再送する必要があります。
+- MCP の run_coordinated_chat は外部エージェントから cross-type selection を使いたい場合の入口です。
+
 ---
 
 ## Workflow 機能

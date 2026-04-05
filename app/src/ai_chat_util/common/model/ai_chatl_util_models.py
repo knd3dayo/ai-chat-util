@@ -163,6 +163,8 @@ class ChatHistory(BaseModel):
 
 class ChatRequestContext(BaseModel):
 
+    _SELECTION_LEVELS: ClassVar[tuple[str, ...]] = ("low", "medium", "high")
+
     # split_mode
     split_mode_name_none: ClassVar[Literal["none"]] = "none"
     split_mode_name_normal: ClassVar[Literal["normal_split"]] = "normal_split"
@@ -180,6 +182,45 @@ class ChatRequestContext(BaseModel):
     # プロンプトテンプレートテキスト. 分割モードがNone以外の場合に使用. 分割した各メッセージの前に付与する。
     # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
+    workflow_file_path: Optional[str] = Field(
+        default=None,
+        description="WF型として処理する際に使用する Markdown workflow ファイルのパス。",
+    )
+    workflow_max_node_visits: int = Field(
+        default=8,
+        ge=1,
+        description="WF型実行時の単一ノード訪問回数上限。",
+    )
+    workflow_plan_mode: bool = Field(
+        default=False,
+        description="WF型を plan mode で起動するかどうか。",
+    )
+    workflow_durable: bool = Field(
+        default=True,
+        description="WF型を durable pause/resume モードで起動するかどうか。",
+    )
+    predictability: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None,
+        description="要求の予見性。高いほど WF 型が適しやすい。",
+    )
+    approval_frequency: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None,
+        description="承認頻度。高いほど WF 型が適しやすい。",
+    )
+    exploration_level: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None,
+        description="探索性。高いほど自律型が適しやすい。",
+    )
+    has_side_effects: Optional[bool] = Field(
+        default=None,
+        description="副作用を伴う処理かどうか。true の場合は WF 型を優先しやすい。",
+    )
+
+    @model_validator(mode="after")
+    def _normalize_coordinator_fields(self) -> "ChatRequestContext":
+        workflow_file_path = (self.workflow_file_path or "").strip()
+        self.workflow_file_path = workflow_file_path or None
+        return self
 
 
 class HitlRequest(BaseModel):

@@ -63,6 +63,16 @@ MCP 連携付きチャット:
 uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml agent_chat -p "work ディレクトリを確認して要約してください"
 ```
 
+Coordinator 付きチャット:
+
+```bash
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml coordinated_chat \
+  -p "この要求を適切な型で処理してください" \
+  --predictability high \
+  --approval-frequency high \
+  --workflow-file ./workflows/sample.md
+```
+
 複数ファイル解析:
 
 ```bash
@@ -86,6 +96,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
 
 - `chat`: LLM へ直接チャット
 - `agent_chat`: MCP ツール込みチャット
+- `coordinated_chat`: WF型 / SV型 / 自律型を Coordinator が選択
 - `batch_chat`: Excel ベースの一括処理
 - `analyze_image_files` / `analyze_pdf_files` / `analyze_office_files` / `analyze_files`: ファイル解析
 - `run_workflow`: Markdown + mermaid ベースのワークフロー実行
@@ -108,6 +119,112 @@ FastAPI サーバーを使う場合は、設定ファイルへのパスを環境
 export AI_CHAT_UTIL_CONFIG=$PWD/ai-chat-util-config.yml
 uv --directory ./app run uvicorn ai_chat_util.api.api_server:app
 ```
+
+Coordinator 入口は [app/src/ai_chat_util/api/api_server.py](app/src/ai_chat_util/api/api_server.py) の coordinated_chat から利用できます。
+
+通常の agent_chat リクエスト例:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ai_chat_util/agent_chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "chat_history": {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {"params": {"type": "text", "text": "work ディレクトリを確認して要約してください"}}
+          ]
+        }
+      ]
+    }
+  }'
+```
+
+Coordinator リクエスト例:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ai_chat_util/coordinated_chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "chat_history": {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {"params": {"type": "text", "text": "この要求を適切な型で処理してください"}}
+          ]
+        }
+      ]
+    },
+    "chat_request_context": {
+      "workflow_file_path": "./workflows/sample.md",
+      "predictability": "high",
+      "approval_frequency": "high",
+      "exploration_level": "low",
+      "has_side_effects": true,
+      "workflow_plan_mode": true,
+      "workflow_durable": true
+    }
+  }'
+```
+
+clarification や approval で paused が返った場合は、同じ trace_id を付けて次のように再送します。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ai_chat_util/coordinated_chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "chat_history": {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {"params": {"type": "text", "text": "SV型で続行してください"}}
+          ]
+        }
+      ]
+    },
+    "chat_request_context": {
+      "predictability": "high",
+      "approval_frequency": "high"
+    }
+  }'
+```
+
+レスポンスの見方:
+
+- status="completed": 実行完了
+- status="paused": clarification または approval 待ち
+- trace_id: 再送時に引き継ぐ相関 ID
+- hitl.prompt: ユーザーへ確認したい内容
+
+## 型選択の最小設定
+
+WF型 / SV型 / 自律型の上位選択を有効にするには、features に deterministic policy を設定します。
+
+```yml
+ai_chat_util_config:
+  features:
+    type_selection_mode: deterministic
+    type_selection_default_route: supervisor
+    type_selection_workflow_requires_definition: true
+    type_selection_prefer_workflow_when_definition_available: true
+    type_selection_workflow_on_high_predictability: true
+    type_selection_workflow_on_high_approval_frequency: true
+    type_selection_workflow_on_side_effects: true
+    type_selection_autonomous_on_explicit_coding_request: true
+    type_selection_autonomous_on_explicit_deep_request: true
+    type_selection_autonomous_on_high_exploration: true
+    type_selection_require_clarification_on_missing_workflow_definition: true
+    type_selection_ambiguity_gap: 0.1
+    audit_log_enabled: true
+    audit_log_path: work/supervisor_audit.jsonl
+```
+
+この設定では、Coordinator はまず workflow 定義の有無、予見性、承認頻度、副作用、探索性、明示的な coding/deep 指示を見て first-stage の型選択を行います。SV 型の内部では既存の structured routing がそのまま使われます。判定が競合した場合は clarification を返し、同じ trace_id で再入力を受け付けます。
 
 ## 補足
 

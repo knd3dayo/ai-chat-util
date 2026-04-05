@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional, Literal, Callable
 
@@ -20,10 +21,33 @@ CODING_AGENT_UTIL_CONFIG_ROOT_KEY = "coding_agent_util_config"
 CODING_CONFIG_ENV_VAR = "CODING_AGENT_UTIL_CONFIG"
 
 _ENV_REF_PREFIX = "os.environ/"
+_PATH_ENV_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+def resolve_path_placeholders(
+    value: str,
+    *,
+    config_path: Path | None = None,
+    field_path: str | None = None,
+) -> str:
+    expanded = os.path.expandvars(os.path.expanduser(value))
+    if _PATH_ENV_PATTERN.search(expanded):
+        location: list[str] = []
+        if config_path is not None:
+            location.append(str(config_path))
+        if field_path:
+            location.append(field_path)
+        loc_suffix = f" ({' / '.join(location)})" if location else ""
+        raise ConfigError(
+            "パス設定の環境変数を解決できませんでした"
+            f": {value}{loc_suffix}\n"
+            "対処: ${HOME} など有効な環境変数のみを使用し、未設定の変数を含めないでください。"
+        )
+    return expanded
 
 def load_resolved_yaml(
     config_path: str | None,
@@ -198,7 +222,7 @@ def _default_project_root() -> Path | None:
 
 
 def _abspath(p: str | Path) -> Path:
-    return Path(p).expanduser().resolve()
+    return Path(resolve_path_placeholders(str(p))).resolve()
 
 
 def _resolve_in_project_root(

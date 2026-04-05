@@ -35,11 +35,11 @@ coding_agent_util:
 
   paths:
     # Shared workspace root (must be writable from the MCP server process).
-    workspace_root: /home/user/data/workspace
-    host_projects_root: /home/user/data/workspace/projects
-    executor_allowed_workspace_root: /home/user/data/workspace
+    workspace_root: ${HOME}/data/workspace
+    host_projects_root: ${HOME}/data/workspace/projects
+    executor_allowed_workspace_root: ${HOME}/data/workspace
     # workspace_path_rewrites:
-    #  - from: /home/user/data/workspace
+    #  - from: ${HOME}/data/workspace
     #    to: /workspace
 
   host:
@@ -54,7 +54,7 @@ coding_agent_util:
     command: opencode run
 
   compose:
-    directory: /home/user/source/repos/ai-platform-poc/app/docker/coding-agent/images/all-in-one-image
+    directory: ${HOME}/source/repos/ai-platform-poc/app/docker/coding-agent/images/all-in-one-image
     file: docker-compose.yml
     service_name: all-in-one-code-executor
     # Example:

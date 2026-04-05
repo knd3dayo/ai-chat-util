@@ -9,7 +9,8 @@ from ai_chat_util.analysis import AnalysisService
 from ai_chat_util.base.chat import create_llm_client
 from ai_chat_util.base.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
-from ai_chat_util.core.app import run_mermaid_workflow_from_file
+from ai_chat_util.common.model.ai_chatl_util_models import ChatRequestContext
+from ai_chat_util.core.app import CoordinatorChatClient, run_mermaid_workflow_from_file
 from ai_chat_util.workflow import WorkflowChatClient
 
 
@@ -60,6 +61,59 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         required=True,
         help="送信するプロンプト文字列",
+    )
+    coordinated_chat_parser = subparsers.add_parser("coordinated_chat", help="Coordinator を使って WF型 / SV型 / 自律型を自動選択します")
+    coordinated_chat_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="送信するプロンプト文字列",
+    )
+    coordinated_chat_parser.add_argument(
+        "--workflow-file",
+        type=str,
+        default="",
+        help="WF型として扱う Markdown workflow ファイルのパス",
+    )
+    coordinated_chat_parser.add_argument(
+        "--workflow-plan-mode",
+        action="store_true",
+        help="WF型を plan mode で起動します",
+    )
+    coordinated_chat_parser.add_argument(
+        "--workflow-non-durable",
+        action="store_true",
+        help="WF型を durable pause/resume なしで起動します",
+    )
+    coordinated_chat_parser.add_argument(
+        "--workflow-max-node-visits",
+        type=int,
+        default=8,
+        help="WF型実行時の単一ノード訪問回数上限",
+    )
+    coordinated_chat_parser.add_argument(
+        "--predictability",
+        choices=["low", "medium", "high"],
+        default="",
+        help="要求の予見性ヒント",
+    )
+    coordinated_chat_parser.add_argument(
+        "--approval-frequency",
+        choices=["low", "medium", "high"],
+        default="",
+        help="承認頻度ヒント",
+    )
+    coordinated_chat_parser.add_argument(
+        "--exploration-level",
+        choices=["low", "medium", "high"],
+        default="",
+        help="探索性ヒント",
+    )
+    coordinated_chat_parser.add_argument(
+        "--has-side-effects",
+        action="store_true",
+        help="副作用ありの処理として扱います",
     )
     deepagent_chat_parser = subparsers.add_parser("run_deepagent_chat", help="DeepAgents を使用してテキストでチャットします")
     deepagent_chat_parser.add_argument(
@@ -360,6 +414,22 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "agent_chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = AgentFactory.create_mcp_client()
+        trace_id: str | None = None
+        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+
+    if args.command == "coordinated_chat":
+        _validate_non_empty(args.prompt, parser)
+        request_context = ChatRequestContext(
+            workflow_file_path=(args.workflow_file or None),
+            workflow_plan_mode=bool(args.workflow_plan_mode),
+            workflow_durable=not bool(args.workflow_non_durable),
+            workflow_max_node_visits=args.workflow_max_node_visits,
+            predictability=(args.predictability or None),
+            approval_frequency=(args.approval_frequency or None),
+            exploration_level=(args.exploration_level or None),
+            has_side_effects=(True if args.has_side_effects else None),
+        )
+        llm_client = CoordinatorChatClient(default_request_context=request_context)
         trace_id: str | None = None
         return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
 

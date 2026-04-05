@@ -31,7 +31,7 @@ class AgentClient(AbstractChatClient):
         self.runtime_config = runtime_config
         self.message_factory = LLMMessageContentFactory(config=runtime_config)
 
-    def _forced_route(self) -> Literal["deep_agent"] | None:
+    def _forced_route(self) -> Literal["deep_agent", "coding_agent"] | None:
         return None
 
 
@@ -150,6 +150,9 @@ class AgentClient(AbstractChatClient):
             if forced_route == "deep_agent":
                 force_coding_agent_route = False
                 force_deep_agent_route = True
+            elif forced_route == "coding_agent":
+                force_coding_agent_route = True
+                force_deep_agent_route = False
             explicit_user_file_paths = AgentClientUtil.extract_explicit_user_file_paths(lc_messages)
             requested_heading_count = AgentClientUtil.extract_requested_heading_count(lc_messages)
             expects_heading_response = AgentClientUtil.requests_heading_response(lc_messages)
@@ -795,6 +798,11 @@ class AgentClient(AbstractChatClient):
 class DeepAgentMCPClient(AgentClient):
     def _forced_route(self) -> Literal["deep_agent"] | None:
         return "deep_agent"
+
+
+class CodingAgentMCPClient(AgentClient):
+    def _forced_route(self) -> Literal["coding_agent"] | None:
+        return "coding_agent"
 
 if __name__ == "__main__":
     runtime_config = get_runtime_config()  # ここは適宜、実際の設定に合わせて初期化してください

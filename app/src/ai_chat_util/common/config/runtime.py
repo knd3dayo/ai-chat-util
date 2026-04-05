@@ -17,7 +17,8 @@ from .config_util import (
     apply_secret_overrides_from_yaml,
     AI_CHAT_UTIL_CONFIG_ROOT_KEY,
     AI_CHAT_UTIL_DEFAULT_CONFIG_FILENAME,
-    _ENV_REF_PREFIX
+    _ENV_REF_PREFIX,
+    resolve_path_placeholders,
     
 )
 import ai_chat_util.log.log_settings as log_settings
@@ -234,6 +235,104 @@ def _configure_litellm(config: AiChatUtilConfig) -> None:
         litellm.api_version = config.llm.api_version
 
 
+def _expand_mapping_path_field(
+    container: dict[str, Any],
+    section_key: str,
+    field_key: str,
+    *,
+    config_path: Path,
+    field_prefix: str,
+) -> None:
+    section = container.get(section_key)
+    if not isinstance(section, dict):
+        return
+    value = section.get(field_key)
+    if isinstance(value, str) and value.strip():
+        section[field_key] = resolve_path_placeholders(
+            value,
+            config_path=config_path,
+            field_path=f"{field_prefix}{section_key}.{field_key}",
+        )
+
+
+def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
+    copied = dict(raw)
+
+    for section_key, field_key in (
+        ("mcp", "mcp_config_path"),
+        ("mcp", "custom_instructions_file_path"),
+        ("mcp", "working_directory"),
+        ("logging", "file"),
+        ("features", "audit_log_path"),
+        ("network", "ca_bundle"),
+        ("office2pdf", "libreoffice_path"),
+    ):
+        _expand_mapping_path_field(
+            copied,
+            section_key,
+            field_key,
+            config_path=config_path,
+            field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
+        )
+
+    file_server = copied.get("file_server")
+    if isinstance(file_server, dict):
+        allowed_roots = file_server.get("allowed_roots")
+        if isinstance(allowed_roots, list):
+            for idx, root in enumerate(allowed_roots):
+                if not isinstance(root, dict):
+                    continue
+                value = root.get("path")
+                if isinstance(value, str) and value.strip():
+                    root["path"] = resolve_path_placeholders(
+                        value,
+                        config_path=config_path,
+                        field_path=(
+                            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.file_server.allowed_roots[{idx}].path"
+                        ),
+                    )
+
+    return copied
+
+
+def _expand_allowlisted_coding_paths(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
+    copied = dict(raw)
+
+    for section_key, field_key in (
+        ("paths", "workspace_root"),
+        ("paths", "host_projects_root"),
+        ("paths", "executor_allowed_workspace_root"),
+        ("compose", "directory"),
+        ("compose", "file"),
+        ("logging", "file"),
+    ):
+        _expand_mapping_path_field(
+            copied,
+            section_key,
+            field_key,
+            config_path=config_path,
+            field_prefix="coding_agent_util.",
+        )
+
+    paths = copied.get("paths")
+    if isinstance(paths, dict):
+        rewrites = paths.get("workspace_path_rewrites")
+        if isinstance(rewrites, list):
+            for idx, rule in enumerate(rewrites):
+                if not isinstance(rule, dict):
+                    continue
+                for key in ("from", "to"):
+                    value = rule.get(key)
+                    if isinstance(value, str) and value.strip():
+                        rule[key] = resolve_path_placeholders(
+                            value,
+                            config_path=config_path,
+                            field_path=f"coding_agent_util.paths.workspace_path_rewrites[{idx}].{key}",
+                        )
+
+    return copied
+
+
 def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> AiChatUtilConfig:
     raw_section = extract_required_root_section(raw_root=raw_root, resolved=resolved)
 
@@ -252,6 +351,7 @@ def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> A
         config_path=resolved,
         field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
     )
+    raw = _expand_allowlisted_ai_paths(raw, config_path=resolved)
 
     try:
         return AiChatUtilConfig.model_validate(raw)
@@ -357,6 +457,8 @@ def _build_coding_agent_util_config(
     ):
         if raw.get(section_key, "__missing__") is None:
             raw[section_key] = {}
+
+    raw = _expand_allowlisted_coding_paths(raw, config_path=resolved)
 
     try:
         config = CodingAgentUtilConfig.model_validate(raw)
@@ -619,6 +721,56 @@ class FeaturesSection(BaseModel):
         default=False,
         description="deep_agent route を有効化します。未導入時は deepagents パッケージのインストールが必要です。",
     )
+    type_selection_mode: Literal["disabled", "deterministic"] = Field(
+        default="disabled",
+        description="WF型 / SV型 / 自律型の上位型選択モード。deterministic で Coordinator を有効化します。",
+    )
+    type_selection_default_route: Literal["supervisor", "autonomous"] = Field(
+        default="supervisor",
+        description="cross-type 判定で明確なシグナルがない場合の既定ルート。",
+    )
+    type_selection_workflow_requires_definition: bool = Field(
+        default=True,
+        description="WF型を選ぶには workflow_file_path の明示を必須にするかどうか。",
+    )
+    type_selection_prefer_workflow_when_definition_available: bool = Field(
+        default=True,
+        description="workflow 定義がある場合に WF 型を優先するかどうか。",
+    )
+    type_selection_workflow_on_high_predictability: bool = Field(
+        default=True,
+        description="predictability=high のとき WF 型を優先するかどうか。",
+    )
+    type_selection_workflow_on_high_approval_frequency: bool = Field(
+        default=True,
+        description="approval_frequency=high のとき WF 型を優先するかどうか。",
+    )
+    type_selection_workflow_on_side_effects: bool = Field(
+        default=True,
+        description="has_side_effects=true のとき WF 型を優先するかどうか。",
+    )
+    type_selection_autonomous_on_explicit_coding_request: bool = Field(
+        default=True,
+        description="ユーザーが coding_agent を明示した場合に自律型を優先するかどうか。",
+    )
+    type_selection_autonomous_on_explicit_deep_request: bool = Field(
+        default=True,
+        description="ユーザーが deep_agent を明示した場合に自律型を優先するかどうか。",
+    )
+    type_selection_autonomous_on_high_exploration: bool = Field(
+        default=True,
+        description="exploration_level=high のとき自律型を優先するかどうか。",
+    )
+    type_selection_require_clarification_on_missing_workflow_definition: bool = Field(
+        default=True,
+        description="WF 型が適しそうだが workflow_file_path が未指定のとき clarification を要求するかどうか。",
+    )
+    type_selection_ambiguity_gap: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="cross-type 判定の上位候補スコア差がこの値未満なら clarification 候補にします。",
+    )
     preferred_coding_route: Literal["coding_agent", "deep_agent"] = Field(
         default="coding_agent",
         description="複雑な調査系要求で優先する route。deep_agent を選ぶには enable_deep_agent も有効化してください。",
@@ -823,7 +975,7 @@ class WorkspacePathRewriteRule(BaseModel):
 
 class CodingPathsSection(BaseModel):
     workspace_root: str = Field(default="/tmp/coding_agent_tasks")
-    host_projects_root: str = Field(default="/home/user/ai-platform/data/projects")
+    host_projects_root: str = Field(default_factory=lambda: str(Path.home() / "ai-platform" / "data" / "projects"))
     executor_allowed_workspace_root: str | None = Field(default=None)
     workspace_path_rewrites: list[WorkspacePathRewriteRule] = Field(default_factory=list)
 

@@ -2,4 +2,4 @@
 IMAGE_NAME="all-in-one-code-executor-image"
 
 # build.sh で使用するイメージに格納するファイルのパス
-MCP_LIB=/home/user/source/repos/mcp
+MCP_LIB=${HOME}/source/repos/mcp

@@ -36,12 +36,12 @@ coding_agent_util:
   paths:
     # Shared workspace root (must be writable from BOTH host and MCP server container).
     # Keep the same absolute path inside the MCP server container via bind mount.
-    workspace_root: /home/user/data/workspace
-    host_projects_root: /home/user/data/workspace/projects
-    executor_allowed_workspace_root: /home/user/data/workspace
+    workspace_root: ${HOME}/data/workspace
+    host_projects_root: ${HOME}/data/workspace/projects
+    executor_allowed_workspace_root: ${HOME}/data/workspace
     # rewrite is intentionally disabled in rewrite-free deployments.
     # workspace_path_rewrites:
-    #   - from: /home/user/data/workspace
+    #   - from: ${HOME}/data/workspace
     #     to: /workspace
 
   host:
@@ -56,7 +56,7 @@ coding_agent_util:
     command: opencode run
 
   compose:
-    directory: /home/user/source/repos/ai-chat-util/docker/coding-agent/images/all-in-one-image
+    directory: ${HOME}/source/repos/ai-chat-util/docker/coding-agent/images/all-in-one-image
     file: docker-compose.yml
     service_name: all-in-one-code-executor
     # Example:

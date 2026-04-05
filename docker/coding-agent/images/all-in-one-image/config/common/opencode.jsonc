@@ -5,7 +5,7 @@
       "enabled": true,
       "timeout": 60000,
       "type": "local",
-      "command":["uv", "--directory", "/home/user/data/mcps/ai-chat-util/app", "run", "--no-sync", "python", "-m", "ai_chat_util.mcp.mcp_server"],
+      "command":["uv", "--directory", "{env:HOME}/data/mcps/ai-chat-util/app", "run", "--no-sync", "python", "-m", "ai_chat_util.mcp.mcp_server"],
       "environment": {
         "LLM_PROVIDER": "openai",
         "COMPLETION_MODEL": "gpt-4o",
@@ -17,7 +17,7 @@
       "enabled": true,
       "timeout": 60000,
       "type": "local",
-      "command":["uv", "--directory", "/home/user/data/mcps/deonodo-log-util", "run", "--no-sync", "python", "-m", "denodo_log_util.mcp.mcp_server"]
+      "command":["uv", "--directory", "{env:HOME}/data/mcps/deonodo-log-util", "run", "--no-sync", "python", "-m", "denodo_log_util.mcp.mcp_server"]
     }
 
   }

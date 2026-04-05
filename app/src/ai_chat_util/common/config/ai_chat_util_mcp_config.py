@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from typing import Dict, Optional, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +12,8 @@ except Exception:  # pragma: no cover
     AliasChoices = None  # type: ignore
 
 from langchain_mcp_adapters.sessions import Connection
+
+from .config_util import ConfigError, resolve_path_placeholders
 
 # サーバー設定のモデル定義
 class MCPServerConfigEntry(BaseModel):
@@ -81,6 +84,17 @@ class MCPServerConfig:
                 raise ValueError(f"mcpServers.{name} must be an object")
 
             cfg2 = dict(cfg)
+
+            command = cfg2.get("command")
+            if isinstance(command, str) and command.strip():
+                try:
+                    cfg2["command"] = resolve_path_placeholders(
+                        command,
+                        config_path=Path(config_path),
+                        field_path=f"mcpServers.{name}.command",
+                    )
+                except ConfigError as e:
+                    raise ValueError(str(e)) from e
 
             # Resolve env refs (os.environ/VAR_NAME) for stdio transports.
             env = cfg2.get("env")

@@ -8,8 +8,8 @@ cd "$basedir"
 export LLM_API_KEY=sk-poc-master-key-12345
 export AI_CHAT_UTIL_CONFIG="$basedir/ai-chat-util-config.yml"
 
-uv --directory "$project_dir" run -m ai_chat_util.cli --config "$AI_CHAT_UTIL_CONFIG" --loglevel INFO --logfile chat_timeout_5s.log agent_chat -p "コーディングエージェントMCPツールで、/home/user/data/workspace/e2e_sv_ws_1/done.txtに「完了2」と書き込んで.最後にget_resultでログを出力して"
+uv --directory "$project_dir" run -m ai_chat_util.cli --config "$AI_CHAT_UTIL_CONFIG" --loglevel INFO --logfile chat_timeout_5s.log agent_chat -p "コーディングエージェントMCPツールで、${HOME}/data/workspace/e2e_sv_ws_1/done.txtに「完了2」と書き込んで.最後にget_resultでログを出力して"
 
 # uv --directory "$project_dir" run -m ai_chat_util.cli --config "$AI_CHAT_UTIL_CONFIG" --loglevel INFO --logfile chat_timeout_5s.log agent_chat -p "/srv/ai_platform/workspaces/e2e_sv_ws_1/をワークスペースとしてください。 コーディングエージェントMCPツールで、ワークスペース内のファイル一覧を表示して。最後にget_resultでログを出力して"
 
-cat /home/user/data/workspace/e2e_sv_ws_1/done.txt
+cat "${HOME}/data/workspace/e2e_sv_ws_1/done.txt"

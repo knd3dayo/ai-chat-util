@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 from ai_chat_util.analysis import AnalysisService
+import ai_chat_util.analysis.analysis_service as analysis_service_mod
 from ai_chat_util.api.api_server import router
 from ai_chat_util.core import tool_app
 from ai_chat_util.common.model.ai_chatl_util_models import ChatResponse
@@ -115,3 +117,34 @@ def test_tool_app_analyze_image_files_retries_timeout(monkeypatch) -> None:
 
     assert result == ""
     assert attempts["count"] == 2
+
+
+def test_analysis_service_resolve_existing_file_paths_expands_directory_from_working_directory(tmp_path, monkeypatch) -> None:
+    workspace_root = tmp_path / "workspace"
+    target_dir = workspace_root / "docs" / "11_tech"
+    nested_dir = target_dir / "nested"
+    nested_dir.mkdir(parents=True)
+
+    first_doc = target_dir / "01_intro.md"
+    second_doc = nested_dir / "02_summary.md"
+    ignored_file = target_dir / "blob.bin"
+
+    first_doc.write_text("# Intro\n", encoding="utf-8")
+    second_doc.write_text("## Summary\n", encoding="utf-8")
+    ignored_file.write_bytes(b"\x00\x01\x02")
+
+    cwd_root = tmp_path / "cwd"
+    wrong_dir = cwd_root / "docs" / "11_tech"
+    wrong_dir.mkdir(parents=True)
+    (wrong_dir / "wrong.md").write_text("# Wrong\n", encoding="utf-8")
+    monkeypatch.chdir(cwd_root)
+
+    runtime_config = SimpleNamespace(mcp=SimpleNamespace(working_directory=str(workspace_root)))
+    monkeypatch.setattr(analysis_service_mod, "get_runtime_config", lambda: runtime_config)
+
+    resolved = AnalysisService.resolve_existing_file_paths(["docs/11_tech"])
+
+    assert resolved == [
+        str(first_doc.resolve()),
+        str(second_doc.resolve()),
+    ]

@@ -8,14 +8,18 @@ from ai_chat_util.common.config.runtime import init_coding_runtime
 
 # 内部パッケージのインポート
 from ..core.task_manager import TaskManager
+from ..core.task_service_factory import select_task_service
 from ..core.docker.docker_task_service import DockerTaskService
 from .typer_actions import TyperActions
 
 # --- CLI Layer: コマンドの定義 ---
 actions = TyperActions()
-docker_task_service = DockerTaskService()
 
 app = typer.Typer(help="Coding Agent Executor CLI Tool")
+
+
+def _get_task_service():
+    return select_task_service()
 
 
 @app.callback()
@@ -63,7 +67,7 @@ def run(
 
     async def main():
         await TaskManager.run_task(
-            task_service=docker_task_service,
+            task_service=_get_task_service(),
             actions=actions,
             prompt=prompt,
             sources=sources,
@@ -120,15 +124,18 @@ def status(task_id: str, tail: int = 20):
 def cancel(task_id: str):
     """強制終了"""
     async def main():
-        await TaskManager.cancel_task(task_id)
-        actions.after_cancel_action(task_id)
+        result = await TaskManager.cancel_task(task_id)
+        actions.after_cancel_action(task_id, result)
 
     asyncio.run(main())
 
 @app.command()
 def prune(compose_service_name: str):
     """掃除実行"""
-    actions.prune_progress_action(docker_task_service.prune_containers(compose_service_name))
+    task_service = _get_task_service()
+    if not isinstance(task_service, DockerTaskService):
+        raise typer.BadParameter("prune は docker backend のときのみ利用できます")
+    actions.prune_progress_action(task_service.prune_containers(compose_service_name))
 
 if __name__ == "__main__":
     app()

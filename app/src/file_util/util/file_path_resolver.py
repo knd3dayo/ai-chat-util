@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import os
 import ntpath
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 
 
 def _strip_quotes(s: str) -> str:
@@ -69,15 +69,17 @@ def _find_repo_root(start: Path) -> Path | None:
 class PathResolutionResult:
     resolved_path: str
     tried_candidates: list[str]
+    path_kind: Literal["file", "directory"] = "file"
 
 
-def resolve_existing_file_path(
+def resolve_existing_path(
     input_path: str,
     *,
     working_directory: str | None = None,
     extra_search_dirs: list[str] | None = None,
+    allow_directory: bool = False,
 ) -> PathResolutionResult:
-    """入力パスを、存在するファイルパスへ解決する。"""
+    """入力パスを、存在するファイルまたは directory パスへ解決する。"""
 
     raw = _strip_quotes(_maybe_parse_file_uri(input_path))
     expanded = os.path.expandvars(os.path.expanduser(raw))
@@ -89,20 +91,25 @@ def resolve_existing_file_path(
     repo_root = _find_repo_root(cwd)
     repo_work = (repo_root / "work") if repo_root else None
     docker_work = Path("/app/work")
+    is_absolute_input = Path(p).is_absolute()
 
     candidates: list[str] = []
-    candidates.append(p)
+    if is_absolute_input:
+        candidates.append(p)
+
+    if working_directory and not is_absolute_input:
+        wd = Path(working_directory).expanduser()
+        candidates.append(str((wd / p)))
+        candidates.append(str((wd / basename)))
 
     try:
-        if not Path(p).is_absolute():
+        if not is_absolute_input:
             candidates.append(str((cwd / p).resolve()))
     except Exception:
         pass
 
-    if working_directory:
-        wd = Path(working_directory)
-        candidates.append(str((wd / p)))
-        candidates.append(str((wd / basename)))
+    if not is_absolute_input:
+        candidates.append(p)
 
     if repo_work is not None:
         candidates.append(str(repo_work / p))
@@ -121,10 +128,17 @@ def resolve_existing_file_path(
 
     for c in candidates:
         try:
-            if Path(c).exists() and Path(c).is_file():
+            candidate = Path(c)
+            if candidate.exists() and candidate.is_file():
                 return PathResolutionResult(
-                    resolved_path=str(Path(c).resolve()),
+                    resolved_path=str(candidate.resolve()),
                     tried_candidates=candidates,
+                )
+            if allow_directory and candidate.exists() and candidate.is_dir():
+                return PathResolutionResult(
+                    resolved_path=str(candidate.resolve()),
+                    tried_candidates=candidates,
+                    path_kind="directory",
                 )
         except Exception:
             continue
@@ -152,14 +166,32 @@ def resolve_existing_file_path(
 
     tried_preview = "\n".join([f"- {c}" for c in candidates[:20]])
     hint_text = "\n".join([f"- {h}" for h in hints])
+    allowed_types = "file or directory" if allow_directory else "file"
 
     raise FileNotFoundError(
-        "File not found. Path resolution failed.\n"
+        "Path not found. Path resolution failed.\n"
         f"input: {input_path!r}\n"
         f"expanded: {expanded!r}\n"
+        f"allowed_types: {allowed_types}\n"
         f"os.name: {os_name!r}\n"
         "tried candidates (first 20):\n"
         f"{tried_preview}\n"
         "hints:\n"
         f"{hint_text}"
+    )
+
+
+def resolve_existing_file_path(
+    input_path: str,
+    *,
+    working_directory: str | None = None,
+    extra_search_dirs: list[str] | None = None,
+) -> PathResolutionResult:
+    """入力パスを、存在するファイルパスへ解決する。"""
+
+    return resolve_existing_path(
+        input_path,
+        working_directory=working_directory,
+        extra_search_dirs=extra_search_dirs,
+        allow_directory=False,
     )

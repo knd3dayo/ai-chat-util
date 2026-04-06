@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import time
 from collections.abc import Awaitable, Callable
 
@@ -8,7 +9,7 @@ from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import ChatResponse
 from file_util.model import FileUtilDocument
-from file_util.util.file_path_resolver import resolve_existing_file_path
+from file_util.util.file_path_resolver import resolve_existing_path
 
 import ai_chat_util.log.log_settings as log_settings
 
@@ -19,6 +20,60 @@ logger = log_settings.getLogger(__name__)
 
 
 class AnalysisService:
+    _SUPPORTED_TEXT_SUFFIXES = {
+        ".bat",
+        ".c",
+        ".cc",
+        ".cfg",
+        ".conf",
+        ".cpp",
+        ".cs",
+        ".css",
+        ".csv",
+        ".go",
+        ".h",
+        ".hpp",
+        ".htm",
+        ".html",
+        ".ini",
+        ".java",
+        ".js",
+        ".json",
+        ".jsx",
+        ".log",
+        ".md",
+        ".markdown",
+        ".php",
+        ".ps1",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".toml",
+        ".ts",
+        ".tsv",
+        ".tsx",
+        ".txt",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+    _SUPPORTED_IMAGE_SUFFIXES = {
+        ".bmp",
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".webp",
+    }
+    _SUPPORTED_DOCUMENT_SUFFIXES = {
+        ".docx",
+        ".pdf",
+        ".pptx",
+        ".xlsx",
+    }
+
     @staticmethod
     def summarize_path_basenames(paths: list[str], *, limit: int = 5) -> str:
         names: list[str] = []
@@ -34,16 +89,58 @@ class AnalysisService:
     def prompt_len(prompt: str) -> int:
         return len((prompt or "").strip())
 
-    @staticmethod
-    def resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
+    @classmethod
+    def _is_supported_analysis_file(cls, path: Path) -> bool:
+        suffix = path.suffix.lower()
+        return (
+            suffix in cls._SUPPORTED_TEXT_SUFFIXES
+            or suffix in cls._SUPPORTED_IMAGE_SUFFIXES
+            or suffix in cls._SUPPORTED_DOCUMENT_SUFFIXES
+        )
+
+    @classmethod
+    def _expand_directory_analysis_targets(cls, directory_path: str) -> list[str]:
+        directory = Path(directory_path)
+        resolved_files: list[str] = []
+
+        for candidate in sorted(directory.rglob("*")):
+            try:
+                if not candidate.is_file():
+                    continue
+            except OSError:
+                continue
+
+            if not cls._is_supported_analysis_file(candidate):
+                continue
+
+            resolved_files.append(str(candidate.resolve()))
+
+        if resolved_files:
+            return resolved_files
+
+        raise FileNotFoundError(f"No supported analysis files found in directory: {directory.resolve()}")
+
+    @classmethod
+    def resolve_existing_file_paths(cls, file_path_list: list[str]) -> list[str]:
         runtime_config = get_runtime_config()
         resolved: list[str] = []
+        seen: set[str] = set()
         for file_path in file_path_list:
-            result = resolve_existing_file_path(
+            result = resolve_existing_path(
                 file_path,
                 working_directory=runtime_config.mcp.working_directory,
+                allow_directory=True,
             )
-            resolved.append(result.resolved_path)
+
+            candidate_paths = [result.resolved_path]
+            if result.path_kind == "directory":
+                candidate_paths = cls._expand_directory_analysis_targets(result.resolved_path)
+
+            for candidate_path in candidate_paths:
+                if candidate_path in seen:
+                    continue
+                seen.add(candidate_path)
+                resolved.append(candidate_path)
         return resolved
 
     @staticmethod

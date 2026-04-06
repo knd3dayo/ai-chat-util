@@ -27,7 +27,7 @@ class AbstractActions(ABC):
     def after_list_action(self, table: list) -> None:
         pass
     @abstractmethod
-    def after_cancel_action(self, task_id: str) -> None:
+    def after_cancel_action(self, task_id: str, result: dict[str, Any] | None = None) -> None:
         pass
     @abstractmethod
     def after_get_status_action(self, task_id: str, status_data: TaskStatus) -> None:

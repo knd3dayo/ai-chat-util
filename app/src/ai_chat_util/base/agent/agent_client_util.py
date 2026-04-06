@@ -2433,7 +2433,7 @@ class AgentClientUtil:
         graph = create_deep_agent(
             model=llm,
             tools=deep_agent_tools,
-            system_prompt=build_deep_agent_system_prompt(),
+            system_prompt=build_deep_agent_system_prompt(runtime_config.mcp.working_directory),
             checkpointer=checkpointer,
             name="mcp_deep_agent",
         )

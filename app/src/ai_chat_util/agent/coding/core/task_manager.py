@@ -204,7 +204,7 @@ class TaskManager:
 
         # --- subprocess backend ---
         md = task.metadata if isinstance(task.metadata, dict) else {}
-        if md.get("backend") == "subprocess" or ("pid" in md and ("stdout_path" in md or "exit_code_path" in md)):
+        if md.get("backend") in ("subprocess", "process", "windows_process", "linux_process") or ("pid" in md and ("stdout_path" in md or "exit_code_path" in md)):
             pid = md.get("pid")
             stdout_path = md.get("stdout_path")
             stderr_path = md.get("stderr_path")
@@ -237,7 +237,11 @@ class TaskManager:
                 except Exception:
                     rc = 1
 
-                if rc == 0:
+                if md.get("cancel_requested") or task.sub_status == "cancelled":
+                    task.cancelled()
+                elif task.sub_status == "timeout":
+                    task.timeouted(md.get("timeout", 0) if isinstance(md.get("timeout"), int) else 0)
+                elif rc == 0:
                     task.completed()
                 else:
                     task.failed()
@@ -302,7 +306,7 @@ class TaskManager:
 
         # subprocess backend
         pid_val = md.get("pid")
-        if md.get("backend") == "subprocess" and isinstance(pid_val, int):
+        if md.get("backend") in ("subprocess", "process", "windows_process", "linux_process") and isinstance(pid_val, int):
             pid = pid_val
             if task.status != "running":
                 return {
@@ -313,6 +317,7 @@ class TaskManager:
                 }
             try:
                 kill_process_tree(pid)
+                task.metadata["cancel_requested"] = True
                 task.cancelled()
                 cls.upsert_task(task)
                 return {
@@ -322,6 +327,7 @@ class TaskManager:
                     "message": "cancelled",
                 }
             except ProcessLookupError:
+                task.metadata["cancel_requested"] = True
                 task.cancelled()
                 cls.upsert_task(task)
                 return {

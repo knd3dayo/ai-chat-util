@@ -107,7 +107,12 @@ class TyperActions(AbstractActions) :
     def after_list_action(self, table: list) -> None:
         typer.echo(tabulate(table, headers=["Task ID", "Status", "Created At"]))
 
-    def after_cancel_action(self, task_id: str) -> None:
+    def after_cancel_action(self, task_id: str, result: dict[str, Any] | None = None) -> None:
+        if result and result.get("message"):
+            self.console.print(
+                f"[bold yellow]🛑 タスク {task_id}: {result.get('message')} (status={result.get('status')}, sub={result.get('sub_status')})[/bold yellow]"
+            )
+            return
         self.console.print(f"[bold yellow]🛑 タスク {task_id} をキャンセルしました。[/bold yellow]")
 
     def after_get_status_action(self, task_id: str, status_data: TaskStatus) -> None:

@@ -105,6 +105,8 @@ class AgentClientUtil:
         "route.explicit_coding_agent_request",
         "route.explicit_file_path_request",
         "route.explicit_directory_path_request",
+        "route.workflow_definition_available",
+        "route.workflow_definition_missing",
         "route.general_tool_sufficient",
         "route.multi_step_investigation_needed",
         "route.tool_not_available",
@@ -1701,6 +1703,7 @@ class AgentClientUtil:
         *,
         route_tool_inventory: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
         runtime_config: AiChatUtilConfig | None = None,
+        workflow_file_path: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         known_routes = {
             str(route_name).strip()
@@ -1741,6 +1744,16 @@ class AgentClientUtil:
                 "selected_server_key": None,
                 "server_keys": [],
                 "backend_kind": "deepagents",
+            }
+
+        if isinstance(workflow_file_path, str) and workflow_file_path.strip():
+            metadata["workflow_backend"] = {
+                "agent_name": "workflow_backend",
+                "agent_family": "workflow_backend",
+                "selected_server_key": None,
+                "server_keys": [],
+                "backend_kind": "workflow_markdown",
+                "workflow_file_path": workflow_file_path.strip(),
             }
 
         for route_name in sorted(known_routes):
@@ -2709,12 +2722,18 @@ class AgentClientUtil:
     def _build_default_routing_decision(
         cls,
         *,
+        runtime_config: AiChatUtilConfig,
         force_coding_agent_route: bool,
         force_deep_agent_route: bool,
         deep_agent_enabled: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
         explicit_user_directory_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
+        workflow_file_path: str | None = None,
+        predictability: str | None = None,
+        approval_frequency: str | None = None,
+        exploration_level: str | None = None,
+        has_side_effects: bool | None = None,
     ) -> RoutingDecision:
         normalized_tools = [
             str(tool_name).strip()
@@ -2732,6 +2751,13 @@ class AgentClientUtil:
             for path in (explicit_user_directory_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
+        normalized_workflow_file_path = str(workflow_file_path or "").strip() or None
+        normalized_predictability = str(predictability or "").strip().lower() or None
+        normalized_approval_frequency = str(approval_frequency or "").strip().lower() or None
+        normalized_exploration_level = str(exploration_level or "").strip().lower() or None
+        features = runtime_config.features
+        workflow_requires_definition = bool(getattr(features, "type_selection_workflow_requires_definition", True))
+        workflow_eligible = bool(normalized_workflow_file_path) or not workflow_requires_definition
 
         if force_deep_agent_route and deep_agent_enabled:
             candidate = RouteCandidate(
@@ -2763,6 +2789,68 @@ class AgentClientUtil:
                 confidence=1.0,
                 next_action="execute_selected_route",
                 notes="explicit coding-agent request detected",
+            )
+
+        workflow_reasons: list[str] = []
+        workflow_score = 0.0
+        if workflow_eligible and normalized_workflow_file_path and bool(getattr(features, "type_selection_prefer_workflow_when_definition_available", True)):
+            workflow_score = max(workflow_score, 0.95)
+            workflow_reasons.append("workflow_definition_available")
+        if workflow_eligible and normalized_predictability == "high" and bool(getattr(features, "type_selection_workflow_on_high_predictability", True)):
+            workflow_score = max(workflow_score, 0.9)
+            workflow_reasons.append("high_predictability")
+        if workflow_eligible and normalized_approval_frequency == "high" and bool(getattr(features, "type_selection_workflow_on_high_approval_frequency", True)):
+            workflow_score = max(workflow_score, 0.88)
+            workflow_reasons.append("high_approval_frequency")
+        if workflow_eligible and has_side_effects is True and bool(getattr(features, "type_selection_workflow_on_side_effects", True)):
+            workflow_score = max(workflow_score, 0.92)
+            workflow_reasons.append("side_effects_present")
+
+        if workflow_score > 0.0 and normalized_workflow_file_path:
+            candidate = RouteCandidate(
+                route_name="workflow_backend",
+                score=workflow_score,
+                reason_code="route.workflow_definition_available",
+                tool_hints=[normalized_workflow_file_path],
+            )
+            return RoutingDecision(
+                selected_route="workflow_backend",
+                candidate_routes=[candidate],
+                reason_code="route.workflow_definition_available",
+                confidence=workflow_score,
+                next_action="execute_selected_route",
+                notes="workflow backend selected: " + ", ".join(workflow_reasons),
+            )
+
+        if (
+            workflow_score <= 0.0
+            and workflow_requires_definition
+            and bool(getattr(features, "type_selection_require_clarification_on_missing_workflow_definition", True))
+            and (
+                normalized_predictability == "high"
+                or normalized_approval_frequency == "high"
+                or has_side_effects is True
+            )
+        ):
+            candidate = RouteCandidate(
+                route_name="workflow_backend",
+                score=0.65,
+                reason_code="route.workflow_definition_missing",
+                blocking_issues=["workflow_definition_required"],
+            )
+            notes: list[str] = ["workflow backend needs workflow_file_path"]
+            if normalized_exploration_level:
+                notes.append(f"exploration_level={normalized_exploration_level}")
+            return RoutingDecision(
+                selected_route="workflow_backend",
+                candidate_routes=[candidate],
+                reason_code="route.workflow_definition_missing",
+                confidence=0.65,
+                next_action="ask_user",
+                requires_hitl=True,
+                requires_clarification=True,
+                missing_information=["workflow backend を使うには workflow_file_path が必要です。workflow_file_path を指定するか、通常の agent routing で続行するか指定してください。"],
+                notes="; ".join(notes),
             )
 
         if normalized_paths:
@@ -2819,6 +2907,8 @@ class AgentClientUtil:
         has_coding_agent: bool,
         has_deep_agent: bool,
         has_general_agent: bool,
+        has_workflow_backend: bool = False,
+        workflow_file_path: str | None = None,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         lines: list[str] = []
@@ -2861,6 +2951,14 @@ class AgentClientUtil:
                 )
             else:
                 lines.append("- general_tool_agent: 一般 MCP ツールで完結する設定確認・単発調査向け")
+        if has_workflow_backend:
+            if isinstance(workflow_file_path, str) and workflow_file_path.strip():
+                lines.append(
+                    "- workflow_backend: 定義済み workflow をそのまま実行する経路"
+                    f" (workflow_file: {workflow_file_path.strip()})"
+                )
+            else:
+                lines.append("- workflow_backend: 定義済み workflow をそのまま実行する経路")
         lines.append("- direct_answer: ツール不要で即答できる場合のみ")
         lines.append("- reject: サポート範囲外または route を決めても安全に進めない場合")
         return "\n".join(lines)
@@ -2875,6 +2973,11 @@ class AgentClientUtil:
         explicit_user_directory_paths: Sequence[str] | None,
         routing_mode: str,
         preferred_coding_route: str,
+        workflow_file_path: str | None = None,
+        predictability: str | None = None,
+        approval_frequency: str | None = None,
+        exploration_level: str | None = None,
+        has_side_effects: bool | None = None,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         normalized_paths = [
@@ -2897,6 +3000,11 @@ class AgentClientUtil:
                 f"force_coding_agent_route={str(force_coding_agent_route).lower()}",
                 f"force_deep_agent_route={str(force_deep_agent_route).lower()}",
                 f"preferred_coding_route={preferred_coding_route}",
+                f"workflow_file_path={str(workflow_file_path or '').strip() or '(none)'}",
+                f"predictability={str(predictability or '').strip().lower() or '(none)'}",
+                f"approval_frequency={str(approval_frequency or '').strip().lower() or '(none)'}",
+                f"exploration_level={str(exploration_level or '').strip().lower() or '(none)'}",
+                f"has_side_effects={str(has_side_effects).lower() if has_side_effects is not None else '(none)'}",
                 "explicit_user_file_paths=" + (", ".join(normalized_paths) if normalized_paths else "(none)"),
                 "explicit_user_directory_paths=" + (", ".join(normalized_directories) if normalized_directories else "(none)"),
                 *catalog_lines,
@@ -3086,6 +3194,8 @@ class AgentClientUtil:
             return "route.multi_step_investigation_needed"
         if route == "deep_agent":
             return "route.multi_step_investigation_needed"
+        if route == "workflow_backend":
+            return "route.workflow_definition_available"
         if route == "general_tool_agent":
             return "route.general_tool_sufficient"
         if route == "direct_answer":
@@ -3163,14 +3273,25 @@ class AgentClientUtil:
         available_tool_names: Sequence[str] | None = None,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
         audit_context: AuditContext | None = None,
+        workflow_file_path: str | None = None,
+        predictability: str | None = None,
+        approval_frequency: str | None = None,
+        exploration_level: str | None = None,
+        has_side_effects: bool | None = None,
     ) -> RoutingDecision:
         default_decision = cls._build_default_routing_decision(
+            runtime_config=runtime_config,
             force_coding_agent_route=force_coding_agent_route,
             force_deep_agent_route=force_deep_agent_route,
             deep_agent_enabled=cls.deep_agent_route_enabled(runtime_config),
             explicit_user_file_paths=explicit_user_file_paths,
             explicit_user_directory_paths=explicit_user_directory_paths,
             available_tool_names=available_tool_names,
+            workflow_file_path=workflow_file_path,
+            predictability=predictability,
+            approval_frequency=approval_frequency,
+            exploration_level=exploration_level,
+            has_side_effects=has_side_effects,
         )
 
         routing_mode = str(getattr(runtime_config.features, "routing_mode", "legacy") or "legacy").strip().lower()
@@ -3199,6 +3320,8 @@ class AgentClientUtil:
             has_coding_agent=has_coding_agent,
             has_deep_agent=has_deep_agent,
             has_general_agent=has_general_agent,
+            has_workflow_backend=bool(str(workflow_file_path or "").strip()),
+            workflow_file_path=workflow_file_path,
             route_tool_catalog=route_tool_catalog,
         )
         context_text = cls._build_routing_context_text(
@@ -3208,6 +3331,11 @@ class AgentClientUtil:
             explicit_user_directory_paths=explicit_user_directory_paths,
             routing_mode=routing_mode,
             preferred_coding_route=str(getattr(runtime_config.features, "preferred_coding_route", "coding_agent") or "coding_agent"),
+            workflow_file_path=workflow_file_path,
+            predictability=predictability,
+            approval_frequency=approval_frequency,
+            exploration_level=exploration_level,
+            has_side_effects=has_side_effects,
             route_tool_catalog=route_tool_catalog,
         )
 
@@ -3233,6 +3361,18 @@ class AgentClientUtil:
                     confidence_threshold=confidence_threshold,
                 )
                 if parsed_decision is not None:
+                    if parsed_decision.selected_route == "workflow_backend" and not str(workflow_file_path or "").strip():
+                        return RoutingDecision(
+                            selected_route="workflow_backend",
+                            candidate_routes=parsed_decision.candidate_routes,
+                            reason_code="route.workflow_definition_missing",
+                            confidence=parsed_decision.confidence,
+                            missing_information=["workflow backend を使うには workflow_file_path が必要です。workflow_file_path を指定するか、別 route で続行するか指定してください。"],
+                            next_action="ask_user",
+                            requires_hitl=True,
+                            requires_clarification=True,
+                            notes=parsed_decision.notes,
+                        )
                     if audit_context is not None:
                         audit_context.emit(
                             "route_decision_model_output",

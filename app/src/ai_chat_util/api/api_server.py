@@ -24,7 +24,6 @@ from ai_chat_util.core.resource_app import (
 from ai_chat_util.core.app import (
     run_chat,
     run_agent_chat,
-    run_coordinated_chat,
     run_deepagent_chat,
     run_simple_chat,
     run_batch_chat,
@@ -120,18 +119,9 @@ router.add_api_route(
     summary="Run agent chat",
     description=(
         "Run a chat request via the MCP-backed agent client. "
+        "If chat_request_context.workflow_file_path is provided, the same endpoint may route to the workflow backend. "
         "The response may return status='paused' with hitl and trace_id, "
         "and the client can resume by sending another ChatRequest with the same trace_id."
-    ),
-)
-router.add_api_route(
-    path="/coordinated_chat",
-    endpoint=run_coordinated_chat,
-    methods=["POST"],
-    summary="Run coordinated chat",
-    description=(
-        "Run a chat request via the cross-type Coordinator. "
-        "The Coordinator selects workflow, supervisor, or autonomous execution using deterministic policy hints."
     ),
 )
 router.add_api_route(

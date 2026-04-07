@@ -187,13 +187,15 @@ class CodingAgentPrompts(PromptsBase):
 
 [重要なルール]
 - 必ず JSON オブジェクトだけを返してください。Markdown、コードフェンス、説明文は不要です。
-- `selected_route` は `coding_agent` / `deep_agent` / `general_tool_agent` / `direct_answer` / `reject` のいずれかにしてください。
+- `selected_route` は `coding_agent` / `deep_agent` / `general_tool_agent` / `workflow_backend` / `direct_answer` / `reject` のいずれかにしてください。
 - ユーザーが `coding agent` / `coding-agent` / `コーディングエージェント` の利用を明示している場合は、原則 `coding_agent` を選んでください。
 - ユーザーが `deep agent` / `deep-agent` / `DeepAgents` の利用を明示しており、deep_agent route が利用可能なら `deep_agent` を選んでください。
+- `workflow_file_path` が与えられており、その定義済み workflow を実行すべき要求なら `workflow_backend` を優先してください。
 - ローカルファイルパスが含まれており、通常ツールで対応できる調査なら `general_tool_agent` を優先して構いません。
 - ローカルディレクトリパス、または working_directory 配下で解決できるディレクトリ名が含まれており、通常ツールで対応できる単発調査なら `general_tool_agent` を優先してください。
 - 複数ステップ調査や深い分解が必要で、非同期ジョブ系ツールが不要なら `deep_agent` を選んで構いません。
 - execute/status/get_result のような非同期ジョブ系ツールが必要な作業は `coding_agent` を優先してください。
+- `workflow_backend` を選ぶのに必要な `workflow_file_path` が無い場合は、`requires_clarification=true` とし、`next_action=ask_user` を返してください。
 - 情報不足で route を安全に確定できない場合は、`requires_clarification=true` とし、`next_action=ask_user` を返してください。
 - `confidence` は 0.0 から 1.0 の範囲で返してください。
 

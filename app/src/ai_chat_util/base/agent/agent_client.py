@@ -12,11 +12,12 @@ from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
     get_runtime_config,
 )
-from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, HitlRequest
+from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, ChatRequestContext, HitlRequest
 from ai_chat_util.common.model.request_headers import get_current_request_headers
 from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from ai_chat_util.base.chat import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from ai_chat_util.workflow.chat_client import WorkflowChatClient
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 
@@ -27,9 +28,10 @@ from .agent_client_util import AgentClientUtil
 from .tool_limits import ToolLimits
 
 class AgentClient(AbstractChatClient):
-    def __init__(self, runtime_config: AiChatUtilConfig):
+    def __init__(self, runtime_config: AiChatUtilConfig, default_request_context: ChatRequestContext | None = None):
         self.runtime_config = runtime_config
         self.message_factory = LLMMessageContentFactory(config=runtime_config)
+        self.default_request_context = default_request_context.model_copy(deep=True) if default_request_context is not None else None
 
     def _forced_route(self) -> Literal["deep_agent", "coding_agent"] | None:
         return None
@@ -91,19 +93,32 @@ class AgentClient(AbstractChatClient):
                         content=[ChatContent(params={"type": "text", "text": prompt})],
                     )
                 ]
-            )
+            ),
+            chat_request_context=self.default_request_context.model_copy(deep=True) if self.default_request_context is not None else None,
         )
         response = await self.chat(chat_request)
         return response.output
 
+    def _merge_chat_request_context(self, current: ChatRequestContext | None) -> ChatRequestContext | None:
+        if current is not None:
+            return current
+        if self.default_request_context is None:
+            return None
+        return self.default_request_context.model_copy(deep=True)
+
     async def chat(self, chat_request: ChatRequest, **kwargs) -> ChatResponse:
 
- 
-        trace_id = getattr(chat_request, "trace_id", None)
+        effective_request = chat_request.model_copy(
+            update={"chat_request_context": self._merge_chat_request_context(chat_request.chat_request_context)}
+        )
+
+        trace_id = getattr(effective_request, "trace_id", None)
         current_request_headers = get_current_request_headers()
         # LangGraph checkpoint key is named `thread_id`. This project standardizes on `trace_id`.
         # If not provided, generate a W3C-compatible 32-hex trace_id.
         run_trace_id = (trace_id or uuid.uuid4().hex).lower()
+        if not getattr(effective_request, "trace_id", None):
+            effective_request = effective_request.model_copy(update={"trace_id": run_trace_id})
         audit_context = create_audit_context(
             self.runtime_config,
             run_trace_id,
@@ -128,9 +143,19 @@ class AgentClient(AbstractChatClient):
             recursion_limit = tool_limits.tool_recursion_limit
             auto_approve = tool_limits.auto_approve
             max_retries = tool_limits.max_retries
-            lc_messages = self._chat_messages_to_langchain(chat_request.chat_history.messages)
+            lc_messages = self._chat_messages_to_langchain(effective_request.chat_history.messages)
             if not lc_messages:
                 raise ValueError("chat_request.chat_history.messages が空です。")
+
+            request_context = effective_request.chat_request_context
+            workflow_file_path = str(getattr(request_context, "workflow_file_path", "") or "").strip() or None
+            workflow_plan_mode = bool(getattr(request_context, "workflow_plan_mode", False))
+            workflow_durable = bool(getattr(request_context, "workflow_durable", True))
+            workflow_max_node_visits = int(getattr(request_context, "workflow_max_node_visits", 8) or 8)
+            predictability = str(getattr(request_context, "predictability", "") or "").strip().lower() or None
+            approval_frequency = str(getattr(request_context, "approval_frequency", "") or "").strip().lower() or None
+            exploration_level = str(getattr(request_context, "exploration_level", "") or "").strip().lower() or None
+            has_side_effects = getattr(request_context, "has_side_effects", None)
 
             audit_context.emit(
                 "request_received",
@@ -199,6 +224,7 @@ class AgentClient(AbstractChatClient):
             route_backend_metadata = AgentClientUtil.build_route_backend_metadata(
                 route_tool_inventory=route_tool_inventory,
                 runtime_config=self.runtime_config,
+                workflow_file_path=workflow_file_path,
             )
             available_tool_names = [
                 tool_name
@@ -216,6 +242,11 @@ class AgentClient(AbstractChatClient):
                 available_tool_names=available_tool_names,
                 route_tool_catalog=route_tool_catalog,
                 audit_context=audit_context,
+                workflow_file_path=workflow_file_path,
+                predictability=predictability,
+                approval_frequency=approval_frequency,
+                exploration_level=exploration_level,
+                has_side_effects=has_side_effects,
             )
             audit_context.emit(
                 "route_decided",
@@ -235,6 +266,36 @@ class AgentClient(AbstractChatClient):
                     "forced_route": forced_route,
                 },
             )
+            if routing_decision.selected_route == "workflow_backend":
+                if workflow_file_path is None:
+                    prompt_text = "workflow backend を使うには workflow_file_path が必要です。workflow_file_path を指定するか、通常の agent routing で続行するか指定してください。"
+                    hitl = HitlRequest(
+                        kind=cast(Any, "input"),
+                        prompt=prompt_text,
+                        action_id=str(uuid.uuid4()),
+                        source="routing",
+                    )
+                    return ChatResponse(
+                        status=cast(Any, "paused"),
+                        trace_id=run_trace_id,
+                        hitl=hitl,
+                        messages=[
+                            ChatMessage(
+                                role="assistant",
+                                content=[ChatContent(params={"type": "text", "text": prompt_text})],
+                            )
+                        ],
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                workflow_client = WorkflowChatClient(
+                    workflow_file_path,
+                    runtime_config=self.runtime_config,
+                    max_node_visits=workflow_max_node_visits,
+                    plan_mode=workflow_plan_mode,
+                    durable=workflow_durable,
+                )
+                return await workflow_client.chat(effective_request)
             if expects_tool_catalog_response and route_tool_catalog:
                 tool_catalog_payload = AgentClientUtil.build_route_tool_catalog_payload(
                     route_tool_inventory,

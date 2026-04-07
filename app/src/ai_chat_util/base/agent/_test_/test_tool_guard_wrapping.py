@@ -1410,7 +1410,9 @@ def test_explicitly_requests_deep_agent_detects_user_instruction() -> None:
 
 
 def test_default_routing_prefers_deep_agent_for_explicit_request_when_enabled() -> None:
+    runtime_config = _build_runtime_config()
     decision = AgentClientUtil._build_default_routing_decision(
+        runtime_config=runtime_config,
         force_coding_agent_route=False,
         force_deep_agent_route=True,
         deep_agent_enabled=True,
@@ -1424,7 +1426,9 @@ def test_default_routing_prefers_deep_agent_for_explicit_request_when_enabled() 
 
 
 def test_default_routing_does_not_select_deep_agent_when_disabled() -> None:
+    runtime_config = _build_runtime_config()
     decision = AgentClientUtil._build_default_routing_decision(
+        runtime_config=runtime_config,
         force_coding_agent_route=False,
         force_deep_agent_route=True,
         deep_agent_enabled=False,
@@ -1437,7 +1441,9 @@ def test_default_routing_does_not_select_deep_agent_when_disabled() -> None:
 
 
 def test_default_routing_prefers_general_tool_agent_for_explicit_directory_path() -> None:
+    runtime_config = _build_runtime_config()
     decision = AgentClientUtil._build_default_routing_decision(
+        runtime_config=runtime_config,
         force_coding_agent_route=False,
         force_deep_agent_route=False,
         deep_agent_enabled=True,

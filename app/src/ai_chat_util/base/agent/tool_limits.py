@@ -293,6 +293,26 @@ class ToolLimits(BaseModel):
         return None
 
     @staticmethod
+    def tool_is_approved(tool_name: str, tool_call_state: Mapping[str, Any]) -> bool:
+        if bool(tool_call_state.get("auto_approve", False)):
+            return True
+        approved_tools = cast(set[str], tool_call_state.get("approved_tools", set()))
+        normalized = (tool_name or "").strip()
+        return "*" in approved_tools or normalized in approved_tools
+
+    @classmethod
+    def requires_tool_approval(cls, tool_name: str, tool_call_state: Mapping[str, Any]) -> bool:
+        return cls.tool_approval_status(tool_name, tool_call_state) == "required" and not cls.tool_is_approved(tool_name, tool_call_state)
+
+    @staticmethod
+    def tool_approval_required_text(tool_name: str) -> str:
+        normalized = (tool_name or "").strip() or "TOOL_NAME"
+        return (
+            f"ERROR: tool approval required. error=tool_approval_required tool={normalized}. "
+            f"このツールの実行には承認が必要です。続行する場合は 'APPROVE {normalized}'、拒否する場合は 'REJECT {normalized}' と入力してください。"
+        )
+
+    @staticmethod
     def _freeze_for_cache(value: Any) -> Any:
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
@@ -701,6 +721,25 @@ class ToolLimits(BaseModel):
                     payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
                 )
 
+                if cls.requires_tool_approval(tool_name, tool_call_state):
+                    _emit_tool_event(
+                        "tool_result_received",
+                        tool_name=tool_name,
+                        args=args,
+                        kwargs=kwargs,
+                        reason_code="hitl.tool_approval_required",
+                        payload={"success": False, "approval_required": True, "blocked": True},
+                    )
+                    return cls._guard_output(
+                        cls.tool_approval_required_text(tool_name),
+                        response_format=response_format,
+                        artifact={
+                            "error": "tool_approval_required",
+                            "tool": tool_name,
+                            "approval_required": True,
+                        },
+                    )
+
                 budget_scope, used_key, scope_limit, scope_used = cls._resolve_budget_scope(
                     tool_name=tool_name,
                     tool_call_state=tool_call_state,
@@ -908,6 +947,29 @@ class ToolLimits(BaseModel):
                 resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
                 approval_status=cls.tool_approval_status(tool_name, tool_call_state),
                 payload={"args_count": len(args), "kwargs_keys": sorted(str(key) for key in kwargs.keys())},
+            )
+
+        if cls.requires_tool_approval(tool_name, tool_call_state):
+            if isinstance(audit_context, AuditContext):
+                audit_context.emit(
+                    "tool_result_received",
+                    agent_name=cast(str | None, tool_call_state.get("agent_name")),
+                    tool_name=tool_name,
+                    reason_code="hitl.tool_approval_required",
+                    target_system=cls.tool_target_system(tool_name),
+                    action_kind=cls.tool_action_kind(tool_name),
+                    resource_identifier=cls.tool_resource_identifier(tool_name, args, kwargs),
+                    approval_status=cls.tool_approval_status(tool_name, tool_call_state),
+                    payload={"success": False, "approval_required": True, "blocked": True},
+                )
+            return cls._guard_output(
+                cls.tool_approval_required_text(tool_name),
+                response_format=response_format,
+                artifact={
+                    "error": "tool_approval_required",
+                    "tool": tool_name,
+                    "approval_required": True,
+                },
             )
 
         used = int(tool_call_state.get("used", 0) or 0)

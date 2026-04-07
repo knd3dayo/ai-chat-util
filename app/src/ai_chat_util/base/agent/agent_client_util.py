@@ -104,6 +104,7 @@ class AgentClientUtil:
     _ALLOWED_ROUTE_REASON_CODES: tuple[str, ...] = (
         "route.explicit_coding_agent_request",
         "route.explicit_file_path_request",
+        "route.explicit_directory_path_request",
         "route.general_tool_sufficient",
         "route.multi_step_investigation_needed",
         "route.tool_not_available",
@@ -237,12 +238,53 @@ class AgentClientUtil:
         return candidates
 
     @classmethod
-    def extract_explicit_user_directory_paths(cls, messages: Sequence[Any]) -> list[str]:
+    def _append_existing_directory_candidate(
+        cls,
+        candidates: list[str],
+        seen: set[str],
+        raw_path: str,
+        *,
+        working_directory: str | None = None,
+    ) -> None:
+        normalized_raw_path = str(raw_path or "").strip().strip("'\"`").rstrip(",.);:]>}")
+        if not normalized_raw_path:
+            return
+
+        try:
+            candidate_path = Path(normalized_raw_path).expanduser()
+            if not candidate_path.is_absolute():
+                base_directory = str(working_directory or "").strip()
+                if not base_directory:
+                    return
+                candidate_path = Path(base_directory).expanduser().resolve() / candidate_path
+            resolved = candidate_path.resolve()
+        except Exception:
+            return
+
+        if not resolved.is_dir():
+            return
+
+        normalized = resolved.as_posix()
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    @classmethod
+    def extract_explicit_user_directory_paths(
+        cls,
+        messages: Sequence[Any],
+        *,
+        working_directory: str | None = None,
+    ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
         patterns = (
             r"(?P<path>/[^\s'\"`]+)",
             r"(?P<path>[A-Za-z]:[\\/][^\s'\"`]+)",
+        )
+        relative_directory_patterns = (
+            r"(?P<path>(?:\./|\.\./|~/)?[A-Za-z0-9][A-Za-z0-9._/\-]*)\s*(?:ディレクトリ|フォルダ|directory|folder)(?=(?:\s|[、。,.!?:]|を|に|で|配下|内|$))",
         )
 
         for message in messages:
@@ -269,20 +311,58 @@ class AgentClientUtil:
 
             for pattern in patterns:
                 for match in re.finditer(pattern, text):
-                    raw_path = match.group("path").strip().rstrip(",.);:]>}")
-                    try:
-                        resolved = Path(raw_path).expanduser().resolve()
-                    except Exception:
-                        continue
-                    if not resolved.is_dir():
-                        continue
-                    normalized = resolved.as_posix()
-                    if normalized in seen:
-                        continue
-                    seen.add(normalized)
-                    candidates.append(normalized)
+                    cls._append_existing_directory_candidate(
+                        candidates,
+                        seen,
+                        match.group("path"),
+                    )
+
+            for pattern in relative_directory_patterns:
+                for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                    cls._append_existing_directory_candidate(
+                        candidates,
+                        seen,
+                        match.group("path"),
+                        working_directory=working_directory,
+                    )
 
         return candidates
+
+    @classmethod
+    def extract_explicit_approval_tool_names(cls, messages: Sequence[Any]) -> list[str]:
+        approved_tools: list[str] = []
+        seen: set[str] = set()
+
+        for message in messages:
+            is_user_message = False
+            content: Any | None = None
+
+            if isinstance(message, HumanMessage):
+                is_user_message = True
+                content = message.content
+            elif isinstance(message, BaseMessage):
+                continue
+            elif isinstance(message, Mapping):
+                role = str(message.get("role") or "").lower()
+                if role in {"user", "human"}:
+                    is_user_message = True
+                    content = message.get("content")
+
+            if not is_user_message:
+                continue
+
+            text = cls._stringify_message_content(content)
+            if not text:
+                continue
+
+            for match in re.finditer(r"\bAPPROVE(?:\s+([A-Za-z0-9_\-:.]+))?", text, flags=re.IGNORECASE):
+                tool_name = str(match.group(1) or "*").strip()
+                if not tool_name or tool_name in seen:
+                    continue
+                seen.add(tool_name)
+                approved_tools.append(tool_name)
+
+        return approved_tools
 
     @classmethod
     def should_include_general_agent(
@@ -2181,6 +2261,53 @@ class AgentClientUtil:
         return None, None
 
     @classmethod
+    def extract_approval_required_tool_name(cls, text: str | None) -> str | None:
+        t = (text or "").strip()
+        if not t:
+            return None
+
+        patterns = (
+            r"error=tool_approval_required\s+tool=([A-Za-z0-9_\-:.]+)",
+            r"tool=([A-Za-z0-9_\-:.]+)\s+.*error=tool_approval_required",
+            r"APPROVE\s+([A-Za-z0-9_\-:.]+)",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, t, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                return match.group(1).strip().rstrip(".,);:]>}")
+        if "tool_approval_required" in t or "承認が必要" in t:
+            return None
+        return None
+
+    @classmethod
+    def detect_approval_required_from_evidence(cls, evidence: Mapping[str, Any]) -> str | None:
+        text_candidates: list[str] = []
+        for key in ("raw_texts", "stdout_blocks"):
+            values = evidence.get(key)
+            if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+                text_candidates.extend(
+                    str(value).strip()
+                    for value in values
+                    if isinstance(value, str) and str(value).strip()
+                )
+
+        for text in text_candidates:
+            tool_name = cls.extract_approval_required_tool_name(text)
+            if tool_name is not None:
+                return tool_name
+        return None
+
+    @staticmethod
+    def build_tool_approval_request_text(tool_name: str | None) -> str:
+        normalized = str(tool_name or "").strip()
+        if normalized:
+            return (
+                f"ツール {normalized} の実行には承認が必要です。\n"
+                f"続行する場合は 'APPROVE {normalized}'、拒否する場合は 'REJECT {normalized}' と入力してください。"
+            )
+        return "このツールの実行には承認が必要です。続行する場合は 'APPROVE TOOL_NAME'、拒否する場合は 'REJECT TOOL_NAME' と入力してください。"
+
+    @classmethod
     def _default_checkpoint_db_path(cls, runtime_config: AiChatUtilConfig) -> Path:
         """Pick a stable per-config SQLite path for LangGraph checkpoints."""
 
@@ -2451,6 +2578,8 @@ class AgentClientUtil:
         force_coding_agent_route: bool = False,
         force_deep_agent_route: bool = False,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
+        approved_tool_names: Sequence[str] | None = None,
         routing_decision: RoutingDecision | None = None,
         audit_context: AuditContext | None = None,
         expects_heading_response: bool = False,
@@ -2505,6 +2634,7 @@ class AgentClientUtil:
                 else None
             ),
             explicit_user_file_paths=explicit_user_file_paths,
+            approved_tool_names=approved_tool_names,
             audit_context=audit_context,
             )
 
@@ -2550,6 +2680,7 @@ class AgentClientUtil:
                 routing_decision=routing_decision,
                 force_coding_agent_route=force_coding_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
+                explicit_user_directory_paths=explicit_user_directory_paths,
                 expects_heading_response=expects_heading_response,
                 expects_evaluation_response=expects_evaluation_response,
             ),
@@ -2582,6 +2713,7 @@ class AgentClientUtil:
         force_deep_agent_route: bool,
         deep_agent_enabled: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
     ) -> RoutingDecision:
         normalized_tools = [
@@ -2593,6 +2725,11 @@ class AgentClientUtil:
         normalized_paths = [
             str(path).strip()
             for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        normalized_directories = [
+            str(path).strip()
+            for path in (explicit_user_directory_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
 
@@ -2642,6 +2779,22 @@ class AgentClientUtil:
                 confidence=0.8,
                 next_action="execute_selected_route",
                 notes="explicit file path detected",
+            )
+
+        if normalized_directories:
+            candidate = RouteCandidate(
+                route_name="general_tool_agent",
+                score=0.78,
+                reason_code="route.explicit_directory_path_request",
+                tool_hints=normalized_tools[:5],
+            )
+            return RoutingDecision(
+                selected_route="general_tool_agent",
+                candidate_routes=[candidate],
+                reason_code="route.explicit_directory_path_request",
+                confidence=0.78,
+                next_action="execute_selected_route",
+                notes="explicit directory path detected",
             )
 
         candidate = RouteCandidate(
@@ -2719,6 +2872,7 @@ class AgentClientUtil:
         force_coding_agent_route: bool,
         force_deep_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None,
+        explicit_user_directory_paths: Sequence[str] | None,
         routing_mode: str,
         preferred_coding_route: str,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
@@ -2726,6 +2880,11 @@ class AgentClientUtil:
         normalized_paths = [
             str(path).strip()
             for path in (explicit_user_file_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        normalized_directories = [
+            str(path).strip()
+            for path in (explicit_user_directory_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
         catalog_lines = [
@@ -2739,6 +2898,7 @@ class AgentClientUtil:
                 f"force_deep_agent_route={str(force_deep_agent_route).lower()}",
                 f"preferred_coding_route={preferred_coding_route}",
                 "explicit_user_file_paths=" + (", ".join(normalized_paths) if normalized_paths else "(none)"),
+                "explicit_user_directory_paths=" + (", ".join(normalized_directories) if normalized_directories else "(none)"),
                 *catalog_lines,
             ]
         )
@@ -2820,6 +2980,7 @@ class AgentClientUtil:
         routing_decision: RoutingDecision | None,
         force_coding_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
         expects_heading_response: bool = False,
         expects_evaluation_response: bool = False,
     ) -> str | None:
@@ -2828,8 +2989,13 @@ class AgentClientUtil:
             for path in (explicit_user_file_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
+        normalized_directories = [
+            str(path).strip()
+            for path in (explicit_user_directory_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
         decision = routing_decision
-        if decision is None and not force_coding_agent_route and not normalized_paths:
+        if decision is None and not force_coding_agent_route and not normalized_paths and not normalized_directories:
             return None
 
         lines: list[str] = []
@@ -2857,6 +3023,8 @@ class AgentClientUtil:
 
         if normalized_paths:
             lines.append(f"- ユーザーが明示した対象パス: {', '.join(normalized_paths)}")
+        if normalized_directories:
+            lines.append(f"- ユーザーが明示した対象ディレクトリ: {', '.join(normalized_directories)}")
         if decision is not None and decision.reason_code:
             lines.append(f"- route_reason_code: {decision.reason_code}")
         if decision is not None and decision.notes:
@@ -2991,6 +3159,7 @@ class AgentClientUtil:
         force_coding_agent_route: bool,
         force_deep_agent_route: bool,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
         available_tool_names: Sequence[str] | None = None,
         route_tool_catalog: Mapping[str, Sequence[str]] | None = None,
         audit_context: AuditContext | None = None,
@@ -3000,11 +3169,20 @@ class AgentClientUtil:
             force_deep_agent_route=force_deep_agent_route,
             deep_agent_enabled=cls.deep_agent_route_enabled(runtime_config),
             explicit_user_file_paths=explicit_user_file_paths,
+            explicit_user_directory_paths=explicit_user_directory_paths,
             available_tool_names=available_tool_names,
         )
 
         routing_mode = str(getattr(runtime_config.features, "routing_mode", "legacy") or "legacy").strip().lower()
-        if routing_mode == "legacy" or force_deep_agent_route or default_decision.reason_code == "route.explicit_coding_agent_request":
+        if (
+            routing_mode == "legacy"
+            or force_deep_agent_route
+            or default_decision.reason_code in {
+                "route.explicit_coding_agent_request",
+                "route.explicit_file_path_request",
+                "route.explicit_directory_path_request",
+            }
+        ):
             return default_decision
 
         mcp_config = runtime_config.get_mcp_server_config()
@@ -3027,6 +3205,7 @@ class AgentClientUtil:
             force_coding_agent_route=force_coding_agent_route,
             force_deep_agent_route=force_deep_agent_route,
             explicit_user_file_paths=explicit_user_file_paths,
+            explicit_user_directory_paths=explicit_user_directory_paths,
             routing_mode=routing_mode,
             preferred_coding_route=str(getattr(runtime_config.features, "preferred_coding_route", "coding_agent") or "coding_agent"),
             route_tool_catalog=route_tool_catalog,

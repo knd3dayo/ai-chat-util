@@ -96,6 +96,7 @@ class AgentBuilder:
 			agent_name: str,
 			allowed_tool_names: Sequence[str] | None = None,
 			explicit_user_file_paths: Sequence[str] | None = None,
+			approved_tool_names: Sequence[str] | None = None,
 			audit_context: AuditContext | None = None,
 		):
 
@@ -130,6 +131,12 @@ class AgentBuilder:
 			"approval_tools": {
 				*configured_hitl_approval_tools,
 			},
+			"approved_tools": {
+				str(name).strip()
+				for name in (approved_tool_names or [])
+				if isinstance(name, str) and str(name).strip()
+			},
+			"auto_approve": bool(tool_limits.auto_approve) if tool_limits is not None else False,
 			"explicit_user_file_paths": [
 				str(path).strip()
 				for path in (explicit_user_file_paths or [])
@@ -202,6 +209,7 @@ class AgentBuilder:
 		include_general_agent: bool = True,
 		general_tool_allowlist: Sequence[str] | None = None,
 		explicit_user_file_paths: Sequence[str] | None = None,
+		approved_tool_names: Sequence[str] | None = None,
 		audit_context: AuditContext | None = None,
 	) -> list[AgentBuilder]:
 		logger.info("Creating sub-agents...")
@@ -241,6 +249,7 @@ class AgentBuilder:
 					server_names=tuple(code_agent_mcp_config.servers.keys()),
 				),
 				explicit_user_file_paths=explicit_user_file_paths,
+				approved_tool_names=approved_tool_names,
 				audit_context=audit_context,
 			)
 			agents.append(code_agent_builder)
@@ -265,6 +274,7 @@ class AgentBuilder:
 				),
 				allowed_tool_names=general_tool_allowlist,
 				explicit_user_file_paths=explicit_user_file_paths,
+				approved_tool_names=approved_tool_names,
 				audit_context=audit_context,
 			)
 			if general_tool_allowlist is None or normal_agent_builder.langchain_tools:

@@ -154,6 +154,11 @@ class AgentClient(AbstractChatClient):
                 force_coding_agent_route = True
                 force_deep_agent_route = False
             explicit_user_file_paths = AgentClientUtil.extract_explicit_user_file_paths(lc_messages)
+            explicit_user_directory_paths = AgentClientUtil.extract_explicit_user_directory_paths(
+                lc_messages,
+                working_directory=self.runtime_config.mcp.working_directory,
+            )
+            approved_tool_names = AgentClientUtil.extract_explicit_approval_tool_names(lc_messages)
             requested_heading_count = AgentClientUtil.extract_requested_heading_count(lc_messages)
             expects_heading_response = AgentClientUtil.requests_heading_response(lc_messages)
             expects_evaluation_response = AgentClientUtil.requests_evaluation_response(lc_messages)
@@ -207,6 +212,7 @@ class AgentClient(AbstractChatClient):
                 force_coding_agent_route=force_coding_agent_route,
                 force_deep_agent_route=force_deep_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
+                explicit_user_directory_paths=explicit_user_directory_paths,
                 available_tool_names=available_tool_names,
                 route_tool_catalog=route_tool_catalog,
                 audit_context=audit_context,
@@ -222,6 +228,7 @@ class AgentClient(AbstractChatClient):
                     "candidate_routes": [candidate.model_dump(mode="json") for candidate in routing_decision.candidate_routes],
                     "next_action": routing_decision.next_action,
                     "explicit_user_file_paths": list(explicit_user_file_paths),
+                    "explicit_user_directory_paths": list(explicit_user_directory_paths),
                     "route_tool_catalog": route_tool_catalog,
                     "route_backends": route_backend_metadata,
                     "selected_route_backend": route_backend_metadata.get(routing_decision.selected_route),
@@ -330,6 +337,8 @@ class AgentClient(AbstractChatClient):
                 force_coding_agent_route=force_coding_agent_route,
                 force_deep_agent_route=force_deep_agent_route,
                 explicit_user_file_paths=explicit_user_file_paths,
+                explicit_user_directory_paths=explicit_user_directory_paths,
+                approved_tool_names=approved_tool_names,
                 routing_decision=routing_decision,
                 audit_context=audit_context,
                 expects_heading_response=expects_heading_response,
@@ -500,6 +509,17 @@ class AgentClient(AbstractChatClient):
             evidence_summary = AgentClientUtil.build_evidence_summary(evidence)
             if requested_heading_count is not None:
                 evidence["requested_heading_count"] = requested_heading_count
+            approval_required_tool = None if auto_approve else AgentClientUtil.detect_approval_required_from_evidence(evidence)
+            if approval_required_tool is not None:
+                logger.info(
+                    "Approval-required tool evidence detected; forcing paused HITL response: trace_id=%s tool=%s",
+                    run_trace_id,
+                    approval_required_tool or "(unknown)",
+                )
+                resp_type = "question"
+                hitl_kind = "approval"
+                hitl_tool = approval_required_tool or hitl_tool
+                user_text = AgentClientUtil.build_tool_approval_request_text(hitl_tool)
             followup_task_error_detected = (
                 AgentClientUtil.contains_followup_task_error_signal(output_text)
                 or AgentClientUtil.contains_followup_task_error_signal(user_text)
@@ -703,6 +723,7 @@ class AgentClient(AbstractChatClient):
 
         contradicts_evidence = AgentClientUtil.final_text_contradicts_evidence(response_text, postclose_evidence)
         missing_concrete_evidence = AgentClientUtil.final_text_missing_concrete_evidence(response_text, postclose_evidence)
+        response_is_paused = pending_response.get("status") == "paused"
         logger.info(
             "Post-close evidence check: trace_id=%s contradicts=%s missing=%s headings=%s config_path=%s",
             run_trace_id,
@@ -712,7 +733,7 @@ class AgentClient(AbstractChatClient):
             postclose_evidence.get("config_path"),
         )
 
-        if AgentClientUtil.should_prefer_deterministic_evidence_response(response_text, postclose_evidence):
+        if not response_is_paused and AgentClientUtil.should_prefer_deterministic_evidence_response(response_text, postclose_evidence):
             fallback_text = AgentClientUtil.build_evidence_reflected_final_text(postclose_evidence)
             if fallback_text:
                 logger.info(
@@ -726,7 +747,7 @@ class AgentClient(AbstractChatClient):
                 contradicts_evidence = False
                 missing_concrete_evidence = False
 
-        if not contradicts_evidence and missing_concrete_evidence:
+        if not response_is_paused and not contradicts_evidence and missing_concrete_evidence:
             augmented_text = AgentClientUtil.augment_final_text_with_evidence(response_text, postclose_evidence)
             if (
                 augmented_text
@@ -741,7 +762,7 @@ class AgentClient(AbstractChatClient):
                 missing_concrete_evidence = False
                 response_text = augmented_text
 
-        if contradicts_evidence or missing_concrete_evidence:
+        if not response_is_paused and (contradicts_evidence or missing_concrete_evidence):
             fallback_text = AgentClientUtil.build_evidence_reflected_final_text(postclose_evidence)
             if fallback_text:
                 logger.warning(

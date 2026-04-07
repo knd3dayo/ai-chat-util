@@ -26,6 +26,7 @@ sys.modules.setdefault("langchain_mcp_adapters.sessions", fake_sessions_module)
 import ai_chat_util.base.agent.agent_builder as agent_mod
 import ai_chat_util.base.agent.agent_client_util as llm_mcp_client_util_mod
 from ai_chat_util.base.agent.agent_builder import AgentBuilder
+from ai_chat_util.base.agent.agent_client import AgentClient
 from ai_chat_util.base.agent.tool_limits import ToolLimits
 from ai_chat_util.base.agent.prompts import CodingAgentPrompts
 from ai_chat_util.base.agent.agent_client_util import AgentClientUtil
@@ -222,6 +223,44 @@ def test_effective_call_limits_raise_floor_for_explicit_files() -> None:
 
 def test_effective_call_limits_preserve_unlimited_values_for_explicit_files() -> None:
     assert ToolLimits.effective_call_limits(0, 0, ["/tmp/work/doc.md"]) == (0, 0)
+
+
+def test_approval_tool_is_blocked_until_explicitly_approved() -> None:
+    state: dict[str, Any] = {
+        "used": 0,
+        "general_used": 0,
+        "followup_used": 0,
+        "followup_limit": 0,
+        "approval_tools": {"analyze_files"},
+        "approved_tools": set(),
+        "auto_approve": False,
+    }
+    calls = {"n": 0}
+
+    def _func(file_path_list: list[str], prompt: str) -> str:
+        calls["n"] += 1
+        return f"ok:{len(file_path_list)}:{prompt}"
+
+    tool = _FakeTool("analyze_files", response_format="content", func=_func)
+
+    AgentClientUtil._apply_tool_execution_guards(
+        [tool],
+        tool_call_state=state,
+        tool_call_limit_int=1,
+        tool_timeout_seconds_f=0.0,
+        tool_timeout_retries_int=0,
+    )
+
+    blocked = tool.func(["/tmp/work/doc.md"], "inspect")
+    assert isinstance(blocked, str)
+    assert "tool_approval_required" in blocked
+    assert "APPROVE analyze_files" in blocked
+    assert calls["n"] == 0
+
+    state["approved_tools"] = {"analyze_files"}
+    allowed = tool.func(["/tmp/work/doc.md"], "inspect")
+    assert allowed == "ok:1:inspect"
+    assert calls["n"] == 1
 
 
 def test_successful_duplicate_general_tool_call_reuses_cached_result_without_spending_budget() -> None:
@@ -1376,6 +1415,7 @@ def test_default_routing_prefers_deep_agent_for_explicit_request_when_enabled() 
         force_deep_agent_route=True,
         deep_agent_enabled=True,
         explicit_user_file_paths=[],
+        explicit_user_directory_paths=[],
         available_tool_names=["analyze_files", "get_loaded_config_info"],
     )
 
@@ -1389,10 +1429,25 @@ def test_default_routing_does_not_select_deep_agent_when_disabled() -> None:
         force_deep_agent_route=True,
         deep_agent_enabled=False,
         explicit_user_file_paths=[],
+        explicit_user_directory_paths=[],
         available_tool_names=["analyze_files", "get_loaded_config_info"],
     )
 
     assert decision.selected_route == "general_tool_agent"
+
+
+def test_default_routing_prefers_general_tool_agent_for_explicit_directory_path() -> None:
+    decision = AgentClientUtil._build_default_routing_decision(
+        force_coding_agent_route=False,
+        force_deep_agent_route=False,
+        deep_agent_enabled=True,
+        explicit_user_file_paths=[],
+        explicit_user_directory_paths=["/tmp/work"],
+        available_tool_names=["analyze_files", "get_loaded_config_info"],
+    )
+
+    assert decision.selected_route == "general_tool_agent"
+    assert decision.reason_code == "route.explicit_directory_path_request"
 
 
 def test_should_run_config_preflight_detects_ordered_request() -> None:
@@ -1528,6 +1583,18 @@ def test_extract_explicit_user_file_paths_returns_existing_files_only(tmp_path) 
     )
 
     assert paths == [target.resolve().as_posix()]
+
+
+def test_extract_explicit_user_directory_paths_resolves_relative_directory_against_working_directory(tmp_path) -> None:
+    target_dir = tmp_path / "work"
+    target_dir.mkdir()
+
+    paths = AgentClientUtil.extract_explicit_user_directory_paths(
+        [{"role": "user", "content": "work ディレクトリを確認してください。"}],
+        working_directory=tmp_path.as_posix(),
+    )
+
+    assert paths == [target_dir.resolve().as_posix()]
 
 
 def test_extract_requested_heading_count_detects_user_constraint() -> None:
@@ -2166,6 +2233,7 @@ def test_build_routing_context_text_includes_route_tool_catalog() -> None:
         force_coding_agent_route=False,
         force_deep_agent_route=False,
         explicit_user_file_paths=[],
+        explicit_user_directory_paths=["/tmp/work"],
         routing_mode="structured",
         preferred_coding_route="deep_agent",
         route_tool_catalog={
@@ -2177,7 +2245,42 @@ def test_build_routing_context_text_includes_route_tool_catalog() -> None:
 
     assert "coding_agent_tools=execute, status" in text
     assert "preferred_coding_route=deep_agent" in text
+    assert "explicit_user_directory_paths=/tmp/work" in text
     assert "general_tool_agent_tools=get_loaded_config_info" in text
+
+
+def test_decide_route_returns_default_for_explicit_directory_path_in_structured_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime_config = _build_runtime_config()
+    runtime_config.features.routing_mode = "structured"
+    runtime_config.features.enable_deep_agent = True
+    monkeypatch.setattr(llm_mcp_client_util_mod, "deepagents_available", lambda: True)
+    monkeypatch.setattr(type(runtime_config), "get_mcp_server_config", lambda self: _build_mcp_config("coding-agent", "general-tools"))
+    monkeypatch.setattr(
+        AgentClientUtil,
+        "create_llm",
+        classmethod(lambda cls, runtime_config: (_ for _ in ()).throw(AssertionError("LLM should not be called"))),
+    )
+
+    decision = asyncio.run(
+        AgentClientUtil.decide_route(
+            runtime_config=runtime_config,
+            prompts=CodingAgentPrompts(),
+            messages=[{"role": "user", "content": "work ディレクトリを確認してください。"}],
+            force_coding_agent_route=False,
+            force_deep_agent_route=False,
+            explicit_user_file_paths=[],
+            explicit_user_directory_paths=["/tmp/work"],
+            available_tool_names=["analyze_files", "get_loaded_config_info"],
+            route_tool_catalog={
+                "general_tool_agent": ["analyze_files", "get_loaded_config_info"],
+                "deep_agent": ["analyze_files", "get_loaded_config_info"],
+            },
+            audit_context=None,
+        )
+    )
+
+    assert decision.selected_route == "general_tool_agent"
+    assert decision.reason_code == "route.explicit_directory_path_request"
 
 
 def test_extract_task_id_from_tool_result_supports_text_part_list() -> None:
@@ -2443,6 +2546,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         force_coding_agent_route: bool,
         force_deep_agent_route: bool,
         explicit_user_file_paths: Any,
+        explicit_user_directory_paths: Any,
         available_tool_names: list[str],
         route_tool_catalog: dict[str, list[str]],
         audit_context: Any,
@@ -2473,6 +2577,7 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
         explicit_user_file_paths: Any = None,
+        explicit_user_directory_paths: Any = None,
         audit_context: Any | None = None,
     ) -> tuple[_FakeSupervisorApp, list[str]]:
         response = {
@@ -2604,6 +2709,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             force_coding_agent_route: bool,
             force_deep_agent_route: bool,
             explicit_user_file_paths: Any,
+            explicit_user_directory_paths: Any,
             available_tool_names: list[str],
             route_tool_catalog: dict[str, list[str]],
             audit_context: Any,
@@ -2636,6 +2742,7 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             checkpointer: Any | None = None,
             tool_limits: ToolLimits | None = None,
             explicit_user_file_paths: Any = None,
+            explicit_user_directory_paths: Any = None,
             routing_decision: Any = None,
             audit_context: Any | None = None,
             config_preflight_payload: Any | None = None,
@@ -2735,6 +2842,168 @@ def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkey
             sys.modules.pop("ai_chat_util.base.llm.llm_client", None)
 
 
+def test_agent_client_pauses_when_approval_required_evidence_is_observed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ai_chat_util.base.agent.agent_client as agent_client_mod
+
+    recorded_events: list[dict[str, Any]] = []
+
+    class _FakeAuditContext:
+        def emit(self, event_type: str, **kwargs: Any) -> None:
+            recorded_events.append({"event_type": event_type, **kwargs})
+
+    async def _fake_create_sqlite_checkpointer(
+        cls: type[AgentClientUtil],
+        checkpoint_db_path: Path | None,
+        *,
+        exit_stack: Any,
+    ) -> None:
+        return None
+
+    async def _fake_resolve_route_tool_inventory(
+        cls: type[AgentClientUtil],
+        *,
+        runtime_config: AiChatUtilConfig,
+    ) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "general_tool_agent": [
+                {"name": "analyze_files", "description": "analyze files", "primary_args": ["file_path_list", "prompt"]}
+            ]
+        }
+
+    async def _fake_decide_route(
+        cls: type[AgentClientUtil],
+        *,
+        runtime_config: AiChatUtilConfig,
+        prompts: Any,
+        messages: Any,
+        force_coding_agent_route: bool,
+        force_deep_agent_route: bool,
+        explicit_user_file_paths: Any,
+        explicit_user_directory_paths: Any,
+        available_tool_names: list[str],
+        route_tool_catalog: dict[str, list[str]],
+        audit_context: Any,
+    ) -> RoutingDecision:
+        candidate = RouteCandidate(
+            route_name="general_tool_agent",
+            score=0.97,
+            reason_code="route.local_file_investigation",
+            tool_hints=["analyze_files"],
+            blocking_issues=[],
+        )
+        return RoutingDecision(
+            selected_route="general_tool_agent",
+            candidate_routes=[candidate],
+            reason_code="route.local_file_investigation",
+            confidence=0.97,
+            missing_information=[],
+            next_action="execute_selected_route",
+            requires_hitl=False,
+            requires_clarification=False,
+            notes="approval regression test",
+        )
+
+    async def _fake_create_workflow(
+        cls: type[AgentClientUtil],
+        runtime_config: AiChatUtilConfig,
+        prompts: Any,
+        *,
+        checkpointer: Any | None = None,
+        tool_limits: ToolLimits | None = None,
+        force_coding_agent_route: bool = False,
+        force_deep_agent_route: bool = False,
+        explicit_user_file_paths: Any = None,
+        explicit_user_directory_paths: Any = None,
+        approved_tool_names: Any = None,
+        routing_decision: RoutingDecision | None = None,
+        audit_context: Any | None = None,
+        expects_heading_response: bool = False,
+        expects_evaluation_response: bool = False,
+    ) -> _FakeSupervisorApp:
+        response = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "<RESPONSE_TYPE>complete</RESPONSE_TYPE><TEXT>work ディレクトリを確認しました。</TEXT>",
+                }
+            ]
+        }
+        return _FakeSupervisorApp([response])
+
+    async def _fake_collect_evidence_results(
+        cls: type[AgentClientUtil],
+        *,
+        app: Any,
+        run_trace_id: str,
+        workflow_results: Any,
+        checkpoint_db_path: Path | None = None,
+    ) -> list[Any]:
+        return [
+            {
+                "messages": [
+                    {
+                        "role": "tool",
+                        "content": (
+                            "ERROR: tool approval required. error=tool_approval_required tool=analyze_files. "
+                            "このツールの実行には承認が必要です。続行する場合は 'APPROVE analyze_files'、拒否する場合は 'REJECT analyze_files' と入力してください。"
+                        ),
+                    }
+                ]
+            }
+        ]
+
+    async def _fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(agent_client_mod, "create_audit_context", lambda *args, **kwargs: _FakeAuditContext())
+    monkeypatch.setattr(AgentClientUtil, "_create_sqlite_checkpointer", classmethod(_fake_create_sqlite_checkpointer))
+    monkeypatch.setattr(AgentClientUtil, "resolve_route_tool_inventory", classmethod(_fake_resolve_route_tool_inventory))
+    monkeypatch.setattr(AgentClientUtil, "decide_route", classmethod(_fake_decide_route))
+    monkeypatch.setattr(AgentClientUtil, "create_workflow", classmethod(_fake_create_workflow))
+    monkeypatch.setattr(AgentClientUtil, "collect_evidence_results", classmethod(_fake_collect_evidence_results))
+    monkeypatch.setattr(AgentClientUtil, "collect_checkpoint_write_results", classmethod(lambda cls, checkpoint_db_path, run_trace_id: []))
+    monkeypatch.setattr(AgentClientUtil, "final_text_contradicts_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(AgentClientUtil, "final_text_missing_concrete_evidence", classmethod(lambda cls, user_text, evidence: False))
+    monkeypatch.setattr(agent_client_mod.asyncio, "sleep", _fake_sleep)
+
+    runtime_config = _build_runtime_config()
+    runtime_config.features.sufficiency_check_enabled = True
+    runtime_config.features.hitl_approval_tools = ["analyze_files"]
+
+    chat_request = ChatRequest(
+        chat_history=ChatHistory(
+            messages=[
+                ChatMessage(
+                    role="user",
+                    content=[ChatContent(params={"type": "text", "text": "work ディレクトリを確認してください"})],
+                )
+            ]
+        )
+    )
+
+    response = asyncio.run(AgentClient(runtime_config).chat(chat_request))
+
+    assert response.status == "paused"
+    assert response.hitl is not None
+    assert response.hitl.kind == "approval"
+    assert response.output == (
+        "ツール analyze_files の実行には承認が必要です。\n"
+        "続行する場合は 'APPROVE analyze_files'、拒否する場合は 'REJECT analyze_files' と入力してください。"
+    )
+
+    sufficiency_event = next(event for event in recorded_events if event["event_type"] == "sufficiency_judged")
+    assert sufficiency_event["payload"]["reason_code"] == "sufficiency.approval_required"
+    assert sufficiency_event["payload"]["requires_approval"] is True
+
+    hitl_event = next(event for event in recorded_events if event["event_type"] == "hitl_requested")
+    assert hitl_event["approval_status"] == "requested"
+    assert hitl_event["final_status"] == "paused"
+
+    final_event = next(event for event in recorded_events if event["event_type"] == "final_answer_validated")
+    assert final_event["final_status"] == "paused"
+    assert final_event["reason_code"] == "sufficiency.approval_required"
+
+
 def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded_events: list[dict[str, Any]] = []
 
@@ -2797,6 +3066,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         force_coding_agent_route: bool,
         force_deep_agent_route: bool,
         explicit_user_file_paths: Any,
+        explicit_user_directory_paths: Any,
         available_tool_names: list[str],
         route_tool_catalog: dict[str, list[str]],
         audit_context: Any,
@@ -2829,6 +3099,7 @@ def test_deepagent_mcp_client_forces_deep_route_without_prompt(monkeypatch: pyte
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
         explicit_user_file_paths: Any = None,
+        explicit_user_directory_paths: Any = None,
         audit_context: Any | None = None,
     ) -> tuple[_FakeSupervisorApp, list[str]]:
         response = {

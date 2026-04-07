@@ -191,6 +191,7 @@ class CodingAgentPrompts(PromptsBase):
 - ユーザーが `coding agent` / `coding-agent` / `コーディングエージェント` の利用を明示している場合は、原則 `coding_agent` を選んでください。
 - ユーザーが `deep agent` / `deep-agent` / `DeepAgents` の利用を明示しており、deep_agent route が利用可能なら `deep_agent` を選んでください。
 - ローカルファイルパスが含まれており、通常ツールで対応できる調査なら `general_tool_agent` を優先して構いません。
+- ローカルディレクトリパス、または working_directory 配下で解決できるディレクトリ名が含まれており、通常ツールで対応できる単発調査なら `general_tool_agent` を優先してください。
 - 複数ステップ調査や深い分解が必要で、非同期ジョブ系ツールが不要なら `deep_agent` を選んで構いません。
 - execute/status/get_result のような非同期ジョブ系ツールが必要な作業は `coding_agent` を優先してください。
 - 情報不足で route を安全に確定できない場合は、`requires_clarification=true` とし、`next_action=ask_user` を返してください。

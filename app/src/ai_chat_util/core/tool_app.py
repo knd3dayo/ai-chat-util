@@ -521,7 +521,7 @@ async def analyze_urls(
 
 
 async def analyze_files(
-        file_path_list: Annotated[list[str], Field(description="List of absolute paths to the files to analyze. e.g., [/path/to/document1.pdf, /path/to/image1.jpg]")],
+    file_path_list: Annotated[list[str], Field(description="List of existing file or directory paths to analyze. If the target is a directory, pass that directory path itself. Do not invent child paths or substitute unrelated files. e.g., [/path/to/document1.pdf, /path/to/workdir]")],
         prompt: Annotated[str, Field(description="Prompt to analyze the files")],
         detail: Annotated[
             str,
@@ -534,7 +534,13 @@ async def analyze_files(
         ] = "auto",
     ) -> Annotated[str, Field(description="Analysis result of the files")]:
     """
-    This function analyzes multiple files of various formats using the specified prompt and returns the analysis result.
+        Analyze existing files or directories using the specified prompt and return the result.
+
+        Usage rules:
+        - Pass only paths that actually exist.
+        - If the user asked to inspect a directory, pass the directory path itself.
+            This tool resolves supported files inside that directory automatically.
+        - Do not invent child paths, placeholder paths, or unrelated substitute files.
     """
     llm_client = create_llm_client()
     resolved_paths = _resolve_existing_file_paths(file_path_list)

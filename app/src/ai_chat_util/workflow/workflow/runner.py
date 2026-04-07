@@ -67,6 +67,7 @@ class WorkflowToolAgentRuntime:
 
         agent = await self._get_or_create_agent(normalized_names, auto_approve_tools=auto_approve_tools)
         execution_directive = ""
+        analysis_path_directive = ""
         if execution_mode == "dry_run":
             execution_directive = (
                 "このノードでは preview のみを行ってください。"
@@ -77,6 +78,12 @@ class WorkflowToolAgentRuntime:
                 "このノードのツール実行は人間承認済みです。"
                 "dry_run 引数を持つツールを使う場合は dry_run=False を明示して実実行してください。"
             )
+        if {"analyze_files", "analyze_image_files", "analyze_pdf_files", "analyze_office_files"} & set(normalized_names):
+            analysis_path_directive = (
+                "ファイル解析ツールへ渡す path は、ユーザー入力または直前のツール結果に現れた実在パスだけを使ってください。"
+                "ディレクトリ確認要求では個別ファイル名を推測せず、ディレクトリパス自体を渡してください。"
+                "ユーザーが指定していない config ファイルや仮想パスへ置き換えてはいけません。"
+            )
         prompt = (
             f"ワークフロー仕様Markdown:\n{flowchart.markdown or flowchart.code}\n\n"
             f"現在のノードID: {node.id}\n"
@@ -84,7 +91,8 @@ class WorkflowToolAgentRuntime:
             f"利用可能ツール:\n{allowed_tools_text}\n"
             f"ユーザー入力: {state.get('input_text', '')}\n"
             f"これまでのノード出力:\n{self._previous_outputs_text(state)}\n\n"
-            f"実行モード指示: {execution_directive or '通常実行'}\n\n"
+            f"実行モード指示: {execution_directive or '通常実行'}\n"
+            f"追加制約: {analysis_path_directive or 'なし'}\n\n"
             "必要ならツールを使ってノードの目的を達成してください。"
             "最終出力は system prompt の XML 形式に従ってください。"
         )

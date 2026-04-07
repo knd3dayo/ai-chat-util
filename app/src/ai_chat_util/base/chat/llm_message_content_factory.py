@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from typing import Optional
+from io import BytesIO
 import os
 import uuid
 import tempfile
 import atexit
 import base64
 from abc import ABC, abstractmethod
+
+from docx import Document as WordDocument
+from openpyxl import load_workbook
+from pptx import Presentation
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import (
@@ -23,6 +28,9 @@ logger = log_settings.getLogger(__name__)
 
 
 class LLMMessageContentFactoryBase(ABC):
+    _OFFICE_EXTRACT_MAX_SHEETS = 5
+    _OFFICE_EXTRACT_MAX_ROWS_PER_SHEET = 200
+    _OFFICE_EXTRACT_MAX_COLS_PER_ROW = 20
 
     def _get_effective_config(self) -> AiChatUtilConfig:
         config = self.get_config()
@@ -36,6 +44,85 @@ class LLMMessageContentFactoryBase(ABC):
 
     def _get_configured_libreoffice_path(self) -> str | None:
         return self._get_effective_config().office2pdf.libreoffice_path
+
+    def _extract_word_text(self, document_type: FileUtilDocument) -> str:
+        document = WordDocument(BytesIO(document_type.data))
+        parts: list[str] = []
+
+        for paragraph in document.paragraphs:
+            text = paragraph.text.strip()
+            if text:
+                parts.append(text)
+
+        for table in document.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                if any(cells):
+                    parts.append(" | ".join(cells))
+
+        return "\n".join(parts).strip()
+
+    def _extract_excel_text(self, document_type: FileUtilDocument) -> str:
+        workbook = load_workbook(filename=BytesIO(document_type.data), read_only=True, data_only=True)
+        parts: list[str] = []
+
+        for sheet_index, sheet_name in enumerate(workbook.sheetnames, start=1):
+            if sheet_index > self._OFFICE_EXTRACT_MAX_SHEETS:
+                parts.append("[Truncated additional sheets]")
+                break
+
+            sheet = workbook[sheet_name]
+            parts.append(f"[Sheet] {sheet_name}")
+            row_count = 0
+            for row in sheet.iter_rows(values_only=True):
+                values = ["" if value is None else str(value).strip() for value in row[: self._OFFICE_EXTRACT_MAX_COLS_PER_ROW]]
+                if not any(values):
+                    continue
+                parts.append(" | ".join(values))
+                row_count += 1
+                if row_count >= self._OFFICE_EXTRACT_MAX_ROWS_PER_SHEET:
+                    parts.append("[Truncated additional rows]")
+                    break
+
+        workbook.close()
+        return "\n".join(parts).strip()
+
+    def _extract_ppt_text(self, document_type: FileUtilDocument) -> str:
+        presentation = Presentation(BytesIO(document_type.data))
+        parts: list[str] = []
+
+        for slide_index, slide in enumerate(presentation.slides, start=1):
+            parts.append(f"[Slide {slide_index}]")
+            for shape in slide.shapes:
+                text = getattr(shape, "text", "")
+                normalized = text.strip() if isinstance(text, str) else ""
+                if normalized:
+                    parts.append(normalized)
+
+        return "\n".join(parts).strip()
+
+    def _extract_office_text(self, document_type: FileUtilDocument) -> str:
+        if document_type.is_word():
+            return self._extract_word_text(document_type)
+        if document_type.is_excel():
+            return self._extract_excel_text(document_type)
+        if document_type.is_ppt():
+            return self._extract_ppt_text(document_type)
+        return ""
+
+    def _create_office_text_fallback_content(self, document_type: FileUtilDocument) -> list["ChatContent"]:
+        extracted_text = self._extract_office_text(document_type)
+        if not extracted_text:
+            raise RuntimeError(f"Failed to extract text from office document: {document_type.identifier}")
+
+        explanation_content = self.create_text_content(
+            text=(
+                f"LibreOffice が利用できないため、Office ドキュメント {document_type.identifier} から "
+                "直接テキストを抽出した内容を以下に示します。"
+            )
+        )
+        body_content = self.create_text_content(text=extracted_text)
+        return [explanation_content, body_content]
 
     def is_text_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "text"
@@ -165,26 +252,45 @@ class LLMMessageContentFactoryBase(ABC):
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        # Officeドキュメントを一時的にPDFに変換する
-        temp_dir = tempfile.TemporaryDirectory()
-        atexit.register(temp_dir.cleanup)
-        temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
-        Office2PDFUtil.create_pdf_from_document_bytes(
-            input_bytes=document_type.data,
-            output_path=temp_file_path,
-            configured_libreoffice_path=self._get_configured_libreoffice_path(),
+        configured_libreoffice_path = self._get_configured_libreoffice_path()
+        libreoffice_binary = Office2PDFUtil.try_find_libreoffice_binary(
+            configured_path=configured_libreoffice_path,
         )
-        # 元ファイルからPDFに変換した旨の説明を追加
-        explanation_text = f"""
-            {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
-            ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
-            """
-        explanation_content = self.create_text_content(text=explanation_text)
-        pdf_contents = [explanation_content]
+        if libreoffice_binary is None:
+            logger.info(
+                "LibreOffice is unavailable. Falling back to direct office text extraction for %s",
+                document_type.identifier,
+            )
+            return self._create_office_text_fallback_content(document_type)
 
-        pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
+        try:
+            # Officeドキュメントを一時的にPDFに変換する
+            temp_dir = tempfile.TemporaryDirectory()
+            atexit.register(temp_dir.cleanup)
+            temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
+            Office2PDFUtil.create_pdf_from_document_bytes(
+                input_bytes=document_type.data,
+                output_path=temp_file_path,
+                configured_libreoffice_path=libreoffice_binary,
+            )
+            # 元ファイルからPDFに変換した旨の説明を追加
+            explanation_text = f"""
+                {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
+                ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
+                """
+            explanation_content = self.create_text_content(text=explanation_text)
+            pdf_contents = [explanation_content]
 
-        return pdf_contents
+            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
+
+            return pdf_contents
+        except Exception:
+            logger.warning(
+                "Failed to convert office document to PDF. Falling back to direct text extraction for %s",
+                document_type.identifier,
+                exc_info=True,
+            )
+            return self._create_office_text_fallback_content(document_type)
 
     def create_office_content_from_file(
             self, file_path: str, detail: str = "auto"

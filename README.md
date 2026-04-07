@@ -43,9 +43,14 @@ cp app/ai-chat-util-config.yml ./ai-chat-util-config.yml
 ai_chat_util_config:
   llm:
     provider: openai
-    completion_model: gpt-5
+    completion_model: poc-chat-model
     api_key: os.environ/LLM_API_KEY
 ```
+
+補足:
+
+- 現在の self-host LiteLLM 検証環境では、既定の chat / embedding モデル名は `poc-chat-model` / `poc-embedding-model` です。
+- Office 文書解析は、LibreOffice がある場合は PDF 変換経由、ない場合は Word / Excel / PowerPoint の本文テキスト抽出フォールバックで動作します。
 
 ### 3. まずは CLI で試す
 
@@ -79,6 +84,14 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
 uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
   -i note.txt document.pdf image.png \
   -p "内容を要約してください"
+```
+
+Office 文書解析の例:
+
+```bash
+uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
+  -i data/sample.docx data/sample.xlsx data/sample.pptx \
+  -p "各ファイルの概要を要約してください"
 ```
 
 Excel バッチ:

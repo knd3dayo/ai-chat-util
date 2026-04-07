@@ -20,6 +20,8 @@ logger = log_settings.getLogger(__name__)
 
 
 class AnalysisService:
+    _MAX_DIRECTORY_ANALYSIS_FILES = 20
+    _MAX_DIRECTORY_ANALYSIS_FILE_BYTES = 200_000
     _SUPPORTED_TEXT_SUFFIXES = {
         ".bat",
         ".c",
@@ -98,6 +100,10 @@ class AnalysisService:
             or suffix in cls._SUPPORTED_DOCUMENT_SUFFIXES
         )
 
+    @staticmethod
+    def _is_hidden_path(path: Path) -> bool:
+        return any(part.startswith(".") for part in path.parts)
+
     @classmethod
     def _expand_directory_analysis_targets(cls, directory_path: str) -> list[str]:
         directory = Path(directory_path)
@@ -110,10 +116,21 @@ class AnalysisService:
             except OSError:
                 continue
 
+            if cls._is_hidden_path(candidate.relative_to(directory)):
+                continue
+
             if not cls._is_supported_analysis_file(candidate):
                 continue
 
+            try:
+                if candidate.stat().st_size > cls._MAX_DIRECTORY_ANALYSIS_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+
             resolved_files.append(str(candidate.resolve()))
+            if len(resolved_files) >= cls._MAX_DIRECTORY_ANALYSIS_FILES:
+                break
 
         if resolved_files:
             return resolved_files

@@ -35,6 +35,7 @@
 - 画像ファイル、PDFファイル、Officeドキュメント（Word, Excel, PowerPointなど）をAIに渡して内容を解析。
 - 画像認識、文書要約、表データ抽出などの処理をサポート。
 - 解析前処理として、Office→PDF 変換と PDF→ページ画像変換を API / MCP ツールとして利用可能。
+- LibreOffice が見つからない環境では、Word / Excel / PowerPoint は既存ライブラリによる本文テキスト抽出へ自動フォールバックする。
 
 ### 🧩 MCPサーバー連携
 - `mcp_server.py` により、MCPプロトコルを介して外部ツールや他のAIサービスと連携可能。
@@ -200,6 +201,11 @@ WF 型 workflow は Mermaid 単体ではなく Markdown 全体を入力にしま
 cd app
 uv run ai-chat-util run_workflow -f src/ai_chat_util/workflow/samples/data/sample2.md -m "work ディレクトリを確認してください"
 ```
+
+注意:
+
+- workflow へ渡すメッセージには、調査対象ディレクトリの具体パスまたは相対パスを含めてください。
+- sample2 は、ユーザーが指定したパスをそのまま使う前提で調査を行い、`/path/to/work` のようなダミーパスを生成しないよう補正しています。
 
 plan モード:
 

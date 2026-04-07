@@ -26,10 +26,10 @@ ai_chat_util_config:
     api_key: os.environ/LLM_API_KEY
 
     # Model name (or Azure deployment name) for chat completion
-    completion_model: gpt-4o
+    completion_model: poc-chat-model
 
     # Model name for embeddings
-    embedding_model: text-embedding-3-small
+    embedding_model: poc-embedding-model
 
     # Non-secret API base URL (optional).
     # - OpenAI: https://api.openai.com/v1/

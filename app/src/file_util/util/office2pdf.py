@@ -347,11 +347,11 @@ class Office2PDFUtil:
         return target.resolve()
 
     @classmethod
-    def find_libreoffice_binary(
+    def try_find_libreoffice_binary(
         cls,
         explicit_path: str | Path | None = None,
         configured_path: str | Path | None = None,
-    ) -> str:
+    ) -> str | None:
         candidate = explicit_path or configured_path
         if candidate:
             candidate_path = Path(candidate).expanduser()
@@ -360,12 +360,31 @@ class Office2PDFUtil:
             executable = shutil.which(str(candidate))
             if executable:
                 return executable
-            raise FileNotFoundError(f"LibreOffice binary not found at {candidate}")
+            return None
 
         for binary in ("soffice", "libreoffice"):
             executable = shutil.which(binary)
             if executable:
                 return executable
+
+        return None
+
+    @classmethod
+    def find_libreoffice_binary(
+        cls,
+        explicit_path: str | Path | None = None,
+        configured_path: str | Path | None = None,
+    ) -> str:
+        candidate = explicit_path or configured_path
+        resolved = cls.try_find_libreoffice_binary(
+            explicit_path=explicit_path,
+            configured_path=configured_path,
+        )
+        if resolved:
+            return resolved
+
+        if candidate:
+            raise FileNotFoundError(f"LibreOffice binary not found at {candidate}")
 
         raise RuntimeError(
             "LibreOffice binary not found. Set office2pdf.libreoffice_path in ai-chat-util-config.yml "

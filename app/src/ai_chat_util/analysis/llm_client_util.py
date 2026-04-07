@@ -176,11 +176,28 @@ class LLMClientUtil:
         detail: str = "auto",
     ) -> ChatResponse:
         content_list = []
+        skipped_files: list[str] = []
         for file_path in file_path_list:
-            contents = llm_client.get_message_factory().create_multi_format_contents_from_file(
-                file_path, detail=detail
-            )
+            try:
+                contents = llm_client.get_message_factory().create_multi_format_contents_from_file(
+                    file_path, detail=detail
+                )
+            except ValueError as exc:
+                if "Unsupported document type" not in str(exc):
+                    raise
+                skipped_files.append(file_path)
+                logger.info("FILE_ANALYZE_SKIP unsupported=%s", file_path)
+                continue
             content_list.extend(contents)
+
+        if not content_list:
+            raise ValueError(
+                "No supported files were found for analyze_files. "
+                f"skipped={len(skipped_files)}"
+            )
+
+        if skipped_files:
+            logger.info("FILE_ANALYZE_SKIPPED_COUNT count=%d", len(skipped_files))
 
         prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
         chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)

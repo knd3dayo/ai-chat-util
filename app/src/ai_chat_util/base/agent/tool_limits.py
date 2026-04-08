@@ -144,13 +144,19 @@ class ToolLimits(BaseModel):
         tool_call_limit_int: int,
         followup_tool_call_limit_int: int,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
     ) -> tuple[int, int]:
-        normalized_paths = [
+        normalized_file_paths = [
             str(path).strip()
             for path in (explicit_user_file_paths or [])
             if isinstance(path, str) and str(path).strip()
         ]
-        if not normalized_paths:
+        normalized_directory_paths = [
+            str(path).strip()
+            for path in (explicit_user_directory_paths or [])
+            if isinstance(path, str) and str(path).strip()
+        ]
+        if not normalized_file_paths and not normalized_directory_paths:
             return tool_call_limit_int, followup_tool_call_limit_int
 
         effective_tool_limit = tool_call_limit_int

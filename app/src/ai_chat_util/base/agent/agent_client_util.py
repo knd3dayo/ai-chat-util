@@ -2504,6 +2504,7 @@ class AgentClientUtil:
         tool_limits: ToolLimits | None,
         audit_context: AuditContext | None,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
     ) -> list[Any]:
         agent_client = MultiServerMCPClient(runtime_config.get_mcp_server_config().to_langchain_config())
         deep_agent_tools = [
@@ -2523,6 +2524,7 @@ class AgentClientUtil:
             tool_call_limit_int,
             followup_limit,
             explicit_user_file_paths,
+            explicit_user_directory_paths,
         )
         configured_hitl_approval_tools = [
             str(name).strip()
@@ -2540,6 +2542,11 @@ class AgentClientUtil:
             "explicit_user_file_paths": [
                 str(path).strip()
                 for path in (explicit_user_file_paths or [])
+                if isinstance(path, str) and str(path).strip()
+            ],
+            "explicit_user_directory_paths": [
+                str(path).strip()
+                for path in (explicit_user_directory_paths or [])
                 if isinstance(path, str) and str(path).strip()
             ],
         }
@@ -2560,6 +2567,7 @@ class AgentClientUtil:
         checkpointer: Any | None = None,
         tool_limits: ToolLimits | None = None,
         explicit_user_file_paths: Sequence[str] | None = None,
+        explicit_user_directory_paths: Sequence[str] | None = None,
         audit_context: AuditContext | None = None,
     ) -> tuple[CompiledStateGraph, list[str]]:
         create_deep_agent = require_create_deep_agent()
@@ -2569,11 +2577,16 @@ class AgentClientUtil:
             tool_limits=tool_limits,
             audit_context=audit_context,
             explicit_user_file_paths=explicit_user_file_paths,
+            explicit_user_directory_paths=explicit_user_directory_paths,
         )
         graph = create_deep_agent(
             model=llm,
             tools=deep_agent_tools,
-            system_prompt=build_deep_agent_system_prompt(runtime_config.mcp.working_directory),
+            system_prompt=build_deep_agent_system_prompt(
+                runtime_config.mcp.working_directory,
+                explicit_user_file_paths=explicit_user_file_paths,
+                explicit_user_directory_paths=explicit_user_directory_paths,
+            ),
             checkpointer=checkpointer,
             name="mcp_deep_agent",
         )
@@ -2609,6 +2622,7 @@ class AgentClientUtil:
                 checkpointer=checkpointer,
                 tool_limits=tool_limits,
                 explicit_user_file_paths=explicit_user_file_paths,
+                explicit_user_directory_paths=explicit_user_directory_paths,
                 audit_context=audit_context,
             )
             if audit_context is not None:
@@ -3426,6 +3440,62 @@ class AgentClientUtil:
             has_actionable_evidence=bool(headings or stdout_blocks or evidence.get("config_path")),
         )
 
+    @staticmethod
+    def _contains_absence_claim(response_text: str) -> bool:
+        normalized = (response_text or "").strip().lower()
+        if not normalized:
+            return False
+        markers = (
+            "空です",
+            "空でした",
+            "空のディレクトリ",
+            "見つかりませんでした",
+            "見つからない",
+            "存在しません",
+            "存在しない",
+            "ファイルがありません",
+            "ファイルが存在しない",
+            "ディレクトリは空",
+            "not found",
+            "no files found",
+            "directory is empty",
+            "empty directory",
+            "does not exist",
+        )
+        return any(marker in normalized for marker in markers)
+
+    @staticmethod
+    def _has_substantive_tool_evidence(evidence_summary: EvidenceSummary) -> bool:
+        if evidence_summary.headings or evidence_summary.stdout_blocks:
+            return True
+        for text in evidence_summary.tool_errors:
+            normalized = str(text).strip().lower()
+            if not normalized:
+                continue
+            if any(
+                marker in normalized
+                for marker in (
+                    "path not found",
+                    "no supported analysis files found",
+                    "file not found",
+                    "directory",
+                    "見つかりません",
+                    "存在しません",
+                    "空です",
+                )
+            ):
+                return True
+        for text in evidence_summary.raw_texts:
+            normalized = str(text).strip()
+            if not normalized:
+                continue
+            if normalized in {"[]", "{}", "null", "None"}:
+                continue
+            if normalized.startswith("ERROR:"):
+                continue
+            return True
+        return False
+
     @classmethod
     def judge_sufficiency(
         cls,
@@ -3465,6 +3535,17 @@ class AgentClientUtil:
                 reason_code="sufficiency.tool_result_error_only",
                 confidence=0.7,
                 missing_facts=["successful tool evidence is unavailable"],
+                recommended_next_action="call_more_tools",
+                requires_hitl=False,
+                requires_approval=False,
+                evidence_summary=evidence_summary,
+            )
+        if cls._contains_absence_claim(response_text) and not cls._has_substantive_tool_evidence(evidence_summary):
+            return SufficiencyDecision(
+                decision="needs_more_tool_calls",
+                reason_code="sufficiency.unverified_absence_claim",
+                confidence=0.85,
+                missing_facts=["absence claim is not backed by substantive tool evidence"],
                 recommended_next_action="call_more_tools",
                 requires_hitl=False,
                 requires_approval=False,

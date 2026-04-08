@@ -30,7 +30,7 @@ from ai_chat_util.base.agent.agent_client import AgentClient
 from ai_chat_util.base.agent.tool_limits import ToolLimits
 from ai_chat_util.base.agent.prompts import CodingAgentPrompts
 from ai_chat_util.base.agent.agent_client_util import AgentClientUtil
-from ai_chat_util.base.agent.supervisor_support import RouteCandidate, RoutingDecision
+from ai_chat_util.base.agent.supervisor_support import EvidenceSummary, RouteCandidate, RoutingDecision
 from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig, MCPServerConfigEntry
 from ai_chat_util.common.config.runtime import (
     AiChatUtilConfig,
@@ -1961,6 +1961,52 @@ def test_build_evidence_summary_does_not_mark_heading_extraction_for_evaluation_
     assert "heading_extraction" not in summary.successful_tools
 
 
+def test_judge_sufficiency_rejects_unverified_absence_claim_with_config_only_evidence() -> None:
+    decision = AgentClientUtil.judge_sufficiency(
+        response_text='指定されたディレクトリ "/tmp/docs" は空です。',
+        resp_type="complete",
+        hitl_kind=None,
+        evidence_summary=EvidenceSummary(
+            config_path="/tmp/ai-chat-util-config.yml",
+            headings=[],
+            stdout_blocks=[],
+            raw_texts=["[]", "[]"],
+            tool_errors=[],
+            successful_tools=["get_loaded_config_info", "tool_catalog_resolved"],
+            latest_task_id=None,
+            has_actionable_evidence=True,
+        ),
+    )
+
+    assert decision.decision == "needs_more_tool_calls"
+    assert decision.reason_code == "sufficiency.unverified_absence_claim"
+
+
+def test_judge_sufficiency_accepts_absence_claim_when_substantive_tool_evidence_exists() -> None:
+    decision = AgentClientUtil.judge_sufficiency(
+        response_text='指定されたディレクトリ "/tmp/missing" は見つかりませんでした。',
+        resp_type="complete",
+        hitl_kind=None,
+        evidence_summary=EvidenceSummary(
+            config_path="/tmp/ai-chat-util-config.yml",
+            headings=[],
+            stdout_blocks=[],
+            raw_texts=[
+                "ERROR: tool=analyze_files failed (ToolException). error=tool_invocation_failed: Path not found. Path resolution failed."
+            ],
+            tool_errors=[
+                "ERROR: tool=analyze_files failed (ToolException). error=tool_invocation_failed: Path not found. Path resolution failed."
+            ],
+            successful_tools=["get_loaded_config_info", "tool_catalog_resolved"],
+            latest_task_id=None,
+            has_actionable_evidence=True,
+        ),
+    )
+
+    assert decision.decision == "answerable"
+    assert decision.reason_code == "sufficiency.answer_supported_by_evidence"
+
+
 def test_extract_successful_tool_evidence_ignores_synthetic_headings_by_file_block() -> None:
     evidence = AgentClientUtil.extract_successful_tool_evidence(
         [
@@ -2659,6 +2705,97 @@ def test_mcp_client_chat_emits_deep_agent_audit_events(monkeypatch: pytest.Monke
     final_validated_event = next(event for event in recorded_events if event["event_type"] == "final_answer_validated")
     assert final_validated_event["final_status"] == "completed"
     assert final_validated_event["reason_code"] == "audit.validation_passed"
+
+
+def test_create_workflow_forwards_explicit_directories_to_deep_agent_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_create_deep_agent_workflow(
+        cls: type[AgentClientUtil],
+        runtime_config: AiChatUtilConfig,
+        *,
+        checkpointer: Any | None = None,
+        tool_limits: ToolLimits | None = None,
+        explicit_user_file_paths: Any = None,
+        explicit_user_directory_paths: Any = None,
+        audit_context: Any | None = None,
+    ) -> tuple[Any, list[str]]:
+        captured["explicit_user_file_paths"] = list(explicit_user_file_paths or [])
+        captured["explicit_user_directory_paths"] = list(explicit_user_directory_paths or [])
+        return object(), ["analyze_files"]
+
+    monkeypatch.setattr(AgentClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+    monkeypatch.setattr(AgentClientUtil, "create_deep_agent_workflow", classmethod(_fake_create_deep_agent_workflow))
+
+    runtime_config = _build_runtime_config()
+    runtime_config.features.enable_deep_agent = True
+    routing_decision = RoutingDecision(
+        selected_route="deep_agent",
+        candidate_routes=[],
+        reason_code="route.multi_step_investigation_needed",
+        confidence=0.98,
+        missing_information=[],
+        next_action="execute_selected_route",
+        requires_hitl=False,
+        requires_clarification=False,
+        notes="test",
+    )
+
+    asyncio.run(
+        AgentClientUtil.create_workflow(
+            runtime_config,
+            prompts=CodingAgentPrompts(),
+            routing_decision=routing_decision,
+            explicit_user_file_paths=[],
+            explicit_user_directory_paths=["/tmp/work/docs"],
+        )
+    )
+
+    assert captured["explicit_user_file_paths"] == []
+    assert captured["explicit_user_directory_paths"] == ["/tmp/work/docs"]
+
+
+def test_create_deep_agent_workflow_includes_explicit_directories_in_prompt_and_tool_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_resolve_deep_agent_tools(
+        cls: type[AgentClientUtil],
+        *,
+        runtime_config: AiChatUtilConfig,
+        tool_limits: ToolLimits | None,
+        audit_context: Any | None,
+        explicit_user_file_paths: Any = None,
+        explicit_user_directory_paths: Any = None,
+    ) -> list[Any]:
+        captured["explicit_user_file_paths"] = list(explicit_user_file_paths or [])
+        captured["explicit_user_directory_paths"] = list(explicit_user_directory_paths or [])
+        return [_NamedTool("analyze_files")]
+
+    def _fake_create_deep_agent(**kwargs: Any) -> str:
+        captured["system_prompt"] = kwargs["system_prompt"]
+        return "graph"
+
+    monkeypatch.setattr(AgentClientUtil, "create_llm", classmethod(lambda cls, runtime_config: object()))
+    monkeypatch.setattr(AgentClientUtil, "_resolve_deep_agent_tools", classmethod(_fake_resolve_deep_agent_tools))
+    monkeypatch.setattr(llm_mcp_client_util_mod, "require_create_deep_agent", lambda: _fake_create_deep_agent)
+
+    runtime_config = _build_runtime_config()
+    runtime_config.features.enable_deep_agent = True
+
+    graph, tool_names = asyncio.run(
+        AgentClientUtil.create_deep_agent_workflow(
+            runtime_config,
+            explicit_user_file_paths=[],
+            explicit_user_directory_paths=["/tmp/work/docs"],
+        )
+    )
+
+    assert graph == "graph"
+    assert tool_names == ["analyze_files"]
+    assert captured["explicit_user_file_paths"] == []
+    assert captured["explicit_user_directory_paths"] == ["/tmp/work/docs"]
+    assert "/tmp/work/docs" in captured["system_prompt"]
+    assert "glob や child path へ勝手に変形しない" in captured["system_prompt"]
 
 
 def test_mcp_client_chat_emits_selected_server_key_for_coding_agent_route(monkeypatch: pytest.MonkeyPatch) -> None:

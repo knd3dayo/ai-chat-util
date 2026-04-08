@@ -17,8 +17,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..process_utils import popen_new_process_group_kwargs
-
 
 def _redact_cmd(argv: list[str]) -> list[str]:
     """Best-effort redaction for secrets in command arguments.
@@ -146,7 +144,6 @@ def main(argv: list[str] | None = None) -> int:
                 stdout=out,
                 stderr=err,
                 stdin=subprocess.DEVNULL,
-                **popen_new_process_group_kwargs(),
                 close_fds=True,
                 text=True,
             )

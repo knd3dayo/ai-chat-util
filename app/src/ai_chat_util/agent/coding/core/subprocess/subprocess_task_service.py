@@ -170,6 +170,10 @@ class SubprocessTaskService(AbstractTaskService):
             if loop.time() - start > timeout:
                 task_status = self.runner.get_task_status()
                 self.cancel_task(task_status)
+                try:
+                    self.runner.exit_code_file.write_text("124", encoding="utf-8")
+                except Exception:
+                    pass
                 task_status.timeouted(timeout)
                 yield task_status
                 return

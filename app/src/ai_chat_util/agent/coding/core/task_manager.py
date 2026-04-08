@@ -276,6 +276,14 @@ class TaskManager:
                     stderr=stderr,
                 )
 
+            # Preserve already-converged final states even if the detached wrapper
+            # was terminated before writing `.exit_code`.
+            if task.status == "exited" and task.sub_status in ("timeout", "cancelled", "failed", "completed"):
+                task.stdout = _tail_text(stdout_path, None)
+                task.stderr = _tail_text(stderr_path, None)
+                TaskManager.upsert_task(task)
+                return task
+
             # Race condition: process may have exited but `.exit_code` isn't written yet.
             # Do NOT mark the task as failed/exited here; keep it running so callers continue polling.
             stdout = _tail_text(stdout_path, tail)
@@ -385,6 +393,24 @@ class TaskManager:
     ) -> None:
         """新しいタスクを実行します。"""
         await task_service.prepare(prompt, sources, task_id, extra_env=None)
+
+        if wait:
+            task_status = task_service.start(wait=True, timeout=timeout)
+            cls.upsert_task(task_status)
+            actions.after_start_task_action(task_status.task_id)
+
+            monitor_task = asyncio.create_task(cls._monitor_wrapper(task_service, timeout))
+            try:
+                await actions.progress_action(task_status.task_id)
+                await monitor_task
+            finally:
+                if not monitor_task.done():
+                    monitor_task.cancel()
+
+            final_status = await cls.get_status(task_status.task_id, tail=1000)
+            if final_status.sub_status == "completed":
+                actions.after_complete_action(task_service.get_agent_runner())
+            return
 
         async for status in cls._run_(task_service, timeout, wait):
             if status.sub_status in ("running-foreground", "starting"):

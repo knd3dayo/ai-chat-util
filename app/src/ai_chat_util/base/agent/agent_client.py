@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping, Sequence, cast
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, cast
 
 import contextlib
 import uuid
@@ -17,7 +17,6 @@ from ai_chat_util.common.model.request_headers import get_current_request_header
 from ai_chat_util.base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
 from ai_chat_util.base.chat import LLMMessageContentFactoryBase, LLMMessageContentFactory
-from ai_chat_util.workflow.chat_client import WorkflowChatClient
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 
@@ -26,6 +25,21 @@ logger = log_settings.getLogger(__name__)
 
 from .agent_client_util import AgentClientUtil
 from .tool_limits import ToolLimits
+
+if TYPE_CHECKING:
+    from ai_chat_util.workflow.chat_client import WorkflowChatClient as WorkflowChatClientType
+
+
+WorkflowChatClient: Any | None = None
+
+
+def _get_workflow_chat_client_class() -> type[WorkflowChatClientType] | Any:
+    global WorkflowChatClient
+    if WorkflowChatClient is None:
+        from ai_chat_util.workflow.chat_client import WorkflowChatClient as ImportedWorkflowChatClient
+
+        WorkflowChatClient = ImportedWorkflowChatClient
+    return WorkflowChatClient
 
 class AgentClient(AbstractChatClient):
     def __init__(self, runtime_config: AiChatUtilConfig, default_request_context: ChatRequestContext | None = None):
@@ -288,7 +302,8 @@ class AgentClient(AbstractChatClient):
                         input_tokens=0,
                         output_tokens=0,
                     )
-                workflow_client = WorkflowChatClient(
+                workflow_client_cls = _get_workflow_chat_client_class()
+                workflow_client = workflow_client_cls(
                     workflow_file_path,
                     runtime_config=self.runtime_config,
                     max_node_visits=workflow_max_node_visits,

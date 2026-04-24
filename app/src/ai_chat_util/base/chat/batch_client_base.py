@@ -11,7 +11,7 @@ from ai_chat_util.common.config.runtime import AiChatUtilConfig
 
 import ai_chat_util.log.log_settings as log_settings
 
-from .abstract_batch_client import AbstractBatchClient
+from ..chat.abstract_batch_client import AbstractBatchClient
 
 logger = log_settings.getLogger(__name__)
 

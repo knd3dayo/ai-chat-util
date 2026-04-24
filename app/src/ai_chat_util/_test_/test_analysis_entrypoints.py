@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ai_chat_util.analysis import AnalysisService
-import ai_chat_util.analysis.analysis_service as analysis_service_mod
+import ai_chat_util.base.chat.analysis_service as analysis_service_mod
 from ai_chat_util.api.api_server import router
 from ai_chat_util.core import tool_app
 from ai_chat_util.common.model.ai_chatl_util_models import ChatResponse

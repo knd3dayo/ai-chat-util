@@ -5,7 +5,7 @@ from abc import abstractmethod
 from tqdm.asyncio import tqdm_asyncio
 import pandas as pd
 
-from ai_chat_util.base.chat import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
 from ai_chat_util.common.model.ai_chatl_util_models import ChatMessage, ChatResponse, ChatHistory, ChatContent, ChatRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
 

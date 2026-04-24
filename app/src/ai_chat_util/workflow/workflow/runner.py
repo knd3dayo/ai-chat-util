@@ -12,10 +12,10 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field, PrivateAttr
 
 import ai_chat_util.log.log_settings as log_settings
-from ai_chat_util.base.agent.agent_builder import AgentBuilder
-from ai_chat_util.base.agent.agent_client_util import AgentClientUtil
-from ai_chat_util.base.agent.prompts import CodingAgentPrompts
-from ai_chat_util.base.agent.tool_limits import ToolLimits
+from ai_chat_util.ai_chat_util_agent.core.agent_builder import AgentBuilder
+from ai_chat_util.ai_chat_util_agent.core.agent_client_util import AgentClientUtil
+from ai_chat_util.ai_chat_util_agent.core.prompts import CodingAgentPrompts
+from ai_chat_util.ai_chat_util_agent.core.tool_limits import ToolLimits
 from ai_chat_util.common.model.ai_chatl_util_models import HitlRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.workflow.mermaid.mermaid_flowchart import MermaidFlowChart

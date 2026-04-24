@@ -8,7 +8,7 @@ from ai_chat_util.workflow.workflow.flowchat import Flowchart, GraphEdge, GraphN
 from ai_chat_util.workflow.workflow.langgraph_builder import NodeExecutionResult, WorkflowState
 from ai_chat_util.workflow.workflow.markdown_workflow import WorkflowMarkdownDocument, WorkflowToolReference
 from ai_chat_util.workflow.workflow.runner import WorkflowPauseResult, apply_markdown_context_to_flowchart
-from ai_chat_util.base.agent.agent_client_util import AgentClientUtil
+from ai_chat_util.ai_chat_util_agent.core.agent_client_util import AgentClientUtil
 
 
 class FakeExecutor:

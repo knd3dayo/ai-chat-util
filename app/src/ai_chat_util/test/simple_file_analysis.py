@@ -1,4 +1,4 @@
-from ai_chat_util.base.chat import create_llm_client
+from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.analysis import AnalysisService
 
 async def main(files):

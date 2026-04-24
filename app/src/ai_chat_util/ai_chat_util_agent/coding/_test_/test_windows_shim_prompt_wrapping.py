@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from ai_chat_util.agent.coding.core.subprocess.windows_process_coding_agent_runner import (
+from ai_chat_util.ai_chat_util_agent.coding.core.subprocess.windows_process_coding_agent_runner import (
     WindowsProcessCodingAgentRunner,
 )
 

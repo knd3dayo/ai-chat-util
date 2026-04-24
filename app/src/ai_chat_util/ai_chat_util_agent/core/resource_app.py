@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from ai_chat_util.base.chat import create_llm_client
+from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config, get_runtime_config_info
 from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatMessage
 from file_util.model import FileUtilDocument

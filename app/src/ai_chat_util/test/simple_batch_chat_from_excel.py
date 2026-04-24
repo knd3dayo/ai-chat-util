@@ -1,4 +1,4 @@
-from ai_chat_util.base.batch import BatchClient
+from ai_chat_util.ai_chat_util_base.batch import BatchClient
 
 async def main(input_file: str, output_file: str):
 

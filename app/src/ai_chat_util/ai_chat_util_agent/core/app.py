@@ -3,10 +3,10 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from ai_chat_util.base.agent import DeepAgentBatchClient, MCPBatchClient
-from ai_chat_util.base.agent.agent_client_factory import AgentFactory
-from ai_chat_util.base.batch import BatchClient
-from ai_chat_util.base.chat import create_llm_client
+from ai_chat_util.ai_chat_util_agent.core import DeepAgentBatchClient, MCPBatchClient
+from ai_chat_util.ai_chat_util_agent.core.agent_client_factory import AgentFactory
+from ai_chat_util.ai_chat_util_base.batch import BatchClient
+from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.common.model.ai_chatl_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse, WebRequestModel
 from ai_chat_util.common.model.request_headers import get_current_request_headers

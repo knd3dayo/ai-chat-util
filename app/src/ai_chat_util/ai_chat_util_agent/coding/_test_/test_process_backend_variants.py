@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from ai_chat_util.agent.coding.core.task_manager import TaskManager
-from ai_chat_util.agent.coding.core.abstract_actions import AbstractActions
-from ai_chat_util.agent.coding.core.abstract_task_service import AbstractTaskService
-from ai_chat_util.agent.coding.core.subprocess import subprocess_entrypoint
+from ai_chat_util.ai_chat_util_agent.coding.core.task_manager import TaskManager
+from ai_chat_util.ai_chat_util_agent.coding.core.abstract_actions import AbstractActions
+from ai_chat_util.ai_chat_util_agent.coding.core.abstract_task_service import AbstractTaskService
+from ai_chat_util.ai_chat_util_agent.coding.core.subprocess import subprocess_entrypoint
 from ai_chat_util.common.model.agent_util_models import TaskStatus
 from ai_chat_util.common.config.runtime import CodingAgentUtilConfig
 

@@ -7,8 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_chat_util.common.config.runtime import CodingAgentEndpointSection, init_runtime
-from ai_chat_util.agent.coding._cli_.docker_main import app as coding_cli_app
-from ai_chat_util.agent.coding.core.task_manager import TaskManager
+from ai_chat_util.ai_chat_util_agent.coding._cli_.docker_main import app as coding_cli_app
+from ai_chat_util.ai_chat_util_agent.coding.core.task_manager import TaskManager
 
 
 def test_coding_agent_endpoint_section_model_validate_accepts_and_strips() -> None:

@@ -14,9 +14,9 @@ from ai_chat_util.common.config.runtime import (
 )
 from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, ChatRequestContext, HitlRequest
 from ai_chat_util.common.model.request_headers import get_current_request_headers
-from ai_chat_util.base.chat import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
-from ai_chat_util.base.chat import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from ai_chat_util.ai_chat_util_base.chat import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 

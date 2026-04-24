@@ -4,13 +4,13 @@ import argparse
 import asyncio
 import json
 from typing import Any, Iterable, cast
-from ai_chat_util.base.agent.agent_client_factory import AgentFactory
+from ai_chat_util.ai_chat_util_agent.core.agent_client_factory import AgentFactory
 from ai_chat_util.analysis import AnalysisService
-from ai_chat_util.base.chat import create_llm_client
-from ai_chat_util.base.hitl import create_stdio_hitl_client
+from ai_chat_util.ai_chat_util_base.chat import create_llm_client
+from ai_chat_util.ai_chat_util_agent.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 from ai_chat_util.common.model.ai_chatl_util_models import ChatRequestContext
-from ai_chat_util.core.app import run_mermaid_workflow_from_file
+from ai_chat_util.ai_chat_util_agent.core.app import run_mermaid_workflow_from_file
 from ai_chat_util.workflow import WorkflowChatClient
 
 
@@ -454,7 +454,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
         # Heavy deps (e.g., pandas) are only needed for batch_chat.
-        from ai_chat_util.base.batch import BatchClient
+        from ai_chat_util.ai_chat_util_base.batch import BatchClient
 
         llm_batch_client = BatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -472,7 +472,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "agent_batch_chat":
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.agent import MCPBatchClient
+        from ai_chat_util.ai_chat_util_agent.core import MCPBatchClient
 
         llm_batch_client = MCPBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -490,7 +490,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.base.agent import DeepAgentBatchClient
+        from ai_chat_util.ai_chat_util_agent.core import DeepAgentBatchClient
 
         llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(

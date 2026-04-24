@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from ai_chat_util.workflow.workflow.flowchat import Flowchart, GraphEdge, GraphNode
+from ai_chat_util.ai_chat_util_workflow.workflow.flowchat import Flowchart, GraphEdge, GraphNode
 
 
 class WorkflowState(TypedDict, total=False):

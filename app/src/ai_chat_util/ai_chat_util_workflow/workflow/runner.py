@@ -16,16 +16,16 @@ from ai_chat_util.ai_chat_util_agent.core.agent_builder import AgentBuilder
 from ai_chat_util.ai_chat_util_agent.core.agent_client_util import AgentClientUtil
 from ai_chat_util.ai_chat_util_agent.core.prompts import CodingAgentPrompts
 from ai_chat_util.ai_chat_util_agent.core.tool_limits import ToolLimits
-from ai_chat_util.common.model.ai_chatl_util_models import HitlRequest
+from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import HitlRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.workflow.mermaid.mermaid_flowchart import MermaidFlowChart
-from ai_chat_util.workflow.workflow.flowchat import Flowchart, GraphNode
-from ai_chat_util.workflow.workflow.langgraph_builder import (
+from ai_chat_util.ai_chat_util_workflow.mermaid.mermaid_flowchart import MermaidFlowChart
+from ai_chat_util.ai_chat_util_workflow.workflow.flowchat import Flowchart, GraphNode
+from ai_chat_util.ai_chat_util_workflow.workflow.langgraph_builder import (
     LangGraphWorkflowBuilder,
     NodeExecutionResult,
     WorkflowState,
 )
-from ai_chat_util.workflow.workflow.markdown_workflow import (
+from ai_chat_util.ai_chat_util_workflow.workflow.markdown_workflow import (
     WorkflowExecutionResponse,
     WorkflowMarkdownDocument,
     WorkflowToolReference,
@@ -630,7 +630,7 @@ def _inject_review_nodes(flowchart: Flowchart) -> Flowchart:
         for edge in flowchart.edges
     ]
     for source, target in added_edges:
-        from ai_chat_util.workflow.workflow.flowchat import GraphEdge
+        from ai_chat_util.ai_chat_util_workflow.workflow.flowchat import GraphEdge
 
         flowchart.edges.append(GraphEdge(source=source, target=target))
     flowchart.nodes.extend(added_nodes)

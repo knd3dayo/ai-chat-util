@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer
 import os
 import uuid
-from ..config.runtime import get_coding_runtime_config
+from ..common.config.runtime import get_coding_runtime_config
 
 from typing import Optional
 from pydantic import BaseModel, Field

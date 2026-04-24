@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ai_chat_util.common.model.ai_chatl_util_models import HitlRequest
-from ai_chat_util.workflow.workflow.mermaid_models import MermaidCodeBlock
+from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import HitlRequest
+from ai_chat_util.ai_chat_util_workflow.workflow.mermaid_models import MermaidCodeBlock
 
 
 class WorkflowToolReference(BaseModel):
@@ -43,7 +43,7 @@ class WorkflowMarkdownDocument(BaseModel):
         available_tools: list[WorkflowToolReference] | None = None,
         tool_catalog_text: str = "",
     ) -> "WorkflowMarkdownDocument":
-        from ai_chat_util.workflow.mermaid.mermaid_flowchart import MermaidFlowChart
+        from ai_chat_util.ai_chat_util_workflow.mermaid.mermaid_flowchart import MermaidFlowChart
 
         block = MermaidFlowChart.extract_single_mermaid_block(markdown)
         body_markdown = (markdown[: block.start_index] + markdown[block.end_index :]).strip()

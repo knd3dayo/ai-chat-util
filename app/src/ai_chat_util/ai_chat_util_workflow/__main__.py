@@ -7,7 +7,7 @@ from pathlib import Path
 from ai_chat_util.ai_chat_util_agent.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime
 from ai_chat_util.ai_chat_util_agent.core.app import run_mermaid_workflow_from_file
-from ai_chat_util.workflow import WorkflowChatClient
+from ai_chat_util.ai_chat_util_workflow import WorkflowChatClient
 
 
 async def async_main() -> None:

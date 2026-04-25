@@ -2,7 +2,7 @@ from typing import Generator, Any
 from abc import ABC, abstractmethod
 
 # 内部パッケージのインポート
-from ai_chat_util.common.model.agent_util_models import TaskStatus
+from ai_chat_util.ai_chat_util_agent.agent_util_models import TaskStatus
 class AbstractActions(ABC):
     @abstractmethod
     def after_start_task_action(self, tid: str) -> None:

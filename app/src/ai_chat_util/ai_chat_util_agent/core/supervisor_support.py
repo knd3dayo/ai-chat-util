@@ -11,7 +11,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.common.model.request_headers import RequestHeaders
+from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders
 
 import ai_chat_util.log.log_settings as log_settings
 

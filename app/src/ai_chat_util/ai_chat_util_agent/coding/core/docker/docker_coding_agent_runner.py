@@ -8,7 +8,7 @@ import shlex
 import os
 from fastapi import UploadFile
 from python_on_whales import docker as whales, Container, DockerClient
-from ai_chat_util.common.model.agent_util_models import ComposeConfig, CodingAgentConfig, TaskStatus
+from ai_chat_util.ai_chat_util_agent.agent_util_models import ComposeConfig, CodingAgentConfig, TaskStatus
 from ..abstract_agent_runner import AbstractAgentRunner
 from ..process_utils import get_host_uid_gid
 

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from ..abstract_agent_runner import AbstractAgentRunner
 
-from ai_chat_util.common.model.agent_util_models import TaskStatus, CodingAgentConfig
+from ai_chat_util.ai_chat_util_agent.agent_util_models import TaskStatus, CodingAgentConfig
 from ..utils import ExecutorUtil
 from ..process_utils import popen_new_process_group_kwargs
 from ai_chat_util.common.config.runtime import get_coding_runtime_config

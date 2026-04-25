@@ -5,13 +5,13 @@ import asyncio
 import json
 from typing import Any, Iterable, cast
 from ai_chat_util.ai_chat_util_agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.analysis import AnalysisService
+from ai_chat_util.ai_chat_util_base.chat.analysis_service import AnalysisService
 from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.ai_chat_util_agent.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
-from ai_chat_util.common.model.ai_chatl_util_models import ChatRequestContext
+from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import ChatRequestContext
 from ai_chat_util.ai_chat_util_agent.core.app import run_mermaid_workflow_from_file
-from ai_chat_util.workflow import WorkflowChatClient
+from ai_chat_util.ai_chat_util_workflow import WorkflowChatClient
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:

@@ -5,7 +5,7 @@ import os
 import sys
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.common.model.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
+from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 
 from ...ai_chat_util_base.chat.abstract_chat_client import AbstractChatClient
 

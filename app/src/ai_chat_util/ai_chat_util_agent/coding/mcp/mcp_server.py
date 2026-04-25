@@ -19,7 +19,7 @@ from ai_chat_util.common.config.runtime import (
 from fastmcp import FastMCP, Context
 
 from ..core.abstract_endpoint import CodingEndPointBase
-from ai_chat_util.common.model.request_headers import RequestHeaders, bind_current_request_headers
+from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, bind_current_request_headers
 from ..core.endpoint import EndPoint
 
 default_port = 7101

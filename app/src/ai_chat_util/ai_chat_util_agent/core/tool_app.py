@@ -11,7 +11,7 @@ from pydantic import Field
 from ai_chat_util.analysis import AnalysisService, LLMClientUtil
 from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
-from ai_chat_util.common.model.ai_chatl_util_models import WebRequestModel
+from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import WebRequestModel
 from file_util.model import FileUtilDocument
 from file_util.util import pdf_util
 from file_util.util.downloader import DownLoader

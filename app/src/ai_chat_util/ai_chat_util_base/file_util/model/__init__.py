@@ -4,7 +4,7 @@ from chardet.universaldetector import UniversalDetector
 from pathlib import Path
 
 from pydantic import BaseModel, Field, PrivateAttr
-import file_util.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.file_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 from enum import StrEnum

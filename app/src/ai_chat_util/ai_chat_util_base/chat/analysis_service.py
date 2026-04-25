@@ -8,8 +8,8 @@ from collections.abc import Awaitable, Callable
 from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import ChatResponse
-from file_util.model import FileUtilDocument
-from file_util.util.file_path_resolver import resolve_existing_path
+from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.file_util.util.file_path_resolver import resolve_existing_path
 
 import ai_chat_util.log.log_settings as log_settings
 

@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import HitlRequest
-from ai_chat_util.ai_chat_util_workflow.workflow.mermaid_models import MermaidCodeBlock
+from ...ai_chat_util_base.ai_chatl_util_models import HitlRequest
+from .mermaid_models import MermaidCodeBlock
 
 
 class WorkflowToolReference(BaseModel):

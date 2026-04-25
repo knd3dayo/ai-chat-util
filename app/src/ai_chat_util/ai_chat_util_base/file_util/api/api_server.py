@@ -4,9 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, FastAPI, HTTPException
 
 from ai_chat_util.common.config.runtime import init_runtime
-from file_util.model import FileServerProvider
+from ai_chat_util.ai_chat_util_base.file_util.model import FileServerProvider
 
-from file_util.core.app import (
+from ai_chat_util.ai_chat_util_base.file_util.core.app import (
     list_file_server_roots,
     list_file_server_entries,
     get_document_type,

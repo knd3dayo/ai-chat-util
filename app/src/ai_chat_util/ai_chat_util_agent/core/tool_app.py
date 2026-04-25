@@ -12,10 +12,10 @@ from ai_chat_util.analysis import AnalysisService, LLMClientUtil
 from ai_chat_util.ai_chat_util_base.chat import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import WebRequestModel
-from file_util.model import FileUtilDocument
-from file_util.util import pdf_util
-from file_util.util.downloader import DownLoader
-from file_util.util.office2pdf import Office2PDFUtil
+from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.file_util.util import pdf_util
+from ai_chat_util.ai_chat_util_base.file_util.util.downloader import DownLoader
+from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFUtil
 
 import ai_chat_util.log.log_settings as log_settings
 

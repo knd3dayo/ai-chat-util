@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 
-from ai_chat_util.ai_chat_util_workflow.workflow.flowchat import Flowchart, GraphEdge, GraphNode, NodeKind, Subgraph
-from ai_chat_util.ai_chat_util_workflow.workflow.mermaid_models import MermaidCodeBlock
+from ..workflow.flowchat import Flowchart, GraphEdge, GraphNode, NodeKind, Subgraph
+from ..workflow.mermaid_models import MermaidCodeBlock
 
 
 class MermaidFlowChart(Flowchart):

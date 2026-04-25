@@ -11,7 +11,7 @@ from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import (
     ChatResponse,
     WebRequestModel,
 )
-from file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 
 import ai_chat_util.log.log_settings as log_settings
 

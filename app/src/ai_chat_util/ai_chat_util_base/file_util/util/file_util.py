@@ -1,14 +1,14 @@
 import base64
 import os
-from file_util.util.excel_util import ExcelUtil
-from file_util.util.ppt_util import PPTUtil
-from file_util.util.word_util import WordUtil
-from file_util.util.text_util import TextUtil
-from file_util.util.pdf_util import PDFUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.excel_util import ExcelUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.ppt_util import PPTUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.word_util import WordUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.text_util import TextUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.pdf_util import PDFUtil
 
-from file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 
-import file_util.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.file_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

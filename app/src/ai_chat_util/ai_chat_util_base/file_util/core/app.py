@@ -4,8 +4,8 @@ from typing import Annotated, Optional
 from pydantic import Field
 
 from ai_chat_util.common.config.runtime import get_runtime_config, get_runtime_config_path
-from file_util.util.file_util import FileUtil
-from file_util.model import (
+from ai_chat_util.ai_chat_util_base.file_util.util.file_util import FileUtil
+from ai_chat_util.ai_chat_util_base.file_util.model import (
     FileServerListResponse,
     FileServerProvider,
     FileServerRootInfo,
@@ -13,9 +13,9 @@ from file_util.model import (
     FileUtilDocument,
     FileUtilDocumentType,
 )
-from file_util.util.excel_util import ExcelUtil
-from file_util.util.file_server_util import FileServerUtil
-from file_util.util.zip_util import ZipUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.excel_util import ExcelUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.file_server_util import FileServerUtil
+from ai_chat_util.ai_chat_util_base.file_util.util.zip_util import ZipUtil
 
 
 async def get_document_type(

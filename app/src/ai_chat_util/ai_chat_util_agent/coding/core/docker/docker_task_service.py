@@ -48,7 +48,7 @@ class DockerTaskService(AbstractTaskService):
         cmd = [
             sys.executable,
             "-m",
-            "ai_chat_util.agent.coding._cli_.docker_main",
+            "ai_chat_util.ai_chat_util_agent.coding._cli_.docker_main",
             "monitor",
             task_id,
             "--interval",

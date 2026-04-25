@@ -14,7 +14,7 @@ from openpyxl import load_workbook
 from pptx import Presentation
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import (
+from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
     ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent, WebRequestModel
 )

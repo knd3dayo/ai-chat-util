@@ -9,4 +9,4 @@ def get_application_logger() -> logging.Logger:
     - ここで独自 handler を追加すると秘匿マスクを迂回したり、ハンドラ重複でログが多重出力される。
     """
 
-    return logging.getLogger("ai_chat_util.agent.coding")
+    return logging.getLogger("ai_chat_util.ai_chat_util_agent.coding")

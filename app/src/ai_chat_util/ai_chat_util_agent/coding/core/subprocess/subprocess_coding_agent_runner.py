@@ -248,7 +248,7 @@ class SubprocessCodingAgentRunner(AbstractAgentRunner):
         entrypoint_cmd = [
             python_exe,
             "-m",
-            "ai_chat_util.agent.coding.core.subprocess.subprocess_entrypoint",
+            "ai_chat_util.ai_chat_util_agent.coding.core.subprocess.subprocess_entrypoint",
             "--workspace",
             self.workspace.as_posix(),
             "--exit-code-file",

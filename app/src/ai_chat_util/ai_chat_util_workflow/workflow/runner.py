@@ -16,7 +16,7 @@ from ...ai_chat_util_agent.core.agent_builder import AgentBuilder
 from ...ai_chat_util_agent.core.agent_client_util import AgentClientUtil
 from ...ai_chat_util_agent.core.prompts import CodingAgentPrompts
 from ...ai_chat_util_agent.core.tool_limits import ToolLimits
-from ...ai_chat_util_base.ai_chatl_util_models import HitlRequest
+from ...ai_chat_util_base.ai_chat_util_models import HitlRequest
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ..mermaid.mermaid_flowchart import MermaidFlowChart
 from .flowchat import Flowchart, GraphNode

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ...ai_chat_util_base.ai_chatl_util_models import HitlRequest
+from ...ai_chat_util_base.ai_chat_util_models import HitlRequest
 from .mermaid_models import MermaidCodeBlock
 
 

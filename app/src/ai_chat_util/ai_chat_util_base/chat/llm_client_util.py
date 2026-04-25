@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.ai_chatl_util_models import (
+from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
     ChatContent,
     ChatHistory,
     ChatMessage,

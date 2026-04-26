@@ -1,4 +1,7 @@
-import locale, os
+import locale
+import os
+from pathlib import Path
+
 import pyzipper as zipfile
 
 class ZipUtil:
@@ -47,17 +50,32 @@ class ZipUtil:
 
     @classmethod
     def create_zip(cls, file_paths: list[str], output_zip: str, password=None) -> bool:
-        with zipfile.ZipFile(output_zip, 'w') as zip_ref:
-            if password:
+        output_path = Path(output_zip).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if password:
+            with zipfile.AESZipFile(
+                output_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                encryption=zipfile.WZ_AES,
+            ) as zip_ref:
                 zip_ref.setpassword(password.encode())
-            for file_path in file_paths:
-                # ファイルかディレクトリかを確認
-                if os.path.isdir(file_path):
-                    for root, _, files in os.walk(file_path):
-                        for file in files:
-                            full_path = os.path.join(root, file)
-                            arcname = os.path.relpath(full_path, start=os.path.dirname(file_path))
-                            zip_ref.write(full_path, arcname=arcname)
-                else:
-                    zip_ref.write(file_path, arcname=os.path.basename(file_path))
+                cls._write_zip_entries(zip_ref, file_paths)
+            return True
+
+        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_ref:
+            cls._write_zip_entries(zip_ref, file_paths)
         return True
+
+    @classmethod
+    def _write_zip_entries(cls, zip_ref: zipfile.ZipFile, file_paths: list[str]) -> None:
+        for file_path in file_paths:
+            if os.path.isdir(file_path):
+                for root, _, files in os.walk(file_path):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        arcname = os.path.relpath(full_path, start=os.path.dirname(file_path))
+                        zip_ref.write(full_path, arcname=arcname)
+            else:
+                zip_ref.write(file_path, arcname=os.path.basename(file_path))

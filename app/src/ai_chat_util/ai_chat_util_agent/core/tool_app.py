@@ -5,7 +5,6 @@ import time
 from itertools import count
 from pathlib import Path
 from typing import Any
-
 from pydantic import Field
 
 from ai_chat_util.analysis import AnalysisService, LLMClientUtil
@@ -355,31 +354,22 @@ async def convert_office_files_to_pdf(
     try:
         resolved_paths = _resolve_existing_file_paths(office_path_list)
         target_dir = _resolve_output_dir(output_dir)
-        if target_dir is not None and not dry_run:
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-        planned_results = _plan_office_pdf_outputs(resolved_paths, target_dir)
         if dry_run:
-            return [
-                {
-                    **item,
-                    "dry_run": "true",
-                }
-                for item in planned_results
-            ]
+            return [{**item, "dry_run": "true"} for item in AnalysisService.convert_office_files_to_pdf(
+                resolved_paths,
+                output_dir=target_dir,
+                dry_run=True,
+                libreoffice_path=_get_configured_libreoffice_path(),
+                resolve_paths=False,
+            )]
 
-        results: list[dict[str, str]] = []
-        for office_path, planned in zip(resolved_paths, planned_results):
-            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
-                input_path=office_path,
-                output_path=target_dir,
-                configured_libreoffice_path=_get_configured_libreoffice_path(),
-            )
-            results.append({
-                "source_path": planned["source_path"],
-                "pdf_path": str(pdf_path),
-            })
-        return results
+        return AnalysisService.convert_office_files_to_pdf(
+            resolved_paths,
+            output_dir=target_dir,
+            dry_run=False,
+            libreoffice_path=_get_configured_libreoffice_path(),
+            resolve_paths=False,
+        )
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf call_id=%s", call_id)
         raise
@@ -416,42 +406,20 @@ async def convert_pdf_files_to_images(
     try:
         resolved_paths = _resolve_existing_file_paths(pdf_path_list)
         output_root = _resolve_output_dir(output_dir)
-        if output_root is not None and not dry_run:
-            output_root.mkdir(parents=True, exist_ok=True)
-
-        planned_results = _plan_pdf_image_outputs(resolved_paths, output_root)
         if dry_run:
-            return [
-                {
-                    **item,
-                    "dry_run": True,
-                }
-                for item in planned_results
-            ]
+            return [{**item, "dry_run": True} for item in AnalysisService.convert_pdf_files_to_images(
+                resolved_paths,
+                output_dir=output_root,
+                dry_run=True,
+                resolve_paths=False,
+            )]
 
-        results: list[dict[str, Any]] = []
-        for pdf_path, planned in zip(resolved_paths, planned_results):
-            source_path = Path(pdf_path)
-            image_dir = Path(planned["image_dir"])
-            image_dir.mkdir(parents=True, exist_ok=True)
-
-            image_paths: list[str] = []
-            image_index = 0
-            for element in pdf_util.extract_content_from_file(pdf_path):
-                if element.get("type") != "image":
-                    continue
-                image_index += 1
-                image_path = image_dir / f"{source_path.stem}_page_{image_index:04d}.png"
-                with image_path.open("wb") as f:
-                    f.write(element["bytes"])
-                image_paths.append(str(image_path))
-
-            results.append({
-                "source_path": pdf_path,
-                "image_paths": image_paths,
-                "image_dir": str(image_dir),
-            })
-        return results
+        return AnalysisService.convert_pdf_files_to_images(
+            resolved_paths,
+            output_dir=output_root,
+            dry_run=False,
+            resolve_paths=False,
+        )
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=convert_pdf_files_to_images call_id=%s", call_id)
         raise
@@ -518,6 +486,66 @@ async def analyze_urls(
             call_id,
             elapsed_ms,
         )
+
+
+async def detect_log_format_and_search(
+        file_path: Annotated[str, Field(description="Path to the log file to inspect")],
+        search_terms: Annotated[list[str] | None, Field(description="Optional extra search keywords")] = None,
+        sample_line_limit: Annotated[int, Field(description="Maximum number of head lines used for format detection")] = 100,
+        match_limit: Annotated[int, Field(description="Maximum number of matched lines returned per pattern")] = 50,
+    ) -> Annotated[str, Field(description="JSON string describing detected log format and matched records")]:
+    resolved_path = _resolve_existing_file_paths([file_path])[0]
+    return AnalysisService.detect_log_format_and_search_from_file(
+        resolved_path,
+        search_terms=search_terms,
+        sample_line_limit=sample_line_limit,
+        match_limit=match_limit,
+        resolve_paths=False,
+    )
+
+
+async def infer_log_header_pattern(
+        file_path: Annotated[str, Field(description="Path to the log file to inspect")],
+        sample_line_limit: Annotated[int, Field(description="Maximum number of head lines used for inference")] = 100,
+    ) -> Annotated[str, Field(description="JSON string describing inferred header pattern and timestamp slice")]:
+    llm_client = create_llm_client()
+    resolved_path = _resolve_existing_file_paths([file_path])[0]
+    return await AnalysisService.infer_log_header_pattern(
+        llm_client,
+        resolved_path,
+        sample_line_limit,
+        resolve_paths=False,
+    )
+
+
+async def extract_log_time_range(
+        file_path: Annotated[str, Field(description="Path to the log file to extract from")],
+        workspace_path: Annotated[str, Field(description="Workspace root where derived artifacts are written")],
+        header_pattern: Annotated[str, Field(description="Regular expression matching each log record header")],
+        timestamp_start: Annotated[int, Field(description="Start offset of timestamp text within the header line")],
+        timestamp_end: Annotated[int, Field(description="End offset of timestamp text within the header line")],
+        range_start: Annotated[str, Field(description="Extraction start timestamp")],
+        range_end: Annotated[str, Field(description="Extraction end timestamp")],
+        time_format: Annotated[str | None, Field(description="Optional datetime.strptime-compatible timestamp format")] = None,
+        output_subdir: Annotated[str, Field(description="Artifacts subdirectory for extracted logs")] = "log_extracts",
+        output_filename: Annotated[str | None, Field(description="Optional output filename")] = None,
+    ) -> Annotated[str, Field(description="JSON string describing extracted records and output path")]:
+    resolved_path = _resolve_existing_file_paths([file_path])[0]
+    runtime_config = get_runtime_config()
+    return AnalysisService.extract_log_time_range_to_file(
+        file_path=resolved_path,
+        workspace_path=workspace_path,
+        artifacts_subdir=".artifacts",
+        header_pattern=header_pattern,
+        timestamp_start=timestamp_start,
+        timestamp_end=timestamp_end,
+        range_start=range_start,
+        range_end=range_end,
+        time_format=time_format,
+        output_subdir=output_subdir,
+        output_filename=output_filename,
+        resolve_paths=False,
+    )
 
 
 async def analyze_files(

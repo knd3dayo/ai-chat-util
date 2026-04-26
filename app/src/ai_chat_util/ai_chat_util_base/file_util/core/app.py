@@ -13,6 +13,7 @@ from ai_chat_util.ai_chat_util_base.file_util.model import (
     FileUtilDocument,
     FileUtilDocumentType,
 )
+from ai_chat_util.ai_chat_util_base.file_util.util.document_text_util import DocumentTextUtil
 from ai_chat_util.ai_chat_util_base.file_util.util.excel_util import ExcelUtil
 from ai_chat_util.ai_chat_util_base.file_util.util.file_server_util import FileServerUtil
 from ai_chat_util.ai_chat_util_base.file_util.util.zip_util import ZipUtil
@@ -65,7 +66,7 @@ async def extract_base64_to_text(
     """
     This function extracts text from base64 encoded data with a specified file extension.
     """
-    response = await FileUtil.extract_base64_to_text(extension, base64_data)
+    response = DocumentTextUtil.extract_base64_to_text(extension, base64_data)
     return response
 
 
@@ -75,7 +76,7 @@ async def extract_text_from_file(
     """
     This function extracts text from a file at the specified path.
     """
-    return await FileUtil.extract_text_from_file_async(file_path)
+    return DocumentTextUtil.extract_text_from_path(file_path)
 
 # ZIPファイルの内容をリストする関数
 async def list_zip_contents(

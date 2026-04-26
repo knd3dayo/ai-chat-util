@@ -42,6 +42,9 @@ from ai_chat_util.ai_chat_util_agent.core.tool_app import (
     analyze_files,
     convert_office_files_to_pdf,
     convert_pdf_files_to_images,
+    detect_log_format_and_search,
+    infer_log_header_pattern,
+    extract_log_time_range,
     analyze_documents_data,
     analyze_image_urls,
     analyze_pdf_urls,
@@ -98,6 +101,9 @@ router.add_api_route(path="/analyze_urls", endpoint=analyze_urls, methods=["POST
 # ドキュメント変換ツール
 router.add_api_route(path="/convert_office_files_to_pdf", endpoint=convert_office_files_to_pdf, methods=["POST"])
 router.add_api_route(path="/convert_pdf_files_to_images", endpoint=convert_pdf_files_to_images, methods=["POST"])
+router.add_api_route(path="/detect_log_format_and_search", endpoint=detect_log_format_and_search, methods=["POST"])
+router.add_api_route(path="/infer_log_header_pattern", endpoint=infer_log_header_pattern, methods=["POST"])
+router.add_api_route(path="/extract_log_time_range", endpoint=extract_log_time_range, methods=["POST"])
 
 # resource_app の関数をデフォルトで公開する
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])

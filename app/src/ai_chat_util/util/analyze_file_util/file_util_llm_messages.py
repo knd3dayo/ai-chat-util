@@ -223,27 +223,22 @@ class FileUtilLLMMessages:
         effective_config = self._get_effective_config()
         office2pdf_method = effective_config.office2pdf.method
         if not Office2PDFUtil.is_conversion_available(config=effective_config):
-            logger.info(
-                "Office2PDF method %s is unavailable. Falling back to direct office text extraction for %s",
-                office2pdf_method,
-                document_type.identifier,
+            raise RuntimeError(
+                f"Office2PDF method '{office2pdf_method}' is unavailable for {document_type.identifier}"
             )
-            return self._create_office_text_fallback_content(document_type)
 
         try:
-            # Officeドキュメントを一時的にPDFに変換する
             temp_dir = tempfile.TemporaryDirectory()
             atexit.register(temp_dir.cleanup)
             temp_file_path = os.path.join(
-                temp_dir.name, 
+                temp_dir.name,
                 f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf"
-                )
+            )
             Office2PDFUtil.create_pdf_from_document_bytes(
                 input_bytes=document_type.data,
                 output_path=temp_file_path,
                 config=effective_config,
             )
-            # 元ファイルからPDFに変換した旨の説明を追加
             explanation_text = f"""
                 {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
                 ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
@@ -256,12 +251,14 @@ class FileUtilLLMMessages:
             return pdf_contents
         except Exception:
             logger.warning(
-                "Failed to convert office document to PDF with method %s. Falling back to direct text extraction for %s",
+                "Failed to convert office document to PDF with method %s for %s",
                 office2pdf_method,
                 document_type.identifier,
                 exc_info=True,
             )
-            return self._create_office_text_fallback_content(document_type)
+            raise RuntimeError(
+                f"Failed to convert office document to PDF with method {office2pdf_method}."
+            )
 
     def create_office_content_from_file(
             self, file_path: str, detail: str = "auto"

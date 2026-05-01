@@ -16,6 +16,9 @@ from ai_chat_util.core.common.config.runtime import get_runtime_config
 
 class Office2PDFUtil:
     DEFAULT_TIMEOUT_SECONDS = 600
+    _WORD_EXTENSIONS = {".doc", ".docx", ".docm", ".rtf"}
+    _EXCEL_EXTENSIONS = {".xls", ".xlsx", ".xlsm", ".xlsb"}
+    _POWERPOINT_EXTENSIONS = {".ppt", ".pptx", ".pptm"}
 
     class _ConversionTimeout(RuntimeError):
         """Internal exception used to distinguish timeout paths."""
@@ -82,15 +85,200 @@ class Office2PDFUtil:
         return False
 
     @classmethod
-    def _raise_unimplemented_method(cls, method: str) -> None:
-        if method == "pywin32":
-            raise NotImplementedError(
-                "office2pdf.method=pywin32 is configured, but pywin32-based Office conversion is not implemented yet."
+    def _resolve_target_path(
+        cls,
+        input_path: str | Path,
+        output_path: str | Path | None = None,
+    ) -> tuple[Path, Path]:
+        source = Path(input_path).expanduser()
+        if not source.exists():
+            raise FileNotFoundError(f"Input file not found: {source}")
+        source = source.resolve()
+
+        if output_path is None:
+            target = source.with_suffix(".pdf")
+        else:
+            output_candidate = Path(output_path).expanduser()
+            if output_candidate.is_dir():
+                target = output_candidate / source.with_suffix(".pdf").name
+            else:
+                target = output_candidate
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return source, target
+
+    @classmethod
+    def _get_office_application_kind(cls, source: Path) -> str:
+        ext = source.suffix.lower()
+        if ext in cls._WORD_EXTENSIONS:
+            return "word"
+        if ext in cls._EXCEL_EXTENSIONS:
+            return "excel"
+        if ext in cls._POWERPOINT_EXTENSIONS:
+            return "powerpoint"
+        raise RuntimeError(f"Unsupported Office file extension for PDF conversion: {ext or source.name}")
+
+    @classmethod
+    def _create_pdf_via_pywin32(
+        cls,
+        source: Path,
+        target: Path,
+        office_path: str | Path | None,
+    ) -> Path:
+        if os.name != "nt":
+            raise RuntimeError("pywin32 conversion is only supported on Windows.")
+
+        if importlib.util.find_spec("win32com.client") is None:
+            raise RuntimeError("pywin32 conversion requires win32com.client to be installed.")
+
+        if office_path and not cls._is_resolvable_binary(office_path):
+            raise FileNotFoundError(f"Configured Office executable not found: {office_path}")
+
+        import pythoncom  # type: ignore[import-not-found]
+        from win32com.client import DispatchEx  # type: ignore[import-not-found]
+
+        app = None
+        document = None
+        app_kind = cls._get_office_application_kind(source)
+        source_str = str(source)
+        target_str = str(target)
+
+        pythoncom.CoInitialize()
+        try:
+            if app_kind == "word":
+                app = DispatchEx("Word.Application")
+                app.Visible = False
+                app.DisplayAlerts = 0
+                document = app.Documents.Open(source_str, ReadOnly=True)
+                document.ExportAsFixedFormat(OutputFileName=target_str, ExportFormat=17)
+            elif app_kind == "excel":
+                app = DispatchEx("Excel.Application")
+                app.Visible = False
+                app.DisplayAlerts = False
+                document = app.Workbooks.Open(source_str, ReadOnly=True)
+                document.ExportAsFixedFormat(0, target_str)
+            elif app_kind == "powerpoint":
+                app = DispatchEx("PowerPoint.Application")
+                document = app.Presentations.Open(source_str, WithWindow=False)
+                document.SaveAs(target_str, 32)
+            else:
+                raise RuntimeError(f"Unsupported Office application kind: {app_kind}")
+        except Exception as exc:
+            raise RuntimeError(f"pywin32 failed to convert {source.name} to PDF") from exc
+        finally:
+            if document is not None:
+                try:
+                    if app_kind == "powerpoint":
+                        document.Close()
+                    else:
+                        document.Close(False)
+                except Exception:
+                    pass
+            if app is not None:
+                try:
+                    app.Quit()
+                except Exception:
+                    pass
+            pythoncom.CoUninitialize()
+
+        if not target.exists():
+            raise RuntimeError(f"pywin32 conversion did not produce expected PDF: {target}")
+
+        return target.resolve()
+
+    @classmethod
+    def _build_uno_connection_string(cls, connection_string: str | None, host: str, port: int) -> str:
+        if connection_string:
+            return connection_string.strip()
+        return f"uno:socket,host={host},port={port};urp;StarOffice.ComponentContext"
+
+    @classmethod
+    def _build_uno_property(cls, name: str, value: object):
+        from com.sun.star.beans import PropertyValue  # type: ignore[import-not-found]
+
+        prop = PropertyValue()
+        prop.Name = name
+        prop.Value = value
+        return prop
+
+    @classmethod
+    def _detect_uno_pdf_filter(cls, document: object) -> str:
+        if document.supportsService("com.sun.star.text.GenericTextDocument"):
+            return "writer_pdf_Export"
+        if document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
+            return "calc_pdf_Export"
+        if document.supportsService("com.sun.star.presentation.PresentationDocument"):
+            return "impress_pdf_Export"
+        if document.supportsService("com.sun.star.drawing.DrawingDocument"):
+            return "draw_pdf_Export"
+        return "writer_pdf_Export"
+
+    @classmethod
+    def _close_uno_document(cls, document: object) -> None:
+        try:
+            document.close(True)
+            return
+        except Exception:
+            pass
+        try:
+            document.dispose()
+        except Exception:
+            pass
+
+    @classmethod
+    def _create_pdf_via_libreoffice_uno(
+        cls,
+        source: Path,
+        target: Path,
+        *,
+        host: str,
+        port: int,
+        connection_string: str | None,
+    ) -> Path:
+        if importlib.util.find_spec("uno") is None:
+            raise RuntimeError("LibreOffice UNO conversion requires the 'uno' Python module.")
+
+        import uno  # type: ignore[import-not-found]
+
+        local_context = uno.getComponentContext()
+        resolver = local_context.ServiceManager.createInstanceWithContext(
+            "com.sun.star.bridge.UnoUrlResolver", local_context
+        )
+        resolved_connection_string = cls._build_uno_connection_string(connection_string, host, port)
+
+        try:
+            remote_context = resolver.resolve(resolved_connection_string)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to connect to LibreOffice UNO server using '{resolved_connection_string}'"
+            ) from exc
+
+        document = None
+        try:
+            desktop = remote_context.ServiceManager.createInstanceWithContext(
+                "com.sun.star.frame.Desktop", remote_context
             )
-        if method == "libreoffice_uno":
-            raise NotImplementedError(
-                "office2pdf.method=libreoffice_uno is configured, but UNO server conversion is not implemented yet."
+            input_url = uno.systemPathToFileUrl(str(source))
+            output_url = uno.systemPathToFileUrl(str(target))
+            load_props = (cls._build_uno_property("Hidden", True),)
+            document = desktop.loadComponentFromURL(input_url, "_blank", 0, load_props)
+            export_props = (
+                cls._build_uno_property("FilterName", cls._detect_uno_pdf_filter(document)),
             )
+            document.storeToURL(output_url, export_props)
+        except Exception as exc:
+            raise RuntimeError(f"LibreOffice UNO failed to convert {source.name} to PDF") from exc
+        finally:
+            if document is not None:
+                cls._close_uno_document(document)
+
+        if not target.exists():
+            raise RuntimeError(f"LibreOffice UNO conversion did not produce expected PDF: {target}")
+
+        return target.resolve()
+
+    @classmethod
+    def _raise_unsupported_method(cls, method: str) -> None:
+        raise ValueError(f"Unsupported office2pdf method: {method}")
 
     @classmethod
     def _build_user_installation_arg(cls, user_profile_dir: Path) -> str:
@@ -338,25 +526,25 @@ class Office2PDFUtil:
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
         config: object | None = None,
     ) -> Path:
-        source = Path(input_path).expanduser()
-        if not source.exists():
-            raise FileNotFoundError(f"Input file not found: {source}")
-        source = source.resolve()
+        source, target = cls._resolve_target_path(input_path, output_path)
 
         office2pdf_config = cls._get_effective_office2pdf_config(config)
         method = cls.get_selected_method(config)
-        if method != "libreoffice_exec":
-            cls._raise_unimplemented_method(method)
 
-        if output_path is None:
-            target = source.with_suffix(".pdf")
-        else:
-            output_candidate = Path(output_path).expanduser()
-            if output_candidate.is_dir():
-                target = output_candidate / source.with_suffix(".pdf").name
-            else:
-                target = output_candidate
-        target.parent.mkdir(parents=True, exist_ok=True)
+        if method == "pywin32":
+            return cls._create_pdf_via_pywin32(source, target, office2pdf_config.pywin32.office_path)
+
+        if method == "libreoffice_uno":
+            return cls._create_pdf_via_libreoffice_uno(
+                source,
+                target,
+                host=office2pdf_config.libreoffice_uno.host,
+                port=office2pdf_config.libreoffice_uno.port,
+                connection_string=office2pdf_config.libreoffice_uno.connection_string,
+            )
+
+        if method != "libreoffice_exec":
+            cls._raise_unsupported_method(method)
 
         libreoffice_binary = cls.find_libreoffice_binary(
             explicit_path=libreoffice_path,

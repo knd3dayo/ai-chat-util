@@ -18,9 +18,8 @@ from ai_chat_util.core.chat.model import (
 )
 
 from ai_chat_util.core.analysis.model import FileUtilDocument
-import ai_chat_util.core.log.log_settings as log_settings
-from .office2pdf import Office2PDFUtil
 import fitz  # PyMuPDF
+import ai_chat_util.core.log.log_settings as log_settings
 from .file_util_llm_messages import FileUtilLLMMessages
 
 logger = log_settings.getLogger(__name__)
@@ -100,6 +99,7 @@ class AnalyzeImageUtil:
 
 
 class AnalyzePDFUtil:
+
     @classmethod
     async def analyze_pdf_files(
         cls,
@@ -133,33 +133,6 @@ class AnalyzePDFUtil:
         )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response
-
-    @classmethod
-    def convert_office_files_to_pdf_by_local_libreoffice(
-        cls,
-        file_path_list: list[str],
-        output_dir: str | None = None,
-        libreoffice_path: str | None = None,
-    ) -> list[dict[str, str]]:
-        planned: list[dict[str, str]] = []
-        for office_path in file_path_list:
-            source_path = Path(office_path)
-            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else Path(output_dir) / source_path.with_suffix(".pdf").name
-            planned.append({"source_path": office_path, "pdf_path": str(pdf_path)})
-
-
-        if output_dir is not None:
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-        results: list[dict[str, str]] = []
-        for office_path, planned_item in zip(file_path_list, planned):
-            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
-                input_path=office_path,
-                output_path=output_dir,
-                configured_libreoffice_path=libreoffice_path,
-            )
-            results.append({"source_path": planned_item["source_path"], "pdf_path": str(pdf_path)})
-        return results
 
     @classmethod
     def convert_pdf_files_to_images(

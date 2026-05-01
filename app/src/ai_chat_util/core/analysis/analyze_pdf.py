@@ -9,6 +9,7 @@ from pydantic import Field
 
 from .base import _get_network_download_options
 from ...util.analyze_file_util.analyze_util import AnalyzePDFUtil
+from ...util.analyze_file_util.office2pdf import Office2PDFUtil
 from ai_chat_util.core.chat import create_llm_client
 from ai_chat_util.core.common.config.runtime import get_runtime_config
 from ai_chat_util.core.chat.model import WebRequestModel
@@ -17,9 +18,6 @@ from ai_chat_util.util.analyze_file_util.downloader import DownLoader
 import ai_chat_util.core.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
-
-def _get_configured_libreoffice_path() -> str | None:
-    return get_runtime_config().office2pdf.libreoffice_path
 
 async def analyze_pdf_urls(
         pdf_path_urls: Annotated[
@@ -116,11 +114,20 @@ async def convert_office_files_to_pdf(
         output_dir
     )
     try:
-        return AnalyzePDFUtil.convert_office_files_to_pdf_by_local_libreoffice(
-            office_path_list,
-            output_dir=output_dir,
-            libreoffice_path=_get_configured_libreoffice_path(),
-        )
+        config = get_runtime_config()
+        if output_dir is not None:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, str]] = []
+        for office_path in office_path_list:
+            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
+                input_path=office_path,
+                output_path=output_dir,
+                config=config,
+            )
+            results.append({"source_path": office_path, "pdf_path": str(pdf_path)})
+        return results
+    
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf")
         raise

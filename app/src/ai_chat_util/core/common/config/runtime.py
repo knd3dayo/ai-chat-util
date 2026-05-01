@@ -281,38 +281,8 @@ def _expand_nested_mapping_path_field(
         )
 
 
-def _normalize_legacy_office2pdf_config(raw: dict[str, Any]) -> dict[str, Any]:
-    office2pdf = raw.get("office2pdf")
-    if not isinstance(office2pdf, dict):
-        return raw
-
-    normalized_office2pdf = dict(office2pdf)
-    legacy_libreoffice_path = normalized_office2pdf.pop("libreoffice_path", None)
-
-    libreoffice_exec = normalized_office2pdf.get("libreoffice_exec")
-    if libreoffice_exec is None:
-        libreoffice_exec = {}
-    if not isinstance(libreoffice_exec, dict):
-        return raw
-
-    normalized_exec = dict(libreoffice_exec)
-    if (
-        isinstance(legacy_libreoffice_path, str)
-        and legacy_libreoffice_path.strip()
-        and not normalized_exec.get("libreoffice_path")
-    ):
-        normalized_exec["libreoffice_path"] = legacy_libreoffice_path
-        normalized_office2pdf.setdefault("method", "libreoffice_exec")
-
-    normalized_office2pdf["libreoffice_exec"] = normalized_exec
-
-    normalized = dict(raw)
-    normalized["office2pdf"] = normalized_office2pdf
-    return normalized
-
-
 def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
-    copied = _normalize_legacy_office2pdf_config(dict(raw))
+    copied = dict(raw)
 
     for section_key, field_key in (
         ("mcp", "mcp_config_path"),
@@ -321,7 +291,6 @@ def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> d
         ("logging", "file"),
         ("features", "audit_log_path"),
         ("network", "ca_bundle"),
-        ("office2pdf", "libreoffice_path"),
     ):
         _expand_mapping_path_field(
             copied,
@@ -995,10 +964,6 @@ class Office2PDFSection(BaseModel):
     libreoffice_uno: Office2PDFLibreOfficeUnoSection = Field(
         default_factory=Office2PDFLibreOfficeUnoSection
     )
-
-    @property
-    def libreoffice_path(self) -> str | None:
-        return self.libreoffice_exec.libreoffice_path
 
 
 class _RuntimeState(BaseModel):

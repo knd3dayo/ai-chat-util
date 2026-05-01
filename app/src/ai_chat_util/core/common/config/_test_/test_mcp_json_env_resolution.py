@@ -104,7 +104,7 @@ def test_init_runtime_expands_allowlisted_ai_paths(monkeypatch: pytest.MonkeyPat
             "logging": {"file": "${HOME}/logs/app.log"},
             "features": {"audit_log_path": "${HOME}/logs/audit.jsonl"},
             "network": {"ca_bundle": "${HOME}/certs/ca.pem"},
-            "office2pdf": {"libreoffice_path": "${HOME}/bin/soffice"},
+            "office2pdf": {"libreoffice_exec": {"libreoffice_path": "${HOME}/bin/soffice"}},
             "file_server": {
                 "allowed_roots": [
                     {"name": "root", "path": "${HOME}/data"}
@@ -123,7 +123,7 @@ def test_init_runtime_expands_allowlisted_ai_paths(monkeypatch: pytest.MonkeyPat
     assert cfg.logging.file == f"{tmp_path.as_posix()}/logs/app.log"
     assert cfg.features.audit_log_path == f"{tmp_path.as_posix()}/logs/audit.jsonl"
     assert cfg.network.ca_bundle == f"{tmp_path.as_posix()}/certs/ca.pem"
-    assert cfg.office2pdf.libreoffice_path == f"{tmp_path.as_posix()}/bin/soffice"
+    assert cfg.office2pdf.libreoffice_exec.libreoffice_path == f"{tmp_path.as_posix()}/bin/soffice"
     assert cfg.file_server.allowed_roots[0].path == f"{tmp_path.as_posix()}/data"
 
 
@@ -158,8 +158,7 @@ def test_init_runtime_supports_method_based_office2pdf_config(
     assert cfg.office2pdf.libreoffice_uno.host == "uno-host"
     assert cfg.office2pdf.libreoffice_uno.port == 8100
 
-
-def test_init_runtime_normalizes_legacy_office2pdf_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_init_runtime_rejects_legacy_office2pdf_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     data = {
         "ai_chat_util_config": {
@@ -171,11 +170,8 @@ def test_init_runtime_normalizes_legacy_office2pdf_path(monkeypatch: pytest.Monk
     monkeypatch.setenv("LLM_API_KEY", "dummy-key")
     runtime_mod._runtime_state = None  # type: ignore[attr-defined]
 
-    cfg = runtime_mod.init_runtime(str(cfg_path))
-
-    assert cfg.office2pdf.method == "libreoffice_exec"
-    assert cfg.office2pdf.libreoffice_exec.libreoffice_path == "soffice"
-    assert cfg.office2pdf.libreoffice_path == "soffice"
+    with pytest.raises(ConfigError):
+        runtime_mod.init_runtime(str(cfg_path))
 
 
 def test_init_runtime_rejects_unresolved_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

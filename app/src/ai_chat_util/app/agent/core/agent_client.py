@@ -8,19 +8,19 @@ import uuid
 import asyncio
 from langgraph.errors import GraphRecursionError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import (
+from ai_chat_util.ai_chat_util_base.common.config.runtime import (
     AiChatUtilConfig,
     get_runtime_config,
 )
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, ChatRequestContext, HitlRequest
+from ai_chat_util.ai_chat_util_base.chat.model import ChatRequest, ChatResponse, ChatMessage, ChatContent, ChatHistory, ChatRequestContext, HitlRequest
 from ai_chat_util.ai_chat_util_base.request_headers import get_current_request_headers
-from ai_chat_util.ai_chat_util_base.core.chat.core import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
-from ai_chat_util.ai_chat_util_base.core.chat.core import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_runtime_config, AiChatUtilConfig, CodingAgentUtilConfig
+from ai_chat_util.ai_chat_util_base.chat.core import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .prompts import CodingAgentPrompts
 from .supervisor_support import create_audit_context
 
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 from .agent_client_util import AgentClientUtil

@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import init_runtime
+from ai_chat_util.ai_chat_util_base.common.config.runtime import init_runtime
 from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, bind_current_request_headers
 
-from ai_chat_util.ai_chat_util_base.core.resource_app import (
+from ai_chat_util.ai_chat_util_base.resource_app import (
     use_custom_pdf_analyzer,
     get_completion_model,
     get_loaded_config_info,

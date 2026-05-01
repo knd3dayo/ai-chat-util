@@ -5,11 +5,11 @@ import asyncio
 import json
 from typing import Any, Iterable, cast
 from ai_chat_util.app.ai_chat_util_agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.ai_chat_util_base.core.analysis_service import AnalysisService
-from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
+from ai_chat_util.ai_chat_util_base.analysis_service import AnalysisService
+from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
 from ai_chat_util.app.ai_chat_util_agent.hitl import create_stdio_hitl_client
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatRequestContext
+from ai_chat_util.ai_chat_util_base.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
+from ai_chat_util.ai_chat_util_base.chat.model import ChatRequestContext
 from ai_chat_util.app.ai_chat_util_agent.core.app import run_mermaid_workflow_from_file
 from ai_chat_util.app.workflow import WorkflowChatClient
 
@@ -577,7 +577,7 @@ def cli_main() -> None:
         raise SystemExit(130)
     except Exception as e:
         import sys
-        import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+        import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 
         logger = log_settings.getLogger(__name__)
         logger.exception("Unhandled CLI error")

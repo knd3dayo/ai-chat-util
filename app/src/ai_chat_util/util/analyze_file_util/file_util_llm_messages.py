@@ -13,18 +13,18 @@ from docx import Document as WordDocument
 from openpyxl import load_workbook
 from pptx import Presentation
 
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.core.chat.model import (
+from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.ai_chat_util_base.chat.model import (
     ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent, WebRequestModel
 )
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
 from ai_chat_util.util.analyze_file_util.office2pdf import Office2PDFUtil
 from ai_chat_util.util.analyze_file_util.downloader import DownLoader
 from ai_chat_util.ai_chat_util_base.util.analyze_file_util import pdf_util
-from ai_chat_util.ai_chat_util_base.core.chat.core.abstract_chat_client import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.chat.core.abstract_chat_client import AbstractChatClient
 
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

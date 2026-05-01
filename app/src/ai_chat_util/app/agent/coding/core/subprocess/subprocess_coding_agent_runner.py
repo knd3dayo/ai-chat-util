@@ -15,7 +15,7 @@ from ..abstract_agent_runner import AbstractAgentRunner
 from ai_chat_util.app.ai_chat_util_agent.agent_util_models import TaskStatus, CodingAgentConfig
 from ..utils import ExecutorUtil
 from ..process_utils import popen_new_process_group_kwargs
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_coding_runtime_config
 
 
 def _split_command_base(command_base: str) -> list[str]:

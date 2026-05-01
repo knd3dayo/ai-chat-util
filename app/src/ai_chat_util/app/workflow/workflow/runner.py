@@ -11,13 +11,13 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.types import Command
 from pydantic import BaseModel, Field, PrivateAttr
 
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 from ...ai_chat_util_agent.core.agent_builder import AgentBuilder
 from ...ai_chat_util_agent.core.agent_client_util import AgentClientUtil
 from ...ai_chat_util_agent.core.prompts import CodingAgentPrompts
 from ...ai_chat_util_agent.core.tool_limits import ToolLimits
-from ....ai_chat_util_base.core.chat.model import HitlRequest
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ....ai_chat_util_base.chat.model import HitlRequest
+from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ..mermaid.mermaid_flowchart import MermaidFlowChart
 from .flowchat import Flowchart, GraphNode
 from .langgraph_builder import (

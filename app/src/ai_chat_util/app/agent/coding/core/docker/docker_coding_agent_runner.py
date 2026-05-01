@@ -14,7 +14,7 @@ from ..process_utils import get_host_uid_gid
 
 from ..utils import ExecutorUtil
 
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_coding_runtime_config
 
 from ...util.logging import get_application_logger
 

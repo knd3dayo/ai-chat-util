@@ -32,13 +32,13 @@ try:
 except Exception:  # pragma: no cover
     AsyncSqliteSaver = None  # type: ignore[assignment]
 
-from ai_chat_util.ai_chat_util_base.core.common.config.ai_chat_util_mcp_config import MCPServerConfig
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import (
+from ai_chat_util.ai_chat_util_base.common.config.ai_chat_util_mcp_config import MCPServerConfig
+from ai_chat_util.ai_chat_util_base.common.config.runtime import (
     AiChatUtilConfig,
     CodingAgentUtilConfig,
     get_runtime_config_path,
 )
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

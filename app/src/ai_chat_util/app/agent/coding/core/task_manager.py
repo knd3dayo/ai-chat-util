@@ -19,7 +19,7 @@ from .process_utils import kill_process_tree, pid_is_running
 from .abstract_actions import AbstractActions
 from .abstract_task_service import AbstractTaskService
 
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_coding_runtime_config
 
 from ..util.logging import get_application_logger
 

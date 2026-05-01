@@ -3,8 +3,8 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
 
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import init_runtime
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileServerProvider
+from ai_chat_util.ai_chat_util_base.common.config.runtime import init_runtime
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileServerProvider
 
 from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.base import (
     list_file_server_roots,

@@ -6,7 +6,7 @@ from ai_chat_util.ai_chat_util_base.util.analyze_file_util.word_util import Word
 from ai_chat_util.ai_chat_util_base.util.analyze_file_util.text_util import TextUtil
 from ai_chat_util.ai_chat_util_base.util.analyze_file_util.pdf_util import PDFUtil
 
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
 
 import ai_chat_util.ai_chat_util_base.app.analyze_file_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)

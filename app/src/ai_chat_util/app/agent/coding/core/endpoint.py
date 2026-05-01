@@ -17,7 +17,7 @@ from ai_chat_util.app.ai_chat_util_agent.agent_util_models import (
 )
 
 from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, get_current_request_headers
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_coding_runtime_config
 from .abstract_endpoint import CodingEndPointBase
 
 from ..util.logging import get_application_logger

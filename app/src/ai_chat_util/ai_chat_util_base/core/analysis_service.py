@@ -20,7 +20,10 @@ from ai_chat_util.ai_chat_util_base.analyze_file_util.util.office2pdf import Off
 
 import ai_chat_util.log.log_settings as log_settings
 
-from ..analyze_file_util.util.analyze_util import AnalyzeLogUtil, AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeImageUtil
+from ..analyze_file_util.util.analyze_util import (
+    AnalyzeLogUtil, AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeImageUtil, AnalyzeFileUtil
+)
+from ..analyze_file_util.util.analyze_util import FileUtilLLMMessages
 
 
 
@@ -737,7 +740,7 @@ class AnalysisService:
         resolve_paths: bool = True,
     ) -> ChatResponse:
         target_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        return await AnalyzePDFUtil.analyze_files(llm_client, target_paths, prompt, detail)
+        return await AnalyzeFileUtil.analyze_files(llm_client, target_paths, prompt, detail)
 
     @classmethod
     async def analyze_documents_data(
@@ -747,7 +750,7 @@ class AnalysisService:
         prompt: str,
         detail: str = "auto",
     ) -> ChatResponse:
-        return await AnalyzePDFUtil.analyze_documents_data(
+        return await AnalyzeFileUtil.analyze_documents_data(
             llm_client,
             document_type_list,
             prompt,

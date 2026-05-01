@@ -41,9 +41,3 @@ class PDFUtil:
         return extract_text(filename)
 
 
-__all__ = [
-    "PDFUtil",
-    "extract_content_from_bytes",
-    "extract_content_from_file",
-]
-

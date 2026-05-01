@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 from pydantic import Field
 
 from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config, get_runtime_config_path
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.file_util import FileUtil
+from ai_chat_util.util.analyze_file_util.file_util import FileUtil
 from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import (
     FileServerListResponse,
     FileServerProvider,
@@ -15,7 +15,7 @@ from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import (
 )
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util.document_text_util import DocumentTextUtil
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util.excel_util import ExcelUtil
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.file_server_util import FileServerUtil
+from ai_chat_util.util.analyze_file_util.file_server_util import FileServerUtil
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util.zip_util import ZipUtil
 
 def tool_timeout_seconds() -> float:

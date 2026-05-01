@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 from .ai_chat_util_mcp_config import MCPServerConfigEntry, MCPServerConfig
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.file_path_resolver import resolve_existing_file_path
+from ai_chat_util.util.analyze_file_util.file_path_resolver import resolve_existing_file_path
 
 from .config_util import (
     CONFIG_ENV_VAR,

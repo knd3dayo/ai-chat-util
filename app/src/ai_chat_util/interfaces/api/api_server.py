@@ -21,7 +21,7 @@ from ai_chat_util.ai_chat_util_base.core.resource_app import (
     create_multi_format_contents_from_file,
 )
 
-from ai_chat_util.ai_chat_util_agent.core.app import (
+from ai_chat_util.app.ai_chat_util_agent.core.app import (
     run_chat,
     run_agent_chat,
     run_deepagent_chat,

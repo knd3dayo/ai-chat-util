@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Any
 from pydantic import Field
 
-from ...util.analyze_file_util.analyze_util import AnalyzeLogUtil
+from ....util.analyze_file_util.analyze_util import AnalyzeLogUtil
 from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
 from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config
 from ai_chat_util.ai_chat_util_base.core.chat.model import WebRequestModel
 from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
 from ai_chat_util.ai_chat_util_base.util.analyze_file_util import pdf_util
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.downloader import DownLoader
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.office2pdf import Office2PDFUtil
+from ai_chat_util.util.analyze_file_util.downloader import DownLoader
+from ai_chat_util.util.analyze_file_util.office2pdf import Office2PDFUtil
 
 import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
 

@@ -6,6 +6,7 @@ import json
 from typing import Any, Iterable, cast
 from ai_chat_util.app.agent.core.agent_client_factory import AgentFactory
 from ai_chat_util.core.analysis.analyze_image import AnalyzeImageUtil
+from ai_chat_util.core.analysis.analyze_util import AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeFileUtil
 from ai_chat_util.core.chat import create_llm_client
 from ai_chat_util.app.agent.core.hitl import create_stdio_hitl_client
 from ai_chat_util.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
@@ -516,21 +517,21 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = create_llm_client()
-        response = await AnalysisService.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
+        response = await AnalyzePDFUtil.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = create_llm_client()
-        response = await AnalysisService.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
+        response = await AnalyzeOfficeUtil.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
         print(response.output)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = create_llm_client()
-        response = await AnalysisService.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
+        response = await AnalyzeFileUtil.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
         print(response.output)
         return
 

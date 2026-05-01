@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 import os
 import sys
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.chat.model import ChatRequest, ChatHistory, ChatMessage, ChatContent
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig
+from ai_chat_util.core.chat.model import ChatRequest, ChatHistory, ChatMessage, ChatContent
 
-from ....ai_chat_util_base.chat.core.abstract_chat_client import AbstractChatClient
+from ai_chat_util.core.chat.abstract_chat_client import AbstractChatClient
 
 
 class IOManagerBase(ABC):

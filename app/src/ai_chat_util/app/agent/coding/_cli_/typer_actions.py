@@ -14,7 +14,7 @@ from python_on_whales import docker as whales
 # 内部パッケージのインポート
 from ..core.abstract_actions import AbstractActions
 from typing import Any
-from ai_chat_util.app.ai_chat_util_agent.agent_util_models import TaskStatus
+from ai_chat_util.app.agent.agent_util_models import TaskStatus
 
 from ..core.task_manager import TaskManager
 

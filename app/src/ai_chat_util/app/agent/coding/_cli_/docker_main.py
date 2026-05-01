@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 import time
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import init_coding_runtime
+from ai_chat_util.core.common.config.runtime import init_coding_runtime
 
 # 内部パッケージのインポート
 from ..core.task_manager import TaskManager

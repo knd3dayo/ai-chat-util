@@ -21,7 +21,7 @@ from .config_util import (
     resolve_path_placeholders,
     
 )
-import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
+import ai_chat_util.core.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 # =====================

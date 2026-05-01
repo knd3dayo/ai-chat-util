@@ -1,6 +1,6 @@
-from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.batch import BatchClientBase
-from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig
+from ai_chat_util.core.chat import AbstractChatClient
+from ai_chat_util.core.chat.batch_client_base import BatchClientBase
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig
 
 from .agent_client_factory import AgentFactory
 

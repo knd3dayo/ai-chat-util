@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config, get_runtime_config_path
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig, get_runtime_config, get_runtime_config_path
 
 
 class WorkflowSessionRecord(BaseModel):

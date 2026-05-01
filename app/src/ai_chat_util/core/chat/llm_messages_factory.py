@@ -13,14 +13,14 @@ from docx import Document as WordDocument
 from openpyxl import load_workbook
 from pptx import Presentation
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model import (
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.core.chat.model import (
     ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent
 )
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util import pdf_util
+from ai_chat_util.util.analyze_file_util import pdf_util
 
-import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
+import ai_chat_util.core.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

@@ -1,5 +1,5 @@
-from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
-from ai_chat_util.analysis import AnalysisService
+from ai_chat_util.core.chat import create_llm_client
+from ai_chat_util.core.analysis_service import AnalysisService
 
 
 async def main(files):

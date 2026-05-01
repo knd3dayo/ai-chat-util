@@ -6,13 +6,13 @@ from functools import wraps
 from typing import Callable, Mapping
 from fastmcp import FastMCP, Context
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import init_runtime
-from ai_chat_util.ai_chat_util_base.common.config.runtime import apply_logging_overrides
-from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, bind_current_request_headers
+from ai_chat_util.core.common.config.runtime import init_runtime
+from ai_chat_util.core.common.config.runtime import apply_logging_overrides
+from ai_chat_util.core.request_headers import RequestHeaders, bind_current_request_headers
 
-from ai_chat_util.ai_chat_util_base.resource_app import get_loaded_config_info
+from ai_chat_util.core.resource_app import get_loaded_config_info
 
-from ai_chat_util.app.ai_chat_util_agent.core.app import (
+from ai_chat_util.app.agent.core.app import (
     run_chat,
     run_deepagent_chat,
     run_durable_workflow_from_file,
@@ -26,21 +26,30 @@ from ai_chat_util.app.ai_chat_util_agent.core.app import (
     run_deepagent_batch_chat_from_excel,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_pdf_util.core import (
+from ai_chat_util.core.analysis.analyze_image import (
     analyze_image_files,
+    analyze_image_urls,
+)
+from ai_chat_util.core.analysis.analyze_pdf import (
     analyze_pdf_files,
-    analyze_office_files,
-    analyze_files,
     convert_office_files_to_pdf,
     convert_pdf_files_to_images,
+    analyze_pdf_urls,
+)
+from ai_chat_util.core.analysis.analyze_office import (
+    analyze_office_urls,
+    analyze_office_files,
+)
+from ai_chat_util.core.analysis.analyze_file import (
+    analyze_files,
+)
+from ai_chat_util.core.analysis.analyze_log import (
     detect_log_format_and_search,
     infer_log_header_pattern,
     extract_log_time_range,
+)
+from ai_chat_util.core.analysis.analyze_util import (
     analyze_documents_data,
-    analyze_image_urls,
-    analyze_pdf_urls,
-    analyze_office_urls,
-    analyze_urls
 )
 
 
@@ -244,7 +253,6 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_image_urls": analyze_image_urls,
         "analyze_pdf_urls": analyze_pdf_urls,
         "analyze_office_urls": analyze_office_urls,
-        "analyze_urls": analyze_urls,
         "convert_office_files_to_pdf": convert_office_files_to_pdf,
         "convert_pdf_files_to_images": convert_pdf_files_to_images,
         "detect_log_format_and_search": detect_log_format_and_search,

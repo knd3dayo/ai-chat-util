@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Annotated
 from abc import ABC, abstractmethod
 from fastapi import Body, Path, Query
 
-from ai_chat_util.app.ai_chat_util_agent.agent_util_models import (
+from ai_chat_util.app.agent.agent_util_models import (
     ExecuteRequest,
     ExecuteResponse,
     HealthzResponse,

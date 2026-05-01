@@ -9,14 +9,14 @@ from typing import AsyncGenerator, Optional
 
 from ...util.logging import get_application_logger
 
-from ai_chat_util.app.ai_chat_util_agent.agent_util_models import TaskStatus
+from ai_chat_util.app.agent.agent_util_models import TaskStatus
 from ..abstract_agent_runner import AbstractAgentRunner
 from ..abstract_task_service import AbstractTaskService
 from ..process_utils import kill_process_tree, popen_new_process_group_kwargs
 from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
 from .windows_process_coding_agent_runner import WindowsProcessCodingAgentRunner
 from .linux_process_coding_agent_runner import LinuxProcessCodingAgentRunner
-from ai_chat_util.ai_chat_util_base.common.config.runtime import (
+from ai_chat_util.core.common.config.runtime import (
     get_coding_runtime_config,
     get_coding_runtime_config_path,
 )
@@ -83,7 +83,7 @@ class SubprocessTaskService(AbstractTaskService):
         cmd = [
             SubprocessCodingAgentRunner.resolve_python_executable(),
             "-m",
-            "ai_chat_util.ai_chat_util_agent.coding._cli_.docker_main",
+            "ai_chat_util.app.agent.coding._cli_.docker_main",
             "monitor",
             task_id,
             "--interval",

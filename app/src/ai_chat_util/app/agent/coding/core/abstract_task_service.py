@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
-from ai_chat_util.app.ai_chat_util_agent.agent_util_models import TaskStatus
+from ai_chat_util.app.agent.agent_util_models import TaskStatus
 from .abstract_agent_runner import AbstractAgentRunner
 
 

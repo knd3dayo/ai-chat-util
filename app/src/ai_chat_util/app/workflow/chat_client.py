@@ -4,9 +4,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient, LLMMessageContentFactory, LLMMessageContentFactoryBase
-from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse
+from ai_chat_util.core.chat import AbstractChatClient, LLMMessageContentFactory, LLMMessageContentFactoryBase
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.core.chat.model import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse
 from ai_chat_util.app.workflow.session_store import WorkflowSessionRecord, WorkflowSessionStore
 from ai_chat_util.app.workflow.workflow.runner import execute_workflow_markdown
 

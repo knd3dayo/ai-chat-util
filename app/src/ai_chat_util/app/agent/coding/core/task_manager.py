@@ -12,14 +12,14 @@ from pathlib import Path
 from fastapi import HTTPException
 from python_on_whales import docker as whales
 from pydantic import ValidationError
-from ai_chat_util.app.ai_chat_util_agent.agent_util_models import TaskStatus
+from ai_chat_util.app.agent.agent_util_models import TaskStatus
 
 from .process_utils import kill_process_tree, pid_is_running
 
 from .abstract_actions import AbstractActions
 from .abstract_task_service import AbstractTaskService
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.core.common.config.runtime import get_coding_runtime_config
 
 from ..util.logging import get_application_logger
 

@@ -4,13 +4,13 @@ import argparse
 import asyncio
 import json
 from typing import Any, Iterable, cast
-from ai_chat_util.app.ai_chat_util_agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.ai_chat_util_base.analysis_service import AnalysisService
-from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
-from ai_chat_util.app.ai_chat_util_agent.hitl import create_stdio_hitl_client
-from ai_chat_util.ai_chat_util_base.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
-from ai_chat_util.ai_chat_util_base.chat.model import ChatRequestContext
-from ai_chat_util.app.ai_chat_util_agent.core.app import run_mermaid_workflow_from_file
+from ai_chat_util.app.agent.core.agent_client_factory import AgentFactory
+from ai_chat_util.core.analysis_service import AnalysisService
+from ai_chat_util.core.chat import create_llm_client
+from ai_chat_util.app.agent.hitl import create_stdio_hitl_client
+from ai_chat_util.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
+from ai_chat_util.core.chat.model import ChatRequestContext
+from ai_chat_util.app.agent.core.app import run_mermaid_workflow_from_file
 from ai_chat_util.app.workflow import WorkflowChatClient
 
 
@@ -454,7 +454,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
         # Heavy deps (e.g., pandas) are only needed for batch_chat.
-        from ai_chat_util.ai_chat_util_base.batch import BatchClient
+        from ai_chat_util.core.chat.batch_client import BatchClient
 
         llm_batch_client = BatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -472,7 +472,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "agent_batch_chat":
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.app.ai_chat_util_agent.core import MCPBatchClient
+        from ai_chat_util.app.agent.core import MCPBatchClient
 
         llm_batch_client = MCPBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -490,7 +490,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
         _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.app.ai_chat_util_agent.core import DeepAgentBatchClient
+        from ai_chat_util.app.agent.core import DeepAgentBatchClient
 
         llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
@@ -577,7 +577,7 @@ def cli_main() -> None:
         raise SystemExit(130)
     except Exception as e:
         import sys
-        import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
+        import ai_chat_util.core.log.log_settings as log_settings
 
         logger = log_settings.getLogger(__name__)
         logger.exception("Unhandled CLI error")

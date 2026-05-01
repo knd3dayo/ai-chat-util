@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import pytest
 
-from ai_chat_util.ai_chat_util_base.common.config.ai_chat_util_mcp_config import MCPServerConfig
-from ai_chat_util.ai_chat_util_base.common.config import runtime as runtime_mod
-from ai_chat_util.ai_chat_util_base.common.config.config_util import ConfigError, resolve_config_path
+from ai_chat_util.core.common.config.ai_chat_util_mcp_config import MCPServerConfig
+from ai_chat_util.core.common.config import runtime as runtime_mod
+from ai_chat_util.core.common.config.config_util import ConfigError, resolve_config_path
 
 
 def _write_mcp_json(tmp_path: Path, env: dict | None, *, command: str = "python") -> str:

@@ -10,10 +10,10 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders
+from ai_chat_util.core.common.config.runtime import AiChatUtilConfig
+from ai_chat_util.core.request_headers import RequestHeaders
 
-import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
+import ai_chat_util.core.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
 

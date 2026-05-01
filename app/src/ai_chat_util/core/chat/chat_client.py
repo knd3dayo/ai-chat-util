@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Optional, Any, cast
 import asyncio
 
-from ai_chat_util.ai_chat_util_base.common.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.chat.model import (
+from ai_chat_util.core.common.config.runtime import get_runtime_config, AiChatUtilConfig
+from ai_chat_util.core.chat.model import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )
@@ -13,7 +13,7 @@ from .chat_client_base import ChatClientBase
 
 import litellm
 
-import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
+import ai_chat_util.core.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

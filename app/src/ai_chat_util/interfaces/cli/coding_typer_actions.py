@@ -12,11 +12,11 @@ from python_on_whales import docker as whales
 
 
 # 内部パッケージのインポート
-from ..core.abstract_actions import AbstractActions
+from ...app.agent.core.coding.core.abstract_actions import AbstractActions
 from typing import Any
 from ai_chat_util.app.agent.agent_util_models import TaskStatus
 
-from ..core.task_manager import TaskManager
+from ...app.agent.core.coding.core.task_manager import TaskManager
 
 class TyperActions(AbstractActions) :
 

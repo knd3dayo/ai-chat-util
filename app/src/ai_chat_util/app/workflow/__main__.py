@@ -4,7 +4,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from ..agent.hitl import create_stdio_hitl_client
+from ..agent.core.hitl import create_stdio_hitl_client
 from ai_chat_util.core.common.config.runtime import init_runtime
 from ..agent.core.app import run_mermaid_workflow_from_file
 from . import WorkflowChatClient

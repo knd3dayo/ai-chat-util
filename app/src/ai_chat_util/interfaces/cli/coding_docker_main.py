@@ -7,10 +7,10 @@ import time
 from ai_chat_util.core.common.config.runtime import init_coding_runtime
 
 # 内部パッケージのインポート
-from ..core.task_manager import TaskManager
-from ..core.task_service_factory import select_task_service
-from ..core.docker.docker_task_service import DockerTaskService
-from .typer_actions import TyperActions
+from ...app.agent.core.coding.core.task_manager import TaskManager
+from ...app.agent.core.coding.core.task_service_factory import select_task_service
+from ...app.agent.core.coding.core.docker.docker_task_service import DockerTaskService
+from .coding_typer_actions import TyperActions
 
 # --- CLI Layer: コマンドの定義 ---
 actions = TyperActions()

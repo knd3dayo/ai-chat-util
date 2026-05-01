@@ -7,7 +7,7 @@ from typing import Any, Iterable, cast
 from ai_chat_util.app.agent.core.agent_client_factory import AgentFactory
 from ai_chat_util.core.analysis_service import AnalysisService
 from ai_chat_util.core.chat import create_llm_client
-from ai_chat_util.app.agent.hitl import create_stdio_hitl_client
+from ai_chat_util.app.agent.core.hitl import create_stdio_hitl_client
 from ai_chat_util.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
 from ai_chat_util.core.chat.model import ChatRequestContext
 from ai_chat_util.app.agent.core.app import run_mermaid_workflow_from_file

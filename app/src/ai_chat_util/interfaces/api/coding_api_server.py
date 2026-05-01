@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 
-from ..core.endpoint import EndPoint
+from ...app.agent.core.coding.core.endpoint import EndPoint
 from ai_chat_util.app.agent.agent_util_models import CancelResponse, ExecuteResponse, HealthzResponse, TaskStatus
 from ai_chat_util.core.request_headers import RequestHeaders, bind_current_request_headers, get_current_request_headers
 from ai_chat_util.core.common.config.runtime import init_coding_runtime

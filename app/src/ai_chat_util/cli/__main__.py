@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import Any, Iterable, cast
 from ai_chat_util.ai_chat_util_agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.ai_chat_util_base.chat.core.analysis_service import AnalysisService
+from ai_chat_util.ai_chat_util_base.core.analysis_service import AnalysisService
 from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
 from ai_chat_util.ai_chat_util_agent.hitl import create_stdio_hitl_client
 from ai_chat_util.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info

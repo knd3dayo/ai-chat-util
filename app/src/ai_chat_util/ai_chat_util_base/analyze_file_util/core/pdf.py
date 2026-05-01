@@ -7,21 +7,18 @@ from pathlib import Path
 from typing import Any
 from pydantic import Field
 
-from ai_chat_util.analysis import AnalysisService, AnalyzePDFUtil
+from ..util.analyze_pdf_util import AnalyzePDFUtil
 from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
 from ai_chat_util.ai_chat_util_base.chat.model import WebRequestModel
-from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
-from ai_chat_util.ai_chat_util_base.file_util.util import pdf_util
-from ai_chat_util.ai_chat_util_base.file_util.util.downloader import DownLoader
-from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFUtil
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util import pdf_util
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util.downloader import DownLoader
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util.office2pdf import Office2PDFUtil
 
 import ai_chat_util.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
-
-_TOOL_CALL_SEQ = count(1)
-
 
 def _resolve_existing_file_paths(file_path_list: list[str]) -> list[str]:
     """ユーザー入力のパスを、実在するパスへ解決して返す。"""
@@ -58,30 +55,25 @@ async def analyze_image_urls(
     """
     This function analyzes multiple images using the specified prompt and returns the analysis result.
     """
-    call_id = next(_TOOL_CALL_SEQ)
     started = time.perf_counter()
     logger.info(
-        "MCP_TOOL_START tool=analyze_image_urls call_id=%s urls=%d detail=%s prompt_len=%d",
-        call_id,
+        "MCP_TOOL_START tool=analyze_image_urls urls=%d detail=%s",
         len(image_path_urls or []),
-        detail,
-        AnalysisService.prompt_len(prompt),
+        detail
     )
     llm_client = create_llm_client()
     try:
         response = await AnalyzePDFUtil.analyze_image_urls(llm_client, image_path_urls, prompt, detail)
         return response.output
     except Exception:
-        logger.exception("MCP_TOOL_ERR tool=analyze_image_urls call_id=%s", call_id)
+        logger.exception("MCP_TOOL_ERR tool=analyze_image_urls")
         raise
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "MCP_TOOL_END tool=analyze_image_urls call_id=%s elapsed_ms=%s",
-            call_id,
+            "MCP_TOOL_END tool=analyze_image_urls elapsed_ms=%s",
             elapsed_ms,
         )
-
 
 async def analyze_image_files(
         file_list: Annotated[list[str], Field(description="List of absolute paths to the image files to analyze. e.g., [/path/to/image1.jpg, /path/to/image2.jpg]")],
@@ -133,14 +125,11 @@ async def analyze_pdf_urls(
     """
     This function analyzes multiple PDFs using the specified prompt and returns the analysis result.
     """
-    call_id = next(_TOOL_CALL_SEQ)
     started = time.perf_counter()
     logger.info(
-        "MCP_TOOL_START tool=analyze_pdf_urls call_id=%s urls=%d detail=%s prompt_len=%d",
-        call_id,
+        "MCP_TOOL_START tool=analyze_pdf_urls urls=%d detail=%s",
         len(pdf_path_urls or []),
         detail,
-        AnalysisService.prompt_len(prompt),
     )
     tmpdir = tempfile.TemporaryDirectory()
     atexit.register(tmpdir.cleanup)
@@ -153,22 +142,20 @@ async def analyze_pdf_urls(
             requests_verify=requests_verify,
             ca_bundle=ca_bundle,
         )
-        response = await AnalysisService.analyze_pdf_files(
+        response = await AnalyzePDFUtil.analyze_pdf_files(
             llm_client,
             path_list,
             prompt,
             detail,
-            resolve_paths=False,
         )
         return response.output
     except Exception:
-        logger.exception("MCP_TOOL_ERR tool=analyze_pdf_urls call_id=%s", call_id)
+        logger.exception("MCP_TOOL_ERR tool=analyze_pdf_urls")
         raise
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "MCP_TOOL_END tool=analyze_pdf_urls call_id=%s elapsed_ms=%s",
-            call_id,
+            "MCP_TOOL_END tool=analyze_pdf_urls elapsed_ms=%s",
             elapsed_ms,
         )
 
@@ -244,22 +231,20 @@ async def analyze_office_urls(
             requests_verify=requests_verify,
             ca_bundle=ca_bundle,
         )
-        response = await AnalysisService.analyze_office_files(
+        response = await AnalyzePDFUtil.analyze_office_files(
             llm_client,
             path_list,
             prompt,
             detail,
-            resolve_paths=False,
         )
         return response.output
     except Exception:
-        logger.exception("MCP_TOOL_ERR tool=analyze_office_urls call_id=%s", call_id)
+        logger.exception("MCP_TOOL_ERR tool=analyze_office_urls")
         raise
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "MCP_TOOL_END tool=analyze_office_urls call_id=%s elapsed_ms=%s",
-            call_id,
+            "MCP_TOOL_END tool=analyze_office_urls elapsed_ms=%s",
             elapsed_ms,
         )
 
@@ -310,11 +295,9 @@ async def convert_office_files_to_pdf(
         For write-safe usage, call this tool with dry_run=True first to preview the
         output paths. After approval, call it again with dry_run=False.
     """
-    call_id = next(_TOOL_CALL_SEQ)
     started = time.perf_counter()
     logger.info(
-        "MCP_TOOL_START tool=convert_office_files_to_pdf call_id=%s files=%d output_dir=%s dry_run=%s",
-        call_id,
+        "MCP_TOOL_START tool=convert_office_files_to_pdf files=%d output_dir=%s dry_run=%s",
         len(office_path_list or []),
         output_dir,
         dry_run,
@@ -339,13 +322,12 @@ async def convert_office_files_to_pdf(
             resolve_paths=False,
         )
     except Exception:
-        logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf call_id=%s", call_id)
+        logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf")
         raise
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "MCP_TOOL_END tool=convert_office_files_to_pdf call_id=%s elapsed_ms=%s",
-            call_id,
+            "MCP_TOOL_END tool=convert_office_files_to_pdf elapsed_ms=%s",
             elapsed_ms,
         )
 
@@ -504,7 +486,6 @@ async def extract_log_time_range(
         file_path=resolved_path,
         workspace_path=workspace_path,
         artifacts_subdir=".artifacts",
-        header_pattern=header_pattern,
         timestamp_start=timestamp_start,
         timestamp_end=timestamp_end,
         range_start=range_start,

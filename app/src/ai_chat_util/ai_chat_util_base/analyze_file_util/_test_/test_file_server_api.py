@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from ai_chat_util.common.config.runtime import get_runtime_config, init_runtime
-from ai_chat_util.ai_chat_util_base.file_util.api.api_server import app
+from ai_chat_util.ai_chat_util_base.analyze_file_util.api.api_server import app
 
 
 def _write_local_file_server_config(config_path: Path, *, root_path: Path) -> None:

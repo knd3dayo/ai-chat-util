@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ai_chat_util.ai_chat_util_base.file_util.util.file_path_resolver import resolve_existing_path
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util.file_path_resolver import resolve_existing_path
 
 
 def test_resolve_existing_path_accepts_directory_and_prefers_working_directory(tmp_path, monkeypatch) -> None:

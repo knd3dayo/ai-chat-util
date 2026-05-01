@@ -12,8 +12,10 @@ from ai_chat_util.ai_chat_util_base.chat.model import (
     WebRequestModel,
 )
 
-from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
 import ai_chat_util.log.log_settings as log_settings
+from ai_chat_util.ai_chat_util_base.office2pdf_util.core import Office2PDFUtil
+import fitz  # PyMuPDF
 
 logger = log_settings.getLogger(__name__)
 
@@ -206,3 +208,64 @@ class AnalyzePDFUtil:
         )
         chat_response: ChatResponse = await llm_client.chat(chat_request)
         return chat_response
+
+    @classmethod
+    def convert_office_files_to_pdf(
+        cls,
+        file_path_list: list[str],
+        *,
+        output_dir: Path | None = None,
+        dry_run: bool = False,
+        libreoffice_path: str | None = None,
+        resolve_paths: bool = True,
+    ) -> list[dict[str, str]]:
+        resolved_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
+        planned: list[dict[str, str]] = []
+        for office_path in resolved_paths:
+            source_path = Path(office_path)
+            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else output_dir / source_path.with_suffix(".pdf").name
+            planned.append({"source_path": office_path, "pdf_path": str(pdf_path)})
+        if dry_run:
+            return planned
+
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, str]] = []
+        for office_path, planned_item in zip(resolved_paths, planned):
+            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
+                input_path=office_path,
+                output_path=output_dir,
+                configured_libreoffice_path=libreoffice_path,
+            )
+            results.append({"source_path": planned_item["source_path"], "pdf_path": str(pdf_path)})
+        return results
+
+    @classmethod
+    def convert_pdf_files_to_images(
+        cls,
+        file_path_list: list[str],
+        *,
+        output_dir: Path | None = None,
+        dry_run: bool = False,
+        dpi: int = 144,
+        resolve_paths: bool = True,
+    ) -> list[dict[str, Any]]:
+        resolved_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
+        results: list[dict[str, Any]] = []
+        scale = dpi / 72.0
+        matrix = fitz.Matrix(scale, scale)
+        for pdf_path in resolved_paths:
+            path = Path(pdf_path)
+            image_dir = (output_dir / f"{path.stem}_pages") if output_dir is not None else (path.parent / f"{path.stem}_pages")
+            with fitz.open(path) as document:
+                page_total = len(document)
+                image_paths = [str(image_dir / f"{path.stem}_page_{index:04d}.png") for index in range(1, page_total + 1)]
+                if not dry_run:
+                    image_dir.mkdir(parents=True, exist_ok=True)
+                    for index in range(1, page_total + 1):
+                        page = document.load_page(index - 1)
+                        pixmap = page.get_pixmap(matrix=matrix)
+                        pixmap.save(str(image_dir / f"{path.stem}_page_{index:04d}.png"))
+            results.append({"source_path": str(path), "image_dir": str(image_dir), "image_paths": image_paths})
+        return results

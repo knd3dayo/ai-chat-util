@@ -18,10 +18,10 @@ from ai_chat_util.ai_chat_util_base.chat.model import (
     ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent, WebRequestModel
 )
-from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
-from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFUtil
-from ai_chat_util.ai_chat_util_base.file_util.util.downloader import DownLoader
-from ai_chat_util.ai_chat_util_base.file_util.util import pdf_util
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util.office2pdf import Office2PDFUtil
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util.downloader import DownLoader
+from ai_chat_util.ai_chat_util_base.analyze_file_util.util import pdf_util
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)

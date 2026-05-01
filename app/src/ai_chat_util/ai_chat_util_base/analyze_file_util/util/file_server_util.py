@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from ai_chat_util.common.config.runtime import FileServerAllowedRoot, FileServerSMBSection
-from ai_chat_util.ai_chat_util_base.file_util.model import (
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import (
     FileServerEntry,
     FileServerEntryType,
     FileServerListResponse,

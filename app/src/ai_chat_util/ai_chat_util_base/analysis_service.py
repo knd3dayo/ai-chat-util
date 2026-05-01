@@ -11,19 +11,19 @@ from typing import Any
 
 import fitz
 
-from ai_chat_util.ai_chat_util_base.core.chat.core import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatResponse
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_runtime_config
+from ai_chat_util.ai_chat_util_base.chat.model import ChatResponse
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
 from ai_chat_util.util.analyze_file_util.file_path_resolver import resolve_existing_path
 from ai_chat_util.util.analyze_file_util.office2pdf import Office2PDFUtil
 
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 
-from ...util.analyze_file_util.analyze_util import (
+from ..util.analyze_file_util.analyze_util import (
     AnalyzeLogUtil, AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeImageUtil, AnalyzeFileUtil
 )
-from ...util.analyze_file_util.analyze_util import FileUtilLLMMessages
+from ..util.analyze_file_util.analyze_util import FileUtilLLMMessages
 
 
 

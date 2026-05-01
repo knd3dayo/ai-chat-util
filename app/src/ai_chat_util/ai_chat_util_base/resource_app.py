@@ -2,10 +2,10 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config, get_runtime_config_info
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatContent, ChatMessage
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
+from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
+from ai_chat_util.ai_chat_util_base.common.config.runtime import get_runtime_config, get_runtime_config_info
+from ai_chat_util.ai_chat_util_base.chat.model import ChatContent, ChatMessage
+from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
 
 
 def use_custom_pdf_analyzer() -> Annotated[bool, Field(description="Whether to use the custom PDF analyzer or not")]:

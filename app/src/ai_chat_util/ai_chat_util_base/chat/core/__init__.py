@@ -1,4 +1,4 @@
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.ai_chat_util_base.common.config.runtime import AiChatUtilConfig, get_runtime_config
 
 from .abstract_chat_client import AbstractChatClient
 from .chat_client_base import ChatClientBase

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatRequest, ChatResponse
+from ai_chat_util.ai_chat_util_base.chat.model import ChatRequest, ChatResponse
 
 
 class AbstractBatchClient(ABC):

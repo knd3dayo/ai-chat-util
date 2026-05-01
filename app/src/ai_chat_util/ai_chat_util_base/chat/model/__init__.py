@@ -3,7 +3,7 @@ import re
 from typing import Any, ClassVar, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

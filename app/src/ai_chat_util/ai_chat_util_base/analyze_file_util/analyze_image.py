@@ -4,14 +4,14 @@ import atexit
 import time
 from pydantic import Field
 
-from ....util.analyze_file_util.analyze_util import AnalyzeImageUtil
+from ...util.analyze_file_util.analyze_util import AnalyzeImageUtil
 from .base import _get_network_download_options
 
-from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
-from ai_chat_util.ai_chat_util_base.core.chat.model import WebRequestModel
+from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
+from ai_chat_util.ai_chat_util_base.chat.model import WebRequestModel
 from ai_chat_util.util.analyze_file_util.downloader import DownLoader
 
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
 

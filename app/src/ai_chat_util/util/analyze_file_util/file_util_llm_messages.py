@@ -46,9 +46,6 @@ class FileUtilLLMMessages:
         config = self._get_effective_config()
         return config.network.requests_verify, config.network.ca_bundle
 
-    def _get_configured_libreoffice_path(self) -> str | None:
-        return self._get_effective_config().office2pdf.libreoffice_path
-
     def _extract_word_text(self, document_type: FileUtilDocument) -> str:
         document = WordDocument(BytesIO(document_type.data))
         parts: list[str] = []
@@ -223,13 +220,12 @@ class FileUtilLLMMessages:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        configured_libreoffice_path = self._get_configured_libreoffice_path()
-        libreoffice_binary = Office2PDFUtil.try_find_libreoffice_binary(
-            configured_path=configured_libreoffice_path,
-        )
-        if libreoffice_binary is None:
+        effective_config = self._get_effective_config()
+        office2pdf_method = effective_config.office2pdf.method
+        if not Office2PDFUtil.is_conversion_available(config=effective_config):
             logger.info(
-                "LibreOffice is unavailable. Falling back to direct office text extraction for %s",
+                "Office2PDF method %s is unavailable. Falling back to direct office text extraction for %s",
+                office2pdf_method,
                 document_type.identifier,
             )
             return self._create_office_text_fallback_content(document_type)
@@ -245,7 +241,7 @@ class FileUtilLLMMessages:
             Office2PDFUtil.create_pdf_from_document_bytes(
                 input_bytes=document_type.data,
                 output_path=temp_file_path,
-                configured_libreoffice_path=libreoffice_binary,
+                config=effective_config,
             )
             # 元ファイルからPDFに変換した旨の説明を追加
             explanation_text = f"""
@@ -260,7 +256,8 @@ class FileUtilLLMMessages:
             return pdf_contents
         except Exception:
             logger.warning(
-                "Failed to convert office document to PDF. Falling back to direct text extraction for %s",
+                "Failed to convert office document to PDF with method %s. Falling back to direct text extraction for %s",
+                office2pdf_method,
                 document_type.identifier,
                 exc_info=True,
             )

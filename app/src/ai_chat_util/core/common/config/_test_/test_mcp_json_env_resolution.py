@@ -127,6 +127,57 @@ def test_init_runtime_expands_allowlisted_ai_paths(monkeypatch: pytest.MonkeyPat
     assert cfg.file_server.allowed_roots[0].path == f"{tmp_path.as_posix()}/data"
 
 
+def test_init_runtime_supports_method_based_office2pdf_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    data = {
+        "ai_chat_util_config": {
+            "llm": {"api_key": "os.environ/LLM_API_KEY"},
+            "office2pdf": {
+                "method": "pywin32",
+                "pywin32": {"office_path": "${HOME}/Microsoft Office/root/Office16/WINWORD.EXE"},
+                "libreoffice_exec": {"libreoffice_path": "${HOME}/bin/soffice"},
+                "libreoffice_uno": {"host": "uno-host", "port": 8100},
+            },
+        }
+    }
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("LLM_API_KEY", "dummy-key")
+    runtime_mod._runtime_state = None  # type: ignore[attr-defined]
+
+    cfg = runtime_mod.init_runtime(str(cfg_path))
+
+    assert cfg.office2pdf.method == "pywin32"
+    assert (
+        cfg.office2pdf.pywin32.office_path
+        == f"{tmp_path.as_posix()}/Microsoft Office/root/Office16/WINWORD.EXE"
+    )
+    assert cfg.office2pdf.libreoffice_exec.libreoffice_path == f"{tmp_path.as_posix()}/bin/soffice"
+    assert cfg.office2pdf.libreoffice_uno.host == "uno-host"
+    assert cfg.office2pdf.libreoffice_uno.port == 8100
+
+
+def test_init_runtime_normalizes_legacy_office2pdf_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    data = {
+        "ai_chat_util_config": {
+            "llm": {"api_key": "os.environ/LLM_API_KEY"},
+            "office2pdf": {"libreoffice_path": "soffice"},
+        }
+    }
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("LLM_API_KEY", "dummy-key")
+    runtime_mod._runtime_state = None  # type: ignore[attr-defined]
+
+    cfg = runtime_mod.init_runtime(str(cfg_path))
+
+    assert cfg.office2pdf.method == "libreoffice_exec"
+    assert cfg.office2pdf.libreoffice_exec.libreoffice_path == "soffice"
+    assert cfg.office2pdf.libreoffice_path == "soffice"
+
+
 def test_init_runtime_rejects_unresolved_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"
     cfg_path.write_text(

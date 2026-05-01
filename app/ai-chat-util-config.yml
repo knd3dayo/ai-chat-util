@@ -152,10 +152,29 @@ ai_chat_util_config:
     ca_bundle: null
 
   office2pdf:
-    # Optional LibreOffice binary path.
-    # - Windows example: C:\\Program Files\\LibreOffice\\program\\soffice.exe
-    # - Or just "soffice" if it's on PATH
-    libreoffice_path: null
+    # Select one conversion method:
+    # - libreoffice_exec: run local LibreOffice in headless mode
+    # - pywin32: use installed Microsoft Office via pywin32 (config surface only for now)
+    # - libreoffice_uno: use an already-running LibreOffice UNO server (config surface only for now)
+    method: libreoffice_exec
+
+    pywin32:
+      # Optional Office executable path.
+      # Example: C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE
+      office_path: null
+
+    libreoffice_exec:
+      # Optional LibreOffice binary path.
+      # - Windows example: C:\\Program Files\\LibreOffice\\program\\soffice.exe
+      # - Or just "soffice" if it's on PATH
+      libreoffice_path: null
+
+    libreoffice_uno:
+      # Connection target for an existing LibreOffice UNO server.
+      host: 127.0.0.1
+      port: 2002
+      # Optional raw UNO connection string. If set, host/port are ignored.
+      connection_string: null
 
 # --- coding-agent-util settings (integrated) ---
 # coding-agent-util-config.yml の内容を、このファイルの

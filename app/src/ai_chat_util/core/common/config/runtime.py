@@ -255,8 +255,64 @@ def _expand_mapping_path_field(
         )
 
 
+def _expand_nested_mapping_path_field(
+    container: dict[str, Any],
+    section_key: str,
+    nested_section_key: str,
+    field_key: str,
+    *,
+    config_path: Path,
+    field_prefix: str,
+) -> None:
+    section = container.get(section_key)
+    if not isinstance(section, dict):
+        return
+
+    nested_section = section.get(nested_section_key)
+    if not isinstance(nested_section, dict):
+        return
+
+    value = nested_section.get(field_key)
+    if isinstance(value, str) and value.strip():
+        nested_section[field_key] = resolve_path_placeholders(
+            value,
+            config_path=config_path,
+            field_path=f"{field_prefix}{section_key}.{nested_section_key}.{field_key}",
+        )
+
+
+def _normalize_legacy_office2pdf_config(raw: dict[str, Any]) -> dict[str, Any]:
+    office2pdf = raw.get("office2pdf")
+    if not isinstance(office2pdf, dict):
+        return raw
+
+    normalized_office2pdf = dict(office2pdf)
+    legacy_libreoffice_path = normalized_office2pdf.pop("libreoffice_path", None)
+
+    libreoffice_exec = normalized_office2pdf.get("libreoffice_exec")
+    if libreoffice_exec is None:
+        libreoffice_exec = {}
+    if not isinstance(libreoffice_exec, dict):
+        return raw
+
+    normalized_exec = dict(libreoffice_exec)
+    if (
+        isinstance(legacy_libreoffice_path, str)
+        and legacy_libreoffice_path.strip()
+        and not normalized_exec.get("libreoffice_path")
+    ):
+        normalized_exec["libreoffice_path"] = legacy_libreoffice_path
+        normalized_office2pdf.setdefault("method", "libreoffice_exec")
+
+    normalized_office2pdf["libreoffice_exec"] = normalized_exec
+
+    normalized = dict(raw)
+    normalized["office2pdf"] = normalized_office2pdf
+    return normalized
+
+
 def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
-    copied = dict(raw)
+    copied = _normalize_legacy_office2pdf_config(dict(raw))
 
     for section_key, field_key in (
         ("mcp", "mcp_config_path"),
@@ -270,6 +326,19 @@ def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> d
         _expand_mapping_path_field(
             copied,
             section_key,
+            field_key,
+            config_path=config_path,
+            field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
+        )
+
+    for nested_section_key, field_key in (
+        ("pywin32", "office_path"),
+        ("libreoffice_exec", "libreoffice_path"),
+    ):
+        _expand_nested_mapping_path_field(
+            copied,
+            "office2pdf",
+            nested_section_key,
             field_key,
             config_path=config_path,
             field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
@@ -881,10 +950,55 @@ class NetworkSection(BaseModel):
     ca_bundle: str | None = Field(default=None)
 
 
-class Office2PDFSection(BaseModel):
+class Office2PDFPyWin32Section(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    office_path: str | None = Field(default=None)
+
+
+class Office2PDFLibreOfficeExecSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     libreoffice_path: str | None = Field(default=None)
+
+
+class Office2PDFLibreOfficeUnoSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(default="127.0.0.1")
+    port: int = Field(default=2002)
+    connection_string: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_connection(self) -> "Office2PDFLibreOfficeUnoSection":
+        if self.connection_string is not None:
+            self.connection_string = self.connection_string.strip() or None
+        if not self.connection_string:
+            self.host = self.host.strip()
+            if not self.host:
+                raise ValueError("office2pdf.libreoffice_uno.host は空文字にできません")
+            if self.port <= 0:
+                raise ValueError("office2pdf.libreoffice_uno.port は 1 以上である必要があります")
+        return self
+
+
+class Office2PDFSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["pywin32", "libreoffice_exec", "libreoffice_uno"] = Field(
+        default="libreoffice_exec"
+    )
+    pywin32: Office2PDFPyWin32Section = Field(default_factory=Office2PDFPyWin32Section)
+    libreoffice_exec: Office2PDFLibreOfficeExecSection = Field(
+        default_factory=Office2PDFLibreOfficeExecSection
+    )
+    libreoffice_uno: Office2PDFLibreOfficeUnoSection = Field(
+        default_factory=Office2PDFLibreOfficeUnoSection
+    )
+
+    @property
+    def libreoffice_path(self) -> str | None:
+        return self.libreoffice_exec.libreoffice_path
 
 
 class _RuntimeState(BaseModel):

@@ -563,15 +563,36 @@ ai_chat_util_config:
 
 切り分け用途（非推奨）で SSL 検証を無効化する場合は `network.requests_verify: false` を設定してください。
 
-### LibreOffice（Office→PDF 変換）
+### Office2PDF（Office→PDF 変換方式）
 
-Office 解析で LibreOffice を使う場合は、`ai-chat-util-config.yml` の `office2pdf.libreoffice_path` を設定します。
+`ai-chat-util-config.yml` の `office2pdf.method` で変換方式を選択します。
+
+- `libreoffice_exec`: ローカルの LibreOffice を headless 実行します
+- `pywin32`: インストール済み Microsoft Office + pywin32 を使います
+- `libreoffice_uno`: 既存の LibreOffice UNO Server に接続します
 
 ```yml
 ai_chat_util_config:
   office2pdf:
-    libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
+    method: libreoffice_exec
+
+    pywin32:
+      office_path: "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"
+
+    libreoffice_exec:
+      libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
+
+    libreoffice_uno:
+      host: "127.0.0.1"
+      port: 2002
+      connection_string: null
 ```
+
+補足:
+
+- 現時点で実装済みの変換方式は `libreoffice_exec` のみです
+- `pywin32` と `libreoffice_uno` は設定スキーマと方式選択の入口まで実装済みで、実変換処理は今後追加予定です
+- 後方互換のため、従来の `office2pdf.libreoffice_path` も引き続き受け付け、内部では `office2pdf.libreoffice_exec.libreoffice_path` として扱われます
 
 ### 環境変数（一覧）
 

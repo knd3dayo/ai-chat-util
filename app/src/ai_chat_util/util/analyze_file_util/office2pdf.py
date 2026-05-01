@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shlex
 import shutil
@@ -10,12 +11,86 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from ai_chat_util.core.common.config.runtime import get_runtime_config
+
 
 class Office2PDFUtil:
     DEFAULT_TIMEOUT_SECONDS = 600
 
     class _ConversionTimeout(RuntimeError):
         """Internal exception used to distinguish timeout paths."""
+
+    @classmethod
+    def _get_effective_office2pdf_config(cls, config: object | None = None):
+        effective_config = config if config is not None else get_runtime_config()
+        return effective_config.office2pdf
+
+    @classmethod
+    def get_selected_method(cls, config: object | None = None) -> str:
+        return str(cls._get_effective_office2pdf_config(config).method)
+
+    @classmethod
+    def _is_resolvable_binary(cls, candidate: str | Path | None) -> bool:
+        if not candidate:
+            return False
+
+        candidate_path = Path(candidate).expanduser()
+        if candidate_path.exists():
+            return True
+
+        return shutil.which(str(candidate)) is not None
+
+    @classmethod
+    def _is_pywin32_available(cls, office_path: str | Path | None) -> bool:
+        if os.name != "nt":
+            return False
+        if importlib.util.find_spec("win32com.client") is None:
+            return False
+        if office_path:
+            return cls._is_resolvable_binary(office_path)
+        return True
+
+    @classmethod
+    def _is_libreoffice_uno_available(cls) -> bool:
+        return importlib.util.find_spec("uno") is not None
+
+    @classmethod
+    def is_conversion_available(
+        cls,
+        *,
+        config: object | None = None,
+        libreoffice_path: str | Path | None = None,
+        configured_libreoffice_path: str | Path | None = None,
+    ) -> bool:
+        office2pdf_config = cls._get_effective_office2pdf_config(config)
+        method = cls.get_selected_method(config)
+
+        if method == "libreoffice_exec":
+            return cls.try_find_libreoffice_binary(
+                explicit_path=libreoffice_path,
+                configured_path=(
+                    configured_libreoffice_path or office2pdf_config.libreoffice_exec.libreoffice_path
+                ),
+            ) is not None
+
+        if method == "pywin32":
+            return cls._is_pywin32_available(office2pdf_config.pywin32.office_path)
+
+        if method == "libreoffice_uno":
+            return cls._is_libreoffice_uno_available()
+
+        return False
+
+    @classmethod
+    def _raise_unimplemented_method(cls, method: str) -> None:
+        if method == "pywin32":
+            raise NotImplementedError(
+                "office2pdf.method=pywin32 is configured, but pywin32-based Office conversion is not implemented yet."
+            )
+        if method == "libreoffice_uno":
+            raise NotImplementedError(
+                "office2pdf.method=libreoffice_uno is configured, but UNO server conversion is not implemented yet."
+            )
 
     @classmethod
     def _build_user_installation_arg(cls, user_profile_dir: Path) -> str:
@@ -237,6 +312,7 @@ class Office2PDFUtil:
         configured_libreoffice_path: str | Path | None = None,
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
         temp_dir: str | Path | None = None,
+        config: object | None = None,
     ) -> Path:
         with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdirname:
             source_path = Path(tmpdirname) / "input_document"
@@ -249,6 +325,7 @@ class Office2PDFUtil:
                 libreoffice_path=libreoffice_path,
                 configured_libreoffice_path=configured_libreoffice_path,
                 timeout=timeout,
+                config=config,
             )
 
     @classmethod
@@ -259,11 +336,17 @@ class Office2PDFUtil:
         libreoffice_path: str | Path | None = None,
         configured_libreoffice_path: str | Path | None = None,
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
+        config: object | None = None,
     ) -> Path:
         source = Path(input_path).expanduser()
         if not source.exists():
             raise FileNotFoundError(f"Input file not found: {source}")
         source = source.resolve()
+
+        office2pdf_config = cls._get_effective_office2pdf_config(config)
+        method = cls.get_selected_method(config)
+        if method != "libreoffice_exec":
+            cls._raise_unimplemented_method(method)
 
         if output_path is None:
             target = source.with_suffix(".pdf")
@@ -277,7 +360,7 @@ class Office2PDFUtil:
 
         libreoffice_binary = cls.find_libreoffice_binary(
             explicit_path=libreoffice_path,
-            configured_path=configured_libreoffice_path,
+            configured_path=(configured_libreoffice_path or office2pdf_config.libreoffice_exec.libreoffice_path),
         )
         output_dir = target.parent.resolve()
         expected_produced_path = output_dir / (source.stem + ".pdf")
@@ -387,7 +470,7 @@ class Office2PDFUtil:
             raise FileNotFoundError(f"LibreOffice binary not found at {candidate}")
 
         raise RuntimeError(
-            "LibreOffice binary not found. Set office2pdf.libreoffice_path in ai-chat-util-config.yml "
+            "LibreOffice binary not found. Set office2pdf.libreoffice_exec.libreoffice_path in ai-chat-util-config.yml "
             "or ensure LibreOffice is on PATH."
         )
 

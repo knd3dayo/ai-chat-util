@@ -20,7 +20,7 @@ from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFU
 
 import ai_chat_util.log.log_settings as log_settings
 
-from ...analyze_pdf_util.core.app import AnalyzePDFUtil
+from ...analyze_pdf_util.util import AnalyzePDFUtil
 
 
 logger = log_settings.getLogger(__name__)

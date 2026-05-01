@@ -35,7 +35,7 @@ from ai_chat_util.ai_chat_util_agent.core.app import (
     run_deepagent_batch_chat_from_excel,
 )
 
-from ai_chat_util.ai_chat_util_agent.core.tool_app import (
+from ai_chat_util.ai_chat_util_base.analyze_pdf_util.core import (
     analyze_image_files,
     analyze_pdf_files,
     analyze_office_files,

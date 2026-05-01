@@ -122,9 +122,7 @@ async def convert_office_files_to_pdf(
         return AnalyzePDFUtil.convert_office_files_to_pdf(
             office_path_list,
             output_dir=output_dir,
-            dry_run=False,
             libreoffice_path=_get_configured_libreoffice_path(),
-            resolve_paths=False,
         )
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf")

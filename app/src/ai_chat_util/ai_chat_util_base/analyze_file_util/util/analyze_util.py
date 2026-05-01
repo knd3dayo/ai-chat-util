@@ -138,21 +138,18 @@ class AnalyzePDFUtil:
     def convert_office_files_to_pdf(
         cls,
         file_path_list: list[str],
-        *,
-        output_dir: Path | None = None,
-        dry_run: bool = False,
+        output_dir: str | None = None,
         libreoffice_path: str | None = None,
     ) -> list[dict[str, str]]:
         planned: list[dict[str, str]] = []
         for office_path in file_path_list:
             source_path = Path(office_path)
-            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else output_dir / source_path.with_suffix(".pdf").name
+            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else Path(output_dir) / source_path.with_suffix(".pdf").name
             planned.append({"source_path": office_path, "pdf_path": str(pdf_path)})
-        if dry_run:
-            return planned
+
 
         if output_dir is not None:
-            output_dir.mkdir(parents=True, exist_ok=True)
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         results: list[dict[str, str]] = []
         for office_path, planned_item in zip(file_path_list, planned):
@@ -169,25 +166,24 @@ class AnalyzePDFUtil:
         cls,
         file_path_list: list[str],
         *,
-        output_dir: Path | None = None,
-        dry_run: bool = False,
+        output_dir: str | None = None,
         dpi: int = 144,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         scale = dpi / 72.0
         matrix = fitz.Matrix(scale, scale)
+        output_dir_path = Path(output_dir) if output_dir is not None else None
         for pdf_path in file_path_list:
             path = Path(pdf_path)
-            image_dir = (output_dir / f"{path.stem}_pages") if output_dir is not None else (path.parent / f"{path.stem}_pages")
+            image_dir = (output_dir_path / f"{path.stem}_pages") if output_dir_path is not None else (path.parent / f"{path.stem}_pages")
             with fitz.open(path) as document:
                 page_total = len(document)
                 image_paths = [str(image_dir / f"{path.stem}_page_{index:04d}.png") for index in range(1, page_total + 1)]
-                if not dry_run:
-                    image_dir.mkdir(parents=True, exist_ok=True)
-                    for index in range(1, page_total + 1):
-                        page = document.load_page(index - 1)
-                        pixmap = page.get_pixmap(matrix=matrix)
-                        pixmap.save(str(image_dir / f"{path.stem}_page_{index:04d}.png"))
+                image_dir.mkdir(parents=True, exist_ok=True)
+                for index in range(1, page_total + 1):
+                    page = document.load_page(index - 1)
+                    pixmap = page.get_pixmap(matrix=matrix)
+                    pixmap.save(str(image_dir / f"{path.stem}_page_{index:04d}.png"))
             results.append({"source_path": str(path), "image_dir": str(image_dir), "image_paths": image_paths})
         return results
 

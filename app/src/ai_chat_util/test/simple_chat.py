@@ -1,4 +1,4 @@
-from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
+from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
 
 async def main():
 

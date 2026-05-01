@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
-from ai_chat_util.common.config.runtime import init_runtime
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import init_runtime
 from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, bind_current_request_headers
 
-from ai_chat_util.ai_chat_util_agent.core.resource_app import (
+from ai_chat_util.ai_chat_util_base.core.resource_app import (
     use_custom_pdf_analyzer,
     get_completion_model,
     get_loaded_config_info,
@@ -35,34 +35,34 @@ from ai_chat_util.ai_chat_util_agent.core.app import (
     run_deepagent_batch_chat_from_excel,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_pdf import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_pdf import (
     analyze_pdf_files,
     convert_office_files_to_pdf,
     convert_pdf_files_to_images,
     analyze_pdf_urls,
 )
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_image import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_image import (
     analyze_image_files,
     analyze_image_urls,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_office import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_office import (
     analyze_office_files,
     analyze_office_urls,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_office import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_office import (
     analyze_office_files,
     analyze_office_urls,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_log import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_log import (
     detect_log_format_and_search,
     infer_log_header_pattern,
     extract_log_time_range,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_file import (
+from ai_chat_util.ai_chat_util_base.app.analyze_file_util.core.analyze_file import (
     analyze_files,
     analyze_file_urls
 )

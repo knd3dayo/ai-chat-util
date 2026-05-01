@@ -6,12 +6,12 @@ from pydantic import Field
 from ai_chat_util.ai_chat_util_agent.core import DeepAgentBatchClient, MCPBatchClient
 from ai_chat_util.ai_chat_util_agent.core.agent_client_factory import AgentFactory
 from ai_chat_util.ai_chat_util_base.batch import BatchClient
-from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
-from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse, WebRequestModel
+from ai_chat_util.ai_chat_util_base.core.chat.core import create_llm_client
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.ai_chat_util_base.core.chat.model import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse, WebRequestModel
 from ai_chat_util.ai_chat_util_base.request_headers import get_current_request_headers
-from ai_chat_util.ai_chat_util_workflow import WorkflowExecutionResponse, WorkflowSessionStore, execute_workflow_markdown
-from ai_chat_util.ai_chat_util_workflow.chat_client import WorkflowChatClient
+from ai_chat_util.ai_chat_util_base.app.ai_chat_util_workflow import WorkflowExecutionResponse, WorkflowSessionStore, execute_workflow_markdown
+from ai_chat_util.ai_chat_util_base.app.ai_chat_util_workflow.chat_client import WorkflowChatClient
 
 
 def _resolve_workflow_trace_id(trace_id: str = "") -> str:

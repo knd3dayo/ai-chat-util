@@ -7,10 +7,10 @@ from langchain.agents import create_agent
 from langchain.chat_models import BaseChatModel
 from .prompts_base import PromptsBase
 from .supervisor_support import AuditContext
-from ai_chat_util.common.config.ai_chat_util_mcp_config import MCPServerConfig
-from ai_chat_util.common.config.runtime import AiChatUtilConfig
+from ai_chat_util.ai_chat_util_base.core.common.config.ai_chat_util_mcp_config import MCPServerConfig
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig
 from .tool_limits import ToolLimits
-import ai_chat_util.log.log_settings as log_settings
+import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
 
 

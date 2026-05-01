@@ -1,6 +1,6 @@
-from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model import ChatRequestContext
-from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
+from ai_chat_util.ai_chat_util_base.core.chat.model import ChatRequestContext
+from ai_chat_util.ai_chat_util_base.core.chat.core import AbstractChatClient
 
 from .agent_client import CodingAgentMCPClient, DeepAgentMCPClient, AgentClient
 

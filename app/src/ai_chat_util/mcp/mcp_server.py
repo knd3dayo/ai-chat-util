@@ -6,11 +6,11 @@ from functools import wraps
 from typing import Callable, Mapping
 from fastmcp import FastMCP, Context
 
-from ai_chat_util.common.config.runtime import init_runtime
-from ai_chat_util.common.config.runtime import apply_logging_overrides
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import init_runtime
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import apply_logging_overrides
 from ai_chat_util.ai_chat_util_base.request_headers import RequestHeaders, bind_current_request_headers
 
-from ai_chat_util.ai_chat_util_agent.core.resource_app import get_loaded_config_info
+from ai_chat_util.ai_chat_util_base.core.resource_app import get_loaded_config_info
 
 from ai_chat_util.ai_chat_util_agent.core.app import (
     run_chat,

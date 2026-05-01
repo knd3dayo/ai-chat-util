@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 import tempfile
 
-from ai_chat_util.common.config.runtime import (
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import (
 	init_coding_runtime,
 	get_coding_runtime_config,
 	apply_logging_overrides,

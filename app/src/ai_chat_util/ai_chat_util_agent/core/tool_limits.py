@@ -11,8 +11,8 @@ import re
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from ai_chat_util.common.config.runtime import AiChatUtilConfig
-import ai_chat_util.log.log_settings as log_settings
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig
+import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
 
 from .supervisor_support import AuditContext
 

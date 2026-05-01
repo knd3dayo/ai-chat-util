@@ -16,7 +16,7 @@ from ..process_utils import kill_process_tree, popen_new_process_group_kwargs
 from .subprocess_coding_agent_runner import SubprocessCodingAgentRunner
 from .windows_process_coding_agent_runner import WindowsProcessCodingAgentRunner
 from .linux_process_coding_agent_runner import LinuxProcessCodingAgentRunner
-from ai_chat_util.common.config.runtime import (
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import (
     get_coding_runtime_config,
     get_coding_runtime_config_path,
 )

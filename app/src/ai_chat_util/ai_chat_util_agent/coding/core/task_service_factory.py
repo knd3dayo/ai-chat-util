@@ -3,7 +3,7 @@ from __future__ import annotations
 from .abstract_task_service import AbstractTaskService
 from .docker.docker_task_service import DockerTaskService
 from .subprocess.subprocess_task_service import SubprocessTaskService
-from ai_chat_util.common.config.runtime import get_coding_runtime_config
+from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_coding_runtime_config
 
 
 def select_task_service(backend: str | None = None) -> AbstractTaskService:

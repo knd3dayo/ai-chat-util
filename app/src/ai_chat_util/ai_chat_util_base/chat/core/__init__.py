@@ -3,7 +3,7 @@ from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_con
 from .abstract_chat_client import AbstractChatClient
 from .chat_client_base import ChatClientBase
 from .chat_client import LLMClient
-from .llm_message_content_factory import LLMMessageContentFactory, LLMMessageContentFactoryBase
+from .llm_messages_factory import LLMMessageContentFactory, LLMMessageContentFactoryBase
 
 
 def create_llm_client(

@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 from pydantic import Field
 
-from ai_chat_util.analysis import AnalysisService, LLMClientUtil
-from ai_chat_util.ai_chat_util_base.chat import create_llm_client
+from ai_chat_util.analysis import AnalysisService, AnalyzePDFUtil
+from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import WebRequestModel
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import WebRequestModel
 from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 from ai_chat_util.ai_chat_util_base.file_util.util import pdf_util
 from ai_chat_util.ai_chat_util_base.file_util.util.downloader import DownLoader
@@ -69,7 +69,7 @@ async def analyze_image_urls(
     )
     llm_client = create_llm_client()
     try:
-        response = await LLMClientUtil.analyze_image_urls(llm_client, image_path_urls, prompt, detail)
+        response = await AnalyzePDFUtil.analyze_image_urls(llm_client, image_path_urls, prompt, detail)
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_image_urls call_id=%s", call_id)

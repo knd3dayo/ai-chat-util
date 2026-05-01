@@ -1,4 +1,4 @@
-from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient, create_llm_client
+from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient, create_llm_client
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
 from .batch_client_base import BatchClientBase
 

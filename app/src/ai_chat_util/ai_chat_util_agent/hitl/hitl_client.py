@@ -5,9 +5,9 @@ import os
 import sys
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import ChatRequest, ChatHistory, ChatMessage, ChatContent
 
-from ...ai_chat_util_base.chat.abstract_chat_client import AbstractChatClient
+from ...ai_chat_util_base.chat.core.abstract_chat_client import AbstractChatClient
 
 
 class IOManagerBase(ABC):

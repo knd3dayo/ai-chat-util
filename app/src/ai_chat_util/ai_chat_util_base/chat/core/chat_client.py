@@ -4,11 +4,11 @@ from typing import Optional, Any, cast
 import asyncio
 
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )
-from .llm_message_content_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory
+from .llm_messages_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory
 from .chat_client_base import ChatClientBase
 
 import litellm

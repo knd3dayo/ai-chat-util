@@ -230,7 +230,7 @@ async def test_workflow_chat_client_resumes_after_approval(monkeypatch: pytest.M
                 tool_catalog_text="",
                 thread_id=thread_id,
             )
-        from ai_chat_util.ai_chat_util_base.ai_chat_util_models import HitlRequest
+        from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import HitlRequest
         from ai_chat_util.ai_chat_util_workflow.workflow.markdown_workflow import WorkflowExecutionResponse
 
         return WorkflowExecutionResponse(
@@ -245,7 +245,7 @@ async def test_workflow_chat_client_resumes_after_approval(monkeypatch: pytest.M
 
     monkeypatch.setattr("ai_chat_util.workflow.chat_client.execute_workflow_markdown", _fake_execute)
 
-    from ai_chat_util.ai_chat_util_base.ai_chat_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest
+    from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import ChatContent, ChatHistory, ChatMessage, ChatRequest
 
     first = await client.chat(
         ChatRequest(

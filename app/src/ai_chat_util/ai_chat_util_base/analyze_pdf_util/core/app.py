@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import time
 
-from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
+from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import (
     ChatContent,
     ChatHistory,
     ChatMessage,
@@ -11,14 +11,14 @@ from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
     ChatResponse,
     WebRequestModel,
 )
-from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 
+from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 import ai_chat_util.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
 
 
-class LLMClientUtil:
+class AnalyzePDFUtil:
     @classmethod
     async def analyze_image_files(
         cls,

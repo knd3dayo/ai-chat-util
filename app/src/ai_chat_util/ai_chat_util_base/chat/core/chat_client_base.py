@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ai_chat_util.common.config.runtime import AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import (
     ChatContent,
     ChatHistory,
     ChatMessage,
@@ -12,7 +12,7 @@ from ai_chat_util.ai_chat_util_base.ai_chat_util_models import (
     ChatResponse,
 )
 
-from .llm_message_content_factory import LLMMessageContentFactoryBase
+from .llm_messages_factory import LLMMessageContentFactoryBase
 from .abstract_chat_client import AbstractChatClient
 
 

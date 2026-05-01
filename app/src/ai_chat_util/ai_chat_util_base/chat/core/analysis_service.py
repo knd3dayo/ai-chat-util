@@ -11,16 +11,16 @@ from typing import Any
 
 import fitz
 
-from ai_chat_util.ai_chat_util_base.chat import AbstractChatClient
+from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.ai_chat_util_models import ChatResponse
+from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import ChatResponse
 from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 from ai_chat_util.ai_chat_util_base.file_util.util.file_path_resolver import resolve_existing_path
 from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFUtil
 
 import ai_chat_util.log.log_settings as log_settings
 
-from .llm_client_util import LLMClientUtil
+from ...analyze_pdf_util.core.app import AnalyzePDFUtil
 
 
 logger = log_settings.getLogger(__name__)
@@ -697,7 +697,7 @@ class AnalysisService:
         resolve_paths: bool = True,
     ) -> ChatResponse:
         target_paths = cls.resolve_existing_file_paths(file_list) if resolve_paths else file_list
-        return await LLMClientUtil.analyze_image_files(llm_client, target_paths, prompt, detail)
+        return await AnalyzePDFUtil.analyze_image_files(llm_client, target_paths, prompt, detail)
 
     @classmethod
     async def analyze_pdf_files(
@@ -710,7 +710,7 @@ class AnalysisService:
         resolve_paths: bool = True,
     ) -> ChatResponse:
         target_paths = cls.resolve_existing_file_paths(file_list) if resolve_paths else file_list
-        return await LLMClientUtil.analyze_pdf_files(llm_client, target_paths, prompt, detail)
+        return await AnalyzePDFUtil.analyze_pdf_files(llm_client, target_paths, prompt, detail)
 
     @classmethod
     async def analyze_office_files(
@@ -723,7 +723,7 @@ class AnalysisService:
         resolve_paths: bool = True,
     ) -> ChatResponse:
         target_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        return await LLMClientUtil.analyze_office_files(llm_client, target_paths, prompt, detail)
+        return await AnalyzePDFUtil.analyze_office_files(llm_client, target_paths, prompt, detail)
 
     @classmethod
     async def analyze_files(
@@ -736,7 +736,7 @@ class AnalysisService:
         resolve_paths: bool = True,
     ) -> ChatResponse:
         target_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        return await LLMClientUtil.analyze_files(llm_client, target_paths, prompt, detail)
+        return await AnalyzePDFUtil.analyze_files(llm_client, target_paths, prompt, detail)
 
     @classmethod
     async def analyze_documents_data(
@@ -746,7 +746,7 @@ class AnalysisService:
         prompt: str,
         detail: str = "auto",
     ) -> ChatResponse:
-        return await LLMClientUtil.analyze_documents_data(
+        return await AnalyzePDFUtil.analyze_documents_data(
             llm_client,
             document_type_list,
             prompt,

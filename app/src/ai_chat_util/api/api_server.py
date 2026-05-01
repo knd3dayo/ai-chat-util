@@ -35,21 +35,36 @@ from ai_chat_util.ai_chat_util_agent.core.app import (
     run_deepagent_batch_chat_from_excel,
 )
 
-from ai_chat_util.ai_chat_util_base.analyze_pdf_util.core import (
-    analyze_image_files,
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_pdf import (
     analyze_pdf_files,
-    analyze_office_files,
-    analyze_files,
     convert_office_files_to_pdf,
     convert_pdf_files_to_images,
+    analyze_pdf_urls,
+)
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_image import (
+    analyze_image_files,
+    analyze_image_urls,
+)
+
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_office import (
+    analyze_office_files,
+    analyze_office_urls,
+)
+
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_office import (
+    analyze_office_files,
+    analyze_office_urls,
+)
+
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_log import (
     detect_log_format_and_search,
     infer_log_header_pattern,
     extract_log_time_range,
-    analyze_documents_data,
-    analyze_image_urls,
-    analyze_pdf_urls,
-    analyze_office_urls,
-    analyze_urls
+)
+
+from ai_chat_util.ai_chat_util_base.analyze_file_util.core.analyze_file import (
+    analyze_files,
+    analyze_file_urls
 )
 
 router = APIRouter()
@@ -83,9 +98,6 @@ router.add_api_route(path="/analyze_office_files", endpoint=analyze_office_files
 # 複数の形式のドキュメントの分析を行う
 router.add_api_route(path="/analyze_files", endpoint=analyze_files, methods=["POST"])
 
-# 複数の形式のドキュメントの分析を行う
-router.add_api_route(path="/analyze_documents_data", endpoint=analyze_documents_data, methods=["POST"])
-
 # 複数の画像の分析を行う URLから画像をダウンロードして分析する 
 router.add_api_route(path="/analyze_image_urls", endpoint=analyze_image_urls, methods=["POST"])
 
@@ -96,7 +108,7 @@ router.add_api_route(path="/analyze_pdf_urls", endpoint=analyze_pdf_urls, method
 router.add_api_route(path="/analyze_office_urls", endpoint=analyze_office_urls, methods=["POST"])
 
 # 複数の形式のドキュメントの分析を行う URLから形式のドキュメントをダウンロードして分析する
-router.add_api_route(path="/analyze_urls", endpoint=analyze_urls, methods=["POST"])
+router.add_api_route(path="/analyze_file_urls", endpoint=analyze_file_urls, methods=["POST"])
 
 # ドキュメント変換ツール
 router.add_api_route(path="/convert_office_files_to_pdf", endpoint=convert_office_files_to_pdf, methods=["POST"])

@@ -116,7 +116,7 @@ async def convert_office_files_to_pdf(
         output_dir
     )
     try:
-        return AnalyzePDFUtil.convert_office_files_to_pdf(
+        return AnalyzePDFUtil.convert_office_files_to_pdf_by_local_libreoffice(
             office_path_list,
             output_dir=output_dir,
             libreoffice_path=_get_configured_libreoffice_path(),

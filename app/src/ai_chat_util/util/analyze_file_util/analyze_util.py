@@ -135,7 +135,7 @@ class AnalyzePDFUtil:
         return chat_response
 
     @classmethod
-    def convert_office_files_to_pdf(
+    def convert_office_files_to_pdf_by_local_libreoffice(
         cls,
         file_path_list: list[str],
         output_dir: str | None = None,

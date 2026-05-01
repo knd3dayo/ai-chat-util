@@ -238,7 +238,10 @@ class FileUtilLLMMessages:
             # Officeドキュメントを一時的にPDFに変換する
             temp_dir = tempfile.TemporaryDirectory()
             atexit.register(temp_dir.cleanup)
-            temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
+            temp_file_path = os.path.join(
+                temp_dir.name, 
+                f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf"
+                )
             Office2PDFUtil.create_pdf_from_document_bytes(
                 input_bytes=document_type.data,
                 output_path=temp_file_path,

@@ -1,11 +1,11 @@
 from ai_chat_util.core.chat import create_llm_client
-from ai_chat_util.core.analysis_service import AnalysisService
+from ai_chat_util.core.analysis.analyze_pdf import AnalyzePDFUtil
 
 
 async def main(files):
 
     client = create_llm_client()
-    result = await AnalysisService.analyze_pdf_files(
+    result = await AnalyzePDFUtil.analyze_pdf_files(
         client,
         file_list=files,
         prompt="このPDFの要約を作成してください。"

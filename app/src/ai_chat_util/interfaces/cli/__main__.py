@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import Any, Iterable, cast
 from ai_chat_util.app.agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.core.analysis_service import AnalysisService
+from ai_chat_util.core.analysis.analyze_image import AnalyzeImageUtil
 from ai_chat_util.core.chat import create_llm_client
 from ai_chat_util.app.agent.core.hitl import create_stdio_hitl_client
 from ai_chat_util.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
@@ -509,7 +509,7 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
         llm_client = create_llm_client()
-        response = await AnalysisService.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
+        response = await AnalyzeImageUtil.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
         print(response.output)
         return
 

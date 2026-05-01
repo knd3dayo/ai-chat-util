@@ -1,10 +1,10 @@
 from ai_chat_util.core.chat import create_llm_client
-from ai_chat_util.core.analysis_service import AnalysisService
+from ai_chat_util.core.analysis.analyze_office import AnalyzeOfficeUtil
 
 async def main(files):
     client = create_llm_client()
 
-    result = await AnalysisService.analyze_office_files(
+    result = await AnalyzeOfficeUtil.analyze_office_files(
         client,
         file_path_list=files,
         prompt="このExcelファイルの要約を作成してください。"

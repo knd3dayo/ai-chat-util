@@ -1,36 +1,290 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
-import json
-from pathlib import Path
-import re
 import time
-from collections.abc import Awaitable, Callable
+import json
+import re
+from pathlib import Path
+from datetime import datetime
 from typing import Any
 
-import fitz
-
 from ai_chat_util.ai_chat_util_base.core.chat.core import AbstractChatClient
-from ai_chat_util.ai_chat_util_base.core.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.core.chat.model import ChatResponse
-from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.file_path_resolver import resolve_existing_path
-from ai_chat_util.ai_chat_util_base.util.analyze_file_util.office2pdf import Office2PDFUtil
-
-import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
-
-from ..util.analyze_file_util.analyze_util import (
-    AnalyzeLogUtil, AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeImageUtil, AnalyzeFileUtil
+from ai_chat_util.ai_chat_util_base.core.chat.model import (
+    ChatContent,
+    ChatHistory,
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    WebRequestModel,
 )
-from ..util.analyze_file_util.analyze_util import FileUtilLLMMessages
 
-
+from ai_chat_util.ai_chat_util_base.core.analyze_file_util.model import FileUtilDocument
+import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
+from .office2pdf import Office2PDFUtil
+import fitz  # PyMuPDF
+from .file_util_llm_messages import FileUtilLLMMessages
 
 logger = log_settings.getLogger(__name__)
 
+class AnalyzeImageUtil:
+    @classmethod
+    async def analyze_image_files(
+        cls,
+        llm_client: AbstractChatClient,
+        file_list: list[str],
+        prompt: str,
+        detail: str,
+    ) -> ChatResponse:
+        started = time.perf_counter()
+        logger.info(
+            "IMAGE_ANALYZE_START images=%d detail=%s prompt_len=%d",
+            len(file_list or []),
+            detail,
+            len((prompt or "").strip()),
+        )
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        image_content_list: list[ChatContent] = []
+        encode_started = time.perf_counter()
+        total_bytes = 0
+        for image_path in file_list:
+            doc = FileUtilDocument.from_file(document_path=image_path)
+            try:
+                total_bytes += len(doc.data or b"")
+            except Exception:
+                pass
+            image_contents = llm_client.get_message_factory()._create_image_content_(doc.identifier, doc.data, detail)
+            image_content_list.extend(image_contents)
+        logger.info(
+            "IMAGE_ENCODE_END images=%d total_bytes=%d elapsed_ms=%d",
+            len(file_list or []),
+            total_bytes,
+            int((time.perf_counter() - encode_started) * 1000),
+        )
 
-class AnalysisService:
+        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        chat_started = time.perf_counter()
+        logger.info("IMAGE_CHAT_START")
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        logger.info(
+            "IMAGE_CHAT_END elapsed_ms=%d total_elapsed_ms=%d",
+            int((time.perf_counter() - chat_started) * 1000),
+            int((time.perf_counter() - started) * 1000),
+        )
+        return chat_response
+
+    @classmethod
+    async def analyze_image_urls(
+        cls,
+        llm_client: AbstractChatClient,
+        image_url_list: list[WebRequestModel],
+        prompt: str,
+        detail: str,
+    ) -> ChatResponse:
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        image_content_list: list[ChatContent] = []
+        file_util_llm_messages = FileUtilLLMMessages(llm_client)
+        for image_url in image_url_list:
+            image_contents = await file_util_llm_messages.create_image_content_from_url_async(
+                image_url, detail
+            )
+            image_content_list.extend(image_contents)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
+
+class AnalyzePDFUtil:
+    @classmethod
+    async def analyze_pdf_files(
+        cls,
+        llm_client: AbstractChatClient,
+        file_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        pdf_content_list = []
+        config = llm_client.get_config()
+        if not config:
+            raise ValueError("LLMClientの設定が取得できませんでした。")
+
+        for file_path in file_list:
+            if config.features.use_custom_pdf_analyzer:
+                logger.info(f"Using custom PDF analyzer for file: {file_path}")
+                with open(file_path, "rb") as f:
+                    pdf_data = f.read()
+                pdf_content = llm_client.get_message_factory()._create_custom_pdf_content_(file_path, pdf_data, detail)
+            else:
+                logger.info(f"Using standard PDF analyzer for file: {file_path}")
+                with open(file_path, "rb") as f:
+                    pdf_data = f.read()
+                pdf_content = llm_client.get_message_factory()._create_pdf_content_(file_path, pdf_data, detail)
+            pdf_content_list.extend(pdf_content)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
+    @classmethod
+    def convert_office_files_to_pdf(
+        cls,
+        file_path_list: list[str],
+        output_dir: str | None = None,
+        libreoffice_path: str | None = None,
+    ) -> list[dict[str, str]]:
+        planned: list[dict[str, str]] = []
+        for office_path in file_path_list:
+            source_path = Path(office_path)
+            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else Path(output_dir) / source_path.with_suffix(".pdf").name
+            planned.append({"source_path": office_path, "pdf_path": str(pdf_path)})
+
+
+        if output_dir is not None:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, str]] = []
+        for office_path, planned_item in zip(file_path_list, planned):
+            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
+                input_path=office_path,
+                output_path=output_dir,
+                configured_libreoffice_path=libreoffice_path,
+            )
+            results.append({"source_path": planned_item["source_path"], "pdf_path": str(pdf_path)})
+        return results
+
+    @classmethod
+    def convert_pdf_files_to_images(
+        cls,
+        file_path_list: list[str],
+        *,
+        output_dir: str | None = None,
+        dpi: int = 144,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        scale = dpi / 72.0
+        matrix = fitz.Matrix(scale, scale)
+        output_dir_path = Path(output_dir) if output_dir is not None else None
+        for pdf_path in file_path_list:
+            path = Path(pdf_path)
+            image_dir = (output_dir_path / f"{path.stem}_pages") if output_dir_path is not None else (path.parent / f"{path.stem}_pages")
+            with fitz.open(path) as document:
+                page_total = len(document)
+                image_paths = [str(image_dir / f"{path.stem}_page_{index:04d}.png") for index in range(1, page_total + 1)]
+                image_dir.mkdir(parents=True, exist_ok=True)
+                for index in range(1, page_total + 1):
+                    page = document.load_page(index - 1)
+                    pixmap = page.get_pixmap(matrix=matrix)
+                    pixmap.save(str(image_dir / f"{path.stem}_page_{index:04d}.png"))
+            results.append({"source_path": str(path), "image_dir": str(image_dir), "image_paths": image_paths})
+        return results
+
+class AnalyzeOfficeUtil:
+    @classmethod
+    async def analyze_office_files(
+        cls,
+        llm_client: AbstractChatClient,
+        file_path_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
+        office_contents: list[ChatContent] = []
+        file_util_llm_messages = FileUtilLLMMessages(llm_client)
+        for file_path in file_path_list:
+            with open(file_path, "rb") as f:
+                office_data = f.read()
+            pdf_content = file_util_llm_messages.create_office_content_from_file(
+                file_path, detail=detail
+            )
+            office_contents.extend(pdf_content)
+
+        prompt_content = file_util_llm_messages.create_text_content(text=prompt)
+
+        chat_message = ChatMessage(role="user", content=[prompt_content] + office_contents)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        response: ChatResponse = await llm_client.chat(chat_request)
+        return response
+
+class AnalyzeFileUtil:
+
+    @classmethod
+    async def analyze_documents_data(
+        cls,
+        llm_client: AbstractChatClient,
+        document_type_list: list[FileUtilDocument],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
+        file_util_llm_messages = FileUtilLLMMessages(llm_client)
+        content_list = []
+        for document_type in document_type_list:
+            contents = file_util_llm_messages.create_multi_format_content(
+                document_type, detail=detail
+            )
+            content_list.extend(contents)
+
+        prompt_content = file_util_llm_messages.create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
+    @classmethod
+    async def analyze_files(
+        cls,
+        llm_client: AbstractChatClient,
+        file_path_list: list[str],
+        prompt: str,
+        detail: str = "auto",
+    ) -> ChatResponse:
+        content_list = []
+        skipped_files: list[str] = []
+        file_util_llm_messages = FileUtilLLMMessages(llm_client)
+        for file_path in file_path_list:
+            try:
+                contents = file_util_llm_messages.create_multi_format_contents_from_file(
+                    file_path, detail=detail
+                )
+            except ValueError as exc:
+                if "Unsupported document type" not in str(exc):
+                    raise
+                skipped_files.append(file_path)
+                logger.info("FILE_ANALYZE_SKIP unsupported=%s", file_path)
+                continue
+            content_list.extend(contents)
+
+        if not content_list:
+            raise ValueError(
+                "No supported files were found for analyze_files. "
+                f"skipped={len(skipped_files)}"
+            )
+
+        if skipped_files:
+            logger.info("FILE_ANALYZE_SKIPPED_COUNT count=%d", len(skipped_files))
+
+        prompt_content = llm_client.get_message_factory().create_text_content(text=prompt)
+        chat_message = ChatMessage(role="user", content=[prompt_content] + content_list)
+        chat_request: ChatRequest = ChatRequest(
+            chat_history=ChatHistory(messages=[chat_message]), chat_request_context=None
+        )
+        chat_response: ChatResponse = await llm_client.chat(chat_request)
+        return chat_response
+
+
+
+class AnalyzeLogUtil:
     _MAX_DIRECTORY_ANALYSIS_FILES = 20
     _MAX_DIRECTORY_ANALYSIS_FILE_BYTES = 200_000
     _SUPPORTED_TEXT_SUFFIXES = {
@@ -99,21 +353,6 @@ class AnalysisService:
     )
 
     @staticmethod
-    def summarize_path_basenames(paths: list[str], *, limit: int = 5) -> str:
-        names: list[str] = []
-        for path in paths[:limit]:
-            try:
-                names.append(path.rsplit("/", 1)[-1])
-            except Exception:
-                names.append(str(path))
-        more = "" if len(paths) <= limit else f" (+{len(paths) - limit} more)"
-        return f"[{', '.join(names)}]{more}"
-
-    @staticmethod
-    def prompt_len(prompt: str) -> int:
-        return len((prompt or "").strip())
-
-    @staticmethod
     def _coerce_json_object(raw_text: str) -> dict[str, Any]:
         candidate = (raw_text or "").strip()
         if candidate.startswith("```"):
@@ -128,100 +367,6 @@ class AnalysisService:
         if not isinstance(payload, dict):
             raise ValueError("expected a JSON object")
         return payload
-
-    @classmethod
-    def _is_supported_analysis_file(cls, path: Path) -> bool:
-        suffix = path.suffix.lower()
-        return (
-            suffix in cls._SUPPORTED_TEXT_SUFFIXES
-            or suffix in cls._SUPPORTED_IMAGE_SUFFIXES
-            or suffix in cls._SUPPORTED_DOCUMENT_SUFFIXES
-        )
-
-    @staticmethod
-    def _is_hidden_path(path: Path) -> bool:
-        return any(part.startswith(".") for part in path.parts)
-
-    @classmethod
-    def _expand_directory_analysis_targets(cls, directory_path: str) -> list[str]:
-        directory = Path(directory_path)
-        resolved_files: list[str] = []
-
-        for candidate in sorted(directory.rglob("*")):
-            try:
-                if not candidate.is_file():
-                    continue
-            except OSError:
-                continue
-
-            if cls._is_hidden_path(candidate.relative_to(directory)):
-                continue
-
-            if not cls._is_supported_analysis_file(candidate):
-                continue
-
-            try:
-                if candidate.stat().st_size > cls._MAX_DIRECTORY_ANALYSIS_FILE_BYTES:
-                    continue
-            except OSError:
-                continue
-
-            resolved_files.append(str(candidate.resolve()))
-            if len(resolved_files) >= cls._MAX_DIRECTORY_ANALYSIS_FILES:
-                break
-
-        if resolved_files:
-            return resolved_files
-
-        raise FileNotFoundError(f"No supported analysis files found in directory: {directory.resolve()}")
-
-    @classmethod
-    def resolve_existing_file_paths(cls, file_path_list: list[str]) -> list[str]:
-        runtime_config = get_runtime_config()
-        resolved: list[str] = []
-        seen: set[str] = set()
-        for file_path in file_path_list:
-            result = resolve_existing_path(
-                file_path,
-                working_directory=runtime_config.mcp.working_directory,
-                allow_directory=True,
-            )
-
-            candidate_paths = [result.resolved_path]
-            if result.path_kind == "directory":
-                candidate_paths = cls._expand_directory_analysis_targets(result.resolved_path)
-
-            for candidate_path in candidate_paths:
-                if candidate_path in seen:
-                    continue
-                seen.add(candidate_path)
-                resolved.append(candidate_path)
-        return resolved
-
-    @staticmethod
-    def tool_timeout_seconds() -> float:
-        runtime_config = get_runtime_config()
-        tool_timeout_cfg = getattr(runtime_config.features, "mcp_tool_timeout_seconds", None)
-        try:
-            timeout = (
-                float(tool_timeout_cfg)
-                if tool_timeout_cfg is not None
-                else float(runtime_config.llm.timeout_seconds)
-            )
-        except (TypeError, ValueError):
-            timeout = float(runtime_config.llm.timeout_seconds)
-        if timeout <= 0:
-            timeout = float(runtime_config.llm.timeout_seconds)
-        return timeout
-
-    @staticmethod
-    def tool_timeout_retries() -> int:
-        runtime_config = get_runtime_config()
-        try:
-            retries_raw = int(getattr(runtime_config.features, "mcp_tool_timeout_retries", 1) or 0)
-        except (TypeError, ValueError):
-            retries_raw = 1
-        return max(0, min(5, retries_raw))
 
     @staticmethod
     def detect_log_format_from_lines(lines: list[str]) -> dict[str, Any]:
@@ -405,11 +550,8 @@ class AnalysisService:
         llm_client: AbstractChatClient,
         file_path: str,
         sample_line_limit: int = 100,
-        *,
-        resolve_paths: bool = True,
     ) -> str:
-        target_path = cls.resolve_existing_file_paths([file_path])[0] if resolve_paths else str(Path(file_path).expanduser().resolve())
-        path = Path(target_path)
+        path = Path(file_path).expanduser().resolve()
         sample_lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()[:sample_line_limit]
         if not sample_lines:
             return json.dumps(
@@ -467,10 +609,8 @@ class AnalysisService:
         search_terms: list[str] | None = None,
         sample_line_limit: int = 100,
         match_limit: int = 50,
-        resolve_paths: bool = True,
     ) -> str:
-        target_path = cls.resolve_existing_file_paths([file_path])[0] if resolve_paths else str(Path(file_path).expanduser().resolve())
-        path = Path(target_path)
+        path = Path(file_path).expanduser().resolve()
         text = path.read_text(encoding="utf-8", errors="ignore")
         sample_lines = text.splitlines()[:sample_line_limit]
         detection = cls.detect_log_format_from_lines(sample_lines)
@@ -510,9 +650,8 @@ class AnalysisService:
         time_format: str | None = None,
         output_subdir: str = "log_extracts",
         output_filename: str | None = None,
-        resolve_paths: bool = True,
     ) -> str:
-        target_path = cls.resolve_existing_file_paths([file_path])[0] if resolve_paths else str(Path(file_path).expanduser().resolve())
+        target_path = Path(file_path).expanduser().resolve()
         source_path = Path(target_path)
         workspace_root = Path(workspace_path).expanduser().resolve()
         text = source_path.read_text(encoding="utf-8", errors="ignore")
@@ -550,209 +689,4 @@ class AnalysisService:
                 **extraction,
             },
             ensure_ascii=False,
-        )
-
-    @classmethod
-    def convert_office_files_to_pdf(
-        cls,
-        file_path_list: list[str],
-        *,
-        output_dir: Path | None = None,
-        dry_run: bool = False,
-        libreoffice_path: str | None = None,
-        resolve_paths: bool = True,
-    ) -> list[dict[str, str]]:
-        resolved_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        planned: list[dict[str, str]] = []
-        for office_path in resolved_paths:
-            source_path = Path(office_path)
-            pdf_path = source_path.with_suffix(".pdf") if output_dir is None else output_dir / source_path.with_suffix(".pdf").name
-            planned.append({"source_path": office_path, "pdf_path": str(pdf_path)})
-        if dry_run:
-            return planned
-
-        if output_dir is not None:
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-        results: list[dict[str, str]] = []
-        for office_path, planned_item in zip(resolved_paths, planned):
-            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
-                input_path=office_path,
-                output_path=output_dir,
-                configured_libreoffice_path=libreoffice_path,
-            )
-            results.append({"source_path": planned_item["source_path"], "pdf_path": str(pdf_path)})
-        return results
-
-    @classmethod
-    def convert_pdf_files_to_images(
-        cls,
-        file_path_list: list[str],
-        *,
-        output_dir: Path | None = None,
-        dry_run: bool = False,
-        dpi: int = 144,
-        resolve_paths: bool = True,
-    ) -> list[dict[str, Any]]:
-        resolved_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        results: list[dict[str, Any]] = []
-        scale = dpi / 72.0
-        matrix = fitz.Matrix(scale, scale)
-        for pdf_path in resolved_paths:
-            path = Path(pdf_path)
-            image_dir = (output_dir / f"{path.stem}_pages") if output_dir is not None else (path.parent / f"{path.stem}_pages")
-            with fitz.open(path) as document:
-                page_total = len(document)
-                image_paths = [str(image_dir / f"{path.stem}_page_{index:04d}.png") for index in range(1, page_total + 1)]
-                if not dry_run:
-                    image_dir.mkdir(parents=True, exist_ok=True)
-                    for index in range(1, page_total + 1):
-                        page = document.load_page(index - 1)
-                        pixmap = page.get_pixmap(matrix=matrix)
-                        pixmap.save(str(image_dir / f"{path.stem}_page_{index:04d}.png"))
-            results.append({"source_path": str(path), "image_dir": str(image_dir), "image_paths": image_paths})
-        return results
-
-    @classmethod
-    async def run_analysis_tool(
-        cls,
-        *,
-        tool_name: str,
-        prompt: str,
-        detail: str,
-        input_count: int,
-        input_kind: str,
-        operation: Callable[[], Awaitable[ChatResponse]],
-        input_summary: str | None = None,
-        use_timeout_retry: bool = False,
-        stringify_errors: bool = False,
-    ) -> str:
-        started = time.perf_counter()
-        logger.info(
-            "MCP_TOOL_START tool=%s %s=%d detail=%s prompt_len=%d",
-            tool_name,
-            input_kind,
-            input_count,
-            detail,
-            cls.prompt_len(prompt),
-        )
-        if input_summary is not None:
-            logger.info(
-                "MCP_TOOL_INPUT tool=%s %s=%d basenames=%s",
-                tool_name,
-                input_kind,
-                input_count,
-                input_summary,
-            )
-
-        try:
-            if not use_timeout_retry:
-                response = await operation()
-                return response.output
-
-            timeout = cls.tool_timeout_seconds()
-            retries = cls.tool_timeout_retries()
-            last_err: Exception | None = None
-            for attempt in range(1, retries + 2):
-                try:
-                    response = await asyncio.wait_for(operation(), timeout=timeout)
-                    return response.output
-                except asyncio.TimeoutError as exc:
-                    last_err = exc
-                    logger.warning(
-                        "MCP_TOOL_TIMEOUT tool=%s attempt=%s/%s timeout=%ss",
-                        tool_name,
-                        attempt,
-                        retries + 1,
-                        timeout,
-                    )
-                    if attempt <= retries:
-                        continue
-                    break
-
-            if last_err is not None:
-                return (
-                    f"ERROR: {tool_name} timed out. "
-                    f"timeout={timeout}s retries={retries}. "
-                    "同一入力での無限再試行を防ぐため中断しました。"
-                )
-            return f"ERROR: {tool_name} failed (unknown error)"
-        except Exception as exc:
-            logger.exception("MCP_TOOL_ERR tool=%s", tool_name)
-            if stringify_errors:
-                return f"ERROR: {tool_name} failed: {type(exc).__name__}: {str(exc).strip()}"
-            raise
-        finally:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            logger.info(
-                "MCP_TOOL_END tool=%s elapsed_ms=%s",
-                tool_name,
-                elapsed_ms,
-            )
-
-    @classmethod
-    async def analyze_image_files(
-        cls,
-        llm_client: AbstractChatClient,
-        file_list: list[str],
-        prompt: str,
-        detail: str,
-        *,
-        resolve_paths: bool = True,
-    ) -> ChatResponse:
-        target_paths = cls.resolve_existing_file_paths(file_list) if resolve_paths else file_list
-        return await AnalyzeImageUtil.analyze_image_files(llm_client, target_paths, prompt, detail)
-
-    @classmethod
-    async def analyze_pdf_files(
-        cls,
-        llm_client: AbstractChatClient,
-        file_list: list[str],
-        prompt: str,
-        detail: str = "auto",
-        *,
-        resolve_paths: bool = True,
-    ) -> ChatResponse:
-        target_paths = cls.resolve_existing_file_paths(file_list) if resolve_paths else file_list
-        return await AnalyzePDFUtil.analyze_pdf_files(llm_client, target_paths, prompt, detail)
-
-    @classmethod
-    async def analyze_office_files(
-        cls,
-        llm_client: AbstractChatClient,
-        file_path_list: list[str],
-        prompt: str,
-        detail: str = "auto",
-        *,
-        resolve_paths: bool = True,
-    ) -> ChatResponse:
-        target_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        return await AnalyzeOfficeUtil.analyze_office_files(llm_client, target_paths, prompt, detail)
-
-    @classmethod
-    async def analyze_files(
-        cls,
-        llm_client: AbstractChatClient,
-        file_path_list: list[str],
-        prompt: str,
-        detail: str = "auto",
-        *,
-        resolve_paths: bool = True,
-    ) -> ChatResponse:
-        target_paths = cls.resolve_existing_file_paths(file_path_list) if resolve_paths else file_path_list
-        return await AnalyzeFileUtil.analyze_files(llm_client, target_paths, prompt, detail)
-
-    @classmethod
-    async def analyze_documents_data(
-        cls,
-        llm_client: AbstractChatClient,
-        document_type_list: list[FileUtilDocument],
-        prompt: str,
-        detail: str = "auto",
-    ) -> ChatResponse:
-        return await AnalyzeFileUtil.analyze_documents_data(
-            llm_client,
-            document_type_list,
-            prompt,
-            detail,
         )

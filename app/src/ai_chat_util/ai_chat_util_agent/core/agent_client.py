@@ -27,7 +27,7 @@ from .agent_client_util import AgentClientUtil
 from .tool_limits import ToolLimits
 
 if TYPE_CHECKING:
-    from ai_chat_util.ai_chat_util_base.app.ai_chat_util_workflow.chat_client import WorkflowChatClient as WorkflowChatClientType
+    from ai_chat_util.ai_chat_util_workflow.chat_client import WorkflowChatClient as WorkflowChatClientType
 
 
 WorkflowChatClient: Any | None = None
@@ -36,7 +36,7 @@ WorkflowChatClient: Any | None = None
 def _get_workflow_chat_client_class() -> type[WorkflowChatClientType] | Any:
     global WorkflowChatClient
     if WorkflowChatClient is None:
-        from ai_chat_util.ai_chat_util_base.app.ai_chat_util_workflow.chat_client import WorkflowChatClient as ImportedWorkflowChatClient
+        from ai_chat_util.ai_chat_util_workflow.chat_client import WorkflowChatClient as ImportedWorkflowChatClient
 
         WorkflowChatClient = ImportedWorkflowChatClient
     return WorkflowChatClient

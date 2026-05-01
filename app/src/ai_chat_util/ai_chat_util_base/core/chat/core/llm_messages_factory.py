@@ -18,7 +18,7 @@ from ai_chat_util.ai_chat_util_base.core.chat.model import (
     ChatHistory, ChatRequestContext, ChatMessage,
     ChatContent
 )
-from ai_chat_util.ai_chat_util_base.app.analyze_file_util.util import pdf_util
+from ai_chat_util.ai_chat_util_base.util.analyze_file_util import pdf_util
 
 import ai_chat_util.ai_chat_util_base.core.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)

@@ -18,6 +18,34 @@ from ai_chat_util.ai_chat_util_base.analyze_file_util.util.excel_util import Exc
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util.file_server_util import FileServerUtil
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util.zip_util import ZipUtil
 
+def tool_timeout_seconds() -> float:
+    runtime_config = get_runtime_config()
+    tool_timeout_cfg = getattr(runtime_config.features, "mcp_tool_timeout_seconds", None)
+    try:
+        timeout = (
+            float(tool_timeout_cfg)
+            if tool_timeout_cfg is not None
+            else float(runtime_config.llm.timeout_seconds)
+        )
+    except (TypeError, ValueError):
+        timeout = float(runtime_config.llm.timeout_seconds)
+    if timeout <= 0:
+        timeout = float(runtime_config.llm.timeout_seconds)
+    return timeout
+
+def tool_timeout_retries() -> int:
+    runtime_config = get_runtime_config()
+    try:
+        retries_raw = int(getattr(runtime_config.features, "mcp_tool_timeout_retries", 1) or 0)
+    except (TypeError, ValueError):
+        retries_raw = 1
+    return max(0, min(5, retries_raw))
+
+
+def _get_network_download_options() -> tuple[bool, str | None]:
+    cfg = get_runtime_config()
+    return cfg.network.requests_verify, cfg.network.ca_bundle
+
 
 async def get_document_type(
     file_path: Annotated[str, Field(description="Path to the file to get types for")]

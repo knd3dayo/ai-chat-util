@@ -16,11 +16,8 @@ from pptx import Presentation
 from ai_chat_util.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.ai_chat_util_base.chat.model import (
     ChatHistory, ChatRequestContext, ChatMessage,
-    ChatContent, WebRequestModel
+    ChatContent
 )
-from ai_chat_util.ai_chat_util_base.analyze_file_util.model import FileUtilDocument
-from ai_chat_util.ai_chat_util_base.analyze_file_util.util.office2pdf import Office2PDFUtil
-from ai_chat_util.ai_chat_util_base.analyze_file_util.util.downloader import DownLoader
 from ai_chat_util.ai_chat_util_base.analyze_file_util.util import pdf_util
 
 import ai_chat_util.log.log_settings as log_settings
@@ -28,101 +25,6 @@ logger = log_settings.getLogger(__name__)
 
 
 class LLMMessageContentFactoryBase(ABC):
-    _OFFICE_EXTRACT_MAX_SHEETS = 5
-    _OFFICE_EXTRACT_MAX_ROWS_PER_SHEET = 200
-    _OFFICE_EXTRACT_MAX_COLS_PER_ROW = 20
-
-    def _get_effective_config(self) -> AiChatUtilConfig:
-        config = self.get_config()
-        if config is not None:
-            return config
-        return get_runtime_config()
-
-    def _get_network_download_options(self) -> tuple[bool, str | None]:
-        config = self._get_effective_config()
-        return config.network.requests_verify, config.network.ca_bundle
-
-    def _get_configured_libreoffice_path(self) -> str | None:
-        return self._get_effective_config().office2pdf.libreoffice_path
-
-    def _extract_word_text(self, document_type: FileUtilDocument) -> str:
-        document = WordDocument(BytesIO(document_type.data))
-        parts: list[str] = []
-
-        for paragraph in document.paragraphs:
-            text = paragraph.text.strip()
-            if text:
-                parts.append(text)
-
-        for table in document.tables:
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                if any(cells):
-                    parts.append(" | ".join(cells))
-
-        return "\n".join(parts).strip()
-
-    def _extract_excel_text(self, document_type: FileUtilDocument) -> str:
-        workbook = load_workbook(filename=BytesIO(document_type.data), read_only=True, data_only=True)
-        parts: list[str] = []
-
-        for sheet_index, sheet_name in enumerate(workbook.sheetnames, start=1):
-            if sheet_index > self._OFFICE_EXTRACT_MAX_SHEETS:
-                parts.append("[Truncated additional sheets]")
-                break
-
-            sheet = workbook[sheet_name]
-            parts.append(f"[Sheet] {sheet_name}")
-            row_count = 0
-            for row in sheet.iter_rows(values_only=True):
-                values = ["" if value is None else str(value).strip() for value in row[: self._OFFICE_EXTRACT_MAX_COLS_PER_ROW]]
-                if not any(values):
-                    continue
-                parts.append(" | ".join(values))
-                row_count += 1
-                if row_count >= self._OFFICE_EXTRACT_MAX_ROWS_PER_SHEET:
-                    parts.append("[Truncated additional rows]")
-                    break
-
-        workbook.close()
-        return "\n".join(parts).strip()
-
-    def _extract_ppt_text(self, document_type: FileUtilDocument) -> str:
-        presentation = Presentation(BytesIO(document_type.data))
-        parts: list[str] = []
-
-        for slide_index, slide in enumerate(presentation.slides, start=1):
-            parts.append(f"[Slide {slide_index}]")
-            for shape in slide.shapes:
-                text = getattr(shape, "text", "")
-                normalized = text.strip() if isinstance(text, str) else ""
-                if normalized:
-                    parts.append(normalized)
-
-        return "\n".join(parts).strip()
-
-    def _extract_office_text(self, document_type: FileUtilDocument) -> str:
-        if document_type.is_word():
-            return self._extract_word_text(document_type)
-        if document_type.is_excel():
-            return self._extract_excel_text(document_type)
-        if document_type.is_ppt():
-            return self._extract_ppt_text(document_type)
-        return ""
-
-    def _create_office_text_fallback_content(self, document_type: FileUtilDocument) -> list["ChatContent"]:
-        extracted_text = self._extract_office_text(document_type)
-        if not extracted_text:
-            raise RuntimeError(f"Failed to extract text from office document: {document_type.identifier}")
-
-        explanation_content = self.create_text_content(
-            text=(
-                f"LibreOffice が利用できないため、Office ドキュメント {document_type.identifier} から "
-                "直接テキストを抽出した内容を以下に示します。"
-            )
-        )
-        body_content = self.create_text_content(text=extracted_text)
-        return [explanation_content, body_content]
 
     def is_text_content(self, content: ChatContent) -> bool:
         return content.params.get("type") == "text"
@@ -164,233 +66,37 @@ class LLMMessageContentFactoryBase(ABC):
         params = {"type": "text", "text": text}
         return ChatContent(params=params)
 
-    def create_image_content(self, file_data: FileUtilDocument, detail: str) -> list["ChatContent"]:
-        return self._create_image_content_(file_data, detail)
+    def create_image_content(self, identifier: str, data: bytes, detail: str) -> list["ChatContent"]:
+        return self._create_image_content_(identifier, data, detail)
 
-    def create_image_content_from_file(self, file_path: str, detail: str) -> list["ChatContent"]:
-        return self._create_image_content_(FileUtilDocument.from_file(file_path), detail)
-
-    def create_image_content_from_url(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [file_url],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-        return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
-
-    async def create_image_content_from_url_async(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            requests_verify, ca_bundle = self._get_network_download_options()
-            file_paths = await DownLoader.download_files_async(
-                [file_url],
-                tmp_dir,
-                requests_verify=requests_verify,
-                ca_bundle=ca_bundle,
-            )
-            return self._create_image_content_(FileUtilDocument.from_file(file_paths[0]), detail)
-
-    def create_pdf_content(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
+    def create_pdf_content(self, identifier: str, data: bytes, detail: str = "auto") -> list["ChatContent"]:
         config = self.get_config()
         if not config:
             raise ValueError("LLMClientの設定が取得できませんでした。")
 
         use_custom = config.features.use_custom_pdf_analyzer
         if use_custom:
-            return self._create_custom_pdf_content_(document_type, detail=detail)
+            return self._create_custom_pdf_content_(identifier, data, detail=detail)
         else:
-            return self._create_pdf_content_(document_type, detail=detail)
+            return self._create_pdf_content_(identifier, data, detail=detail)
 
-    def create_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
-            return self.create_pdf_content(FileUtilDocument.from_file(file_path), detail=detail)
-
-    def create_pdf_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-        return self.create_pdf_content_from_file(file_paths[0], detail=detail)
-
-    def _create_custom_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
+    def _create_custom_pdf_content_(self, identifier: str, data: bytes, detail: str = "auto") -> list["ChatContent"]:
         '''
         PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-        with open(file_path, "rb") as pdf_file:
-            document_type = FileUtilDocument(data=pdf_file.read(), identifier=file_path)
-        return self._create_custom_pdf_content_(document_type, detail=detail)
-
-    def _create_custom_pdf_content_(self, document_type: FileUtilDocument, detail: str = "auto") -> list["ChatContent"]:
-        '''
-        PDFファイルのバイトデータから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
-        '''
-        page_info_content = self.create_text_content(text=f"PDFファイル: {document_type.identifier} の内容を以下に示します。")
+        page_info_content = self.create_text_content(text=f"PDFファイル: {identifier} の内容を以下に示します。")
         pdf_contents = [page_info_content]
         # PDFからテキストと画像を抽出
-        pdf_elements = pdf_util.extract_content_from_bytes(document_type.data)
+        pdf_elements = pdf_util.extract_content_from_bytes(data)
         for element in pdf_elements:
             if element["type"] == "text":
                 text_content = self.create_text_content(text=element["text"])
                 pdf_contents.append(text_content)
             elif element["type"] == "image":
-                document_type = FileUtilDocument(data=element["bytes"], identifier=document_type.identifier)
-                image_content = self._create_image_content_(document_type, detail)
+                image_content = self._create_image_content_(identifier, element["bytes"], detail)
                 pdf_contents.extend(image_content)
 
         return pdf_contents
-
-    def create_office_content(self, document_type: FileUtilDocument, detail: str) -> list["ChatContent"]:
-        '''
-        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        configured_libreoffice_path = self._get_configured_libreoffice_path()
-        libreoffice_binary = Office2PDFUtil.try_find_libreoffice_binary(
-            configured_path=configured_libreoffice_path,
-        )
-        if libreoffice_binary is None:
-            logger.info(
-                "LibreOffice is unavailable. Falling back to direct office text extraction for %s",
-                document_type.identifier,
-            )
-            return self._create_office_text_fallback_content(document_type)
-
-        try:
-            # Officeドキュメントを一時的にPDFに変換する
-            temp_dir = tempfile.TemporaryDirectory()
-            atexit.register(temp_dir.cleanup)
-            temp_file_path = os.path.join(temp_dir.name, f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf")
-            Office2PDFUtil.create_pdf_from_document_bytes(
-                input_bytes=document_type.data,
-                output_path=temp_file_path,
-                configured_libreoffice_path=libreoffice_binary,
-            )
-            # 元ファイルからPDFに変換した旨の説明を追加
-            explanation_text = f"""
-                {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
-                ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
-                """
-            explanation_content = self.create_text_content(text=explanation_text)
-            pdf_contents = [explanation_content]
-
-            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
-
-            return pdf_contents
-        except Exception:
-            logger.warning(
-                "Failed to convert office document to PDF. Falling back to direct text extraction for %s",
-                document_type.identifier,
-                exc_info=True,
-            )
-            return self._create_office_text_fallback_content(document_type)
-
-    def create_office_content_from_file(
-            self, file_path: str, detail: str = "auto"
-            ) -> list["ChatContent"]:
-        '''
-        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        with open(file_path, "rb") as office_file:
-            document_type = FileUtilDocument(data=office_file.read(), identifier=file_path)
-        return self.create_office_content(document_type, detail=detail)
-
-    def create_office_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
-        '''
-        複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
-        '''
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-
-        office_contents = []
-        for file_path in file_paths:
-            content = self.create_office_content_from_file(
-                file_path, detail=detail)
-            office_contents.extend(content)
-
-        return office_contents
-
-    def create_multi_format_content(
-            self, document_type: FileUtilDocument, detail: str = "auto"
-            ) -> list["ChatContent"]:
-        '''
-        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
-        '''
-
-        if document_type.is_text():
-            text = document_type.data.decode('utf-8')
-            return [self.create_text_content(text)]
-
-        if document_type.is_image():
-            return self.create_image_content(document_type, detail)
-
-        if document_type.is_pdf():
-            return self.create_pdf_content(document_type, detail=detail)
-
-        if document_type.is_office_document():
-            return self.create_office_content(document_type, detail=detail)
-
-        raise ValueError(f"Unsupported document type for file: {document_type.identifier}")
-
-    def create_multi_format_contents_from_file(
-            self, file_path: str, detail: str = "auto"
-            ) -> list["ChatContent"]:
-        '''
-        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
-        '''
-
-        document_type = FileUtilDocument.from_file(document_path=file_path)
-
-        if document_type.is_text():
-            with open(file_path, "r", encoding="utf-8") as text_file:
-                text_data = text_file.read()
-            return [self.create_text_content(text_data)]
-
-        if document_type.is_image():
-            return self.create_image_content_from_file(file_path, detail)
-
-        if document_type.is_pdf():
-            return self.create_pdf_content_from_file(file_path, detail=detail)
-
-        if document_type.is_office_document():
-            return self.create_office_content_from_file(file_path, detail=detail)
-
-        raise ValueError(f"Unsupported document type for file: {file_path}")
-
-    def create_multi_format_contents_from_url(
-            self, file_url: str, detail: str = "auto"
-            ) -> list["ChatContent"]:
-        '''
-        複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
-        '''
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-
-        return self.create_multi_format_contents_from_file(
-            file_paths[0], detail=detail
-        )
 
     # 最後のsystem, assistant以降のユーザーメッセージリストを取得するユーティリティ関数
     # 最後のユーザーメッセージリストとそれ以前のメッセージリストのタプルを返す
@@ -538,11 +244,11 @@ class LLMMessageContentFactoryBase(ABC):
         return result_chat_message_list
 
     @abstractmethod
-    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+    def _create_image_content_(self, identifier: str, data: bytes, detail: str) -> list[ChatContent]:
         pass
 
     @abstractmethod
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
+    def _create_pdf_content_(self, identifier: str, data: bytes, detail: str) -> list[ChatContent]:
         pass
 
     @abstractmethod
@@ -558,14 +264,16 @@ class LLMMessageContentFactory(LLMMessageContentFactoryBase):
     def get_config(self) -> AiChatUtilConfig | None:
         return self.config
 
-    def _create_image_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_image = base64.b64encode(document_type.data).decode('utf-8')
+    def _create_image_content_(self, identifier: str, data: bytes, detail: str) -> list[ChatContent]:
+        base64_image = base64.b64encode(data).decode('utf-8')
         image_url = f"data:image/png;base64,{base64_image}"
-        params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
-        return [ChatContent(params=params)]
+        identifier_params = {"type": "text", "text": f"Image Identifier: {identifier}"}
+        image_params = {"type": "image_url", "image_url": {"url": image_url, "detail": detail}}
+        return [ChatContent(params=identifier_params), ChatContent(params=image_params)]
+    
 
-    def _create_pdf_content_(self, document_type: FileUtilDocument, detail: str) -> list[ChatContent]:
-        base64_file = base64.b64encode(document_type.data).decode('utf-8')
+    def _create_pdf_content_(self, identifier: str, data: bytes, detail: str) -> list[ChatContent]:
+        base64_file = base64.b64encode(data).decode('utf-8')
         file_url = f"data:application/pdf;base64,{base64_file}"
-        params = {"type": "file", "file": {"file_data": file_url, "filename": document_type.identifier}}
+        params = {"type": "file", "file": {"file_data": file_url, "filename": identifier}}
         return [ChatContent(params=params)]

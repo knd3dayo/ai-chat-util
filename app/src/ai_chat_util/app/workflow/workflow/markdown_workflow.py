@@ -43,7 +43,7 @@ class WorkflowMarkdownDocument(BaseModel):
         available_tools: list[WorkflowToolReference] | None = None,
         tool_catalog_text: str = "",
     ) -> "WorkflowMarkdownDocument":
-        from ai_chat_util.app.ai_chat_util_workflow.mermaid.mermaid_flowchart import MermaidFlowChart
+        from ai_chat_util.app.workflow.mermaid.mermaid_flowchart import MermaidFlowChart
 
         block = MermaidFlowChart.extract_single_mermaid_block(markdown)
         body_markdown = (markdown[: block.start_index] + markdown[block.end_index :]).strip()

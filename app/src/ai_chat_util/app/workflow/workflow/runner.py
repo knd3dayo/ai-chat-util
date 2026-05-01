@@ -630,7 +630,7 @@ def _inject_review_nodes(flowchart: Flowchart) -> Flowchart:
         for edge in flowchart.edges
     ]
     for source, target in added_edges:
-        from ai_chat_util.app.ai_chat_util_workflow.workflow.flowchat import GraphEdge
+        from ai_chat_util.app.workflow.workflow.flowchat import GraphEdge
 
         flowchart.edges.append(GraphEdge(source=source, target=target))
     flowchart.nodes.extend(added_nodes)

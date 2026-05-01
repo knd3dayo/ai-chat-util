@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ai_chat_util.app.ai_chat_util_workflow import MermaidFlowChart, WorkflowRunner
+from ai_chat_util.app.workflow import MermaidFlowChart, WorkflowRunner
 
 
 async def async_main() -> None:

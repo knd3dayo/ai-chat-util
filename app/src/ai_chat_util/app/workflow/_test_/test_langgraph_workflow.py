@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ai_chat_util.app.ai_chat_util_workflow import MermaidFlowChart, WorkflowChatClient, WorkflowRunner, WorkflowSessionStore, execute_workflow_markdown
-from ai_chat_util.app.ai_chat_util_workflow.workflow.flowchat import Flowchart, GraphEdge, GraphNode
-from ai_chat_util.app.ai_chat_util_workflow.workflow.langgraph_builder import NodeExecutionResult, WorkflowState
-from ai_chat_util.app.ai_chat_util_workflow.workflow.markdown_workflow import WorkflowMarkdownDocument, WorkflowToolReference
-from ai_chat_util.app.ai_chat_util_workflow.workflow.runner import WorkflowPauseResult, apply_markdown_context_to_flowchart
+from ai_chat_util.app.workflow import MermaidFlowChart, WorkflowChatClient, WorkflowRunner, WorkflowSessionStore, execute_workflow_markdown
+from ai_chat_util.app.workflow.workflow.flowchat import Flowchart, GraphEdge, GraphNode
+from ai_chat_util.app.workflow.workflow.langgraph_builder import NodeExecutionResult, WorkflowState
+from ai_chat_util.app.workflow.workflow.markdown_workflow import WorkflowMarkdownDocument, WorkflowToolReference
+from ai_chat_util.app.workflow.workflow.runner import WorkflowPauseResult, apply_markdown_context_to_flowchart
 from ai_chat_util.app.ai_chat_util_agent.core.agent_client_util import AgentClientUtil
 
 
@@ -220,7 +220,7 @@ async def test_workflow_chat_client_resumes_after_approval(monkeypatch: pytest.M
         approved_markdown = str(kwargs.get("approved_markdown") or "")
         thread_id = str(kwargs.get("thread_id") or "trace-1")
         if approved_markdown:
-            from ai_chat_util.app.ai_chat_util_workflow.workflow.markdown_workflow import WorkflowExecutionResponse
+            from ai_chat_util.app.workflow.workflow.markdown_workflow import WorkflowExecutionResponse
 
             return WorkflowExecutionResponse(
                 status="completed",
@@ -231,7 +231,7 @@ async def test_workflow_chat_client_resumes_after_approval(monkeypatch: pytest.M
                 thread_id=thread_id,
             )
         from ai_chat_util.ai_chat_util_base.core.chat.model import HitlRequest
-        from ai_chat_util.app.ai_chat_util_workflow.workflow.markdown_workflow import WorkflowExecutionResponse
+        from ai_chat_util.app.workflow.workflow.markdown_workflow import WorkflowExecutionResponse
 
         return WorkflowExecutionResponse(
             status="paused",

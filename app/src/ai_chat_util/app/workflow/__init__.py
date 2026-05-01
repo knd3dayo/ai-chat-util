@@ -1,19 +1,19 @@
-from ai_chat_util.app.ai_chat_util_workflow.chat_client import WorkflowChatClient
-from ai_chat_util.app.ai_chat_util_workflow.mermaid.mermaid_flowchart import MermaidFlowChart
-from ai_chat_util.app.ai_chat_util_workflow.session_store import WorkflowSessionRecord, WorkflowSessionStore
-from ai_chat_util.app.ai_chat_util_workflow.workflow.flowchat import (
+from ai_chat_util.app.workflow.chat_client import WorkflowChatClient
+from ai_chat_util.app.workflow.mermaid.mermaid_flowchart import MermaidFlowChart
+from ai_chat_util.app.workflow.session_store import WorkflowSessionRecord, WorkflowSessionStore
+from ai_chat_util.app.workflow.workflow.flowchat import (
     Flowchart,
     GraphEdge,
     GraphNode,
     NodeKind,
     Subgraph,
 )
-from ai_chat_util.app.ai_chat_util_workflow.workflow.markdown_workflow import (
+from ai_chat_util.app.workflow.workflow.markdown_workflow import (
     WorkflowExecutionResponse,
     WorkflowMarkdownDocument,
     WorkflowToolReference,
 )
-from ai_chat_util.app.ai_chat_util_workflow.workflow.runner import (
+from ai_chat_util.app.workflow.workflow.runner import (
     DefaultWorkflowNodeExecutor,
     DefaultWorkflowMarkdownPreprocessor,
     NodeExecutionResult,

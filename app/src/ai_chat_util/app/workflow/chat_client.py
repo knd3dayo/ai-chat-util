@@ -7,8 +7,8 @@ from typing import Any
 from ai_chat_util.ai_chat_util_base.core.chat.core import AbstractChatClient, LLMMessageContentFactory, LLMMessageContentFactoryBase
 from ai_chat_util.ai_chat_util_base.core.common.config.runtime import AiChatUtilConfig, get_runtime_config
 from ai_chat_util.ai_chat_util_base.core.chat.model import ChatContent, ChatHistory, ChatMessage, ChatRequest, ChatResponse
-from ai_chat_util.app.ai_chat_util_workflow.session_store import WorkflowSessionRecord, WorkflowSessionStore
-from ai_chat_util.app.ai_chat_util_workflow.workflow.runner import execute_workflow_markdown
+from ai_chat_util.app.workflow.session_store import WorkflowSessionRecord, WorkflowSessionStore
+from ai_chat_util.app.workflow.workflow.runner import execute_workflow_markdown
 
 
 class WorkflowChatClient(AbstractChatClient):

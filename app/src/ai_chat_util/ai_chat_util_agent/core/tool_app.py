@@ -10,7 +10,7 @@ from pydantic import Field
 from ai_chat_util.analysis import AnalysisService, AnalyzePDFUtil
 from ai_chat_util.ai_chat_util_base.chat.core import create_llm_client
 from ai_chat_util.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import WebRequestModel
+from ai_chat_util.ai_chat_util_base.chat.model import WebRequestModel
 from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 from ai_chat_util.ai_chat_util_base.file_util.util import pdf_util
 from ai_chat_util.ai_chat_util_base.file_util.util.downloader import DownLoader

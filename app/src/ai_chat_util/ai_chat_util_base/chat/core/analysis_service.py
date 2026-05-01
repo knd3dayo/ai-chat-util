@@ -13,7 +13,7 @@ import fitz
 
 from ai_chat_util.ai_chat_util_base.chat.core import AbstractChatClient
 from ai_chat_util.common.config.runtime import get_runtime_config
-from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import ChatResponse
+from ai_chat_util.ai_chat_util_base.chat.model import ChatResponse
 from ai_chat_util.ai_chat_util_base.file_util.model import FileUtilDocument
 from ai_chat_util.ai_chat_util_base.file_util.util.file_path_resolver import resolve_existing_path
 from ai_chat_util.ai_chat_util_base.file_util.util.office2pdf import Office2PDFUtil

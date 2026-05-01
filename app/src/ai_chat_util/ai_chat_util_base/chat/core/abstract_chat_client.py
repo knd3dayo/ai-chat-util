@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import (
+from ai_chat_util.ai_chat_util_base.chat.model import (
     ChatResponse, ChatRequest
 )
 from .llm_messages_factory import LLMMessageContentFactoryBase, LLMMessageContentFactory

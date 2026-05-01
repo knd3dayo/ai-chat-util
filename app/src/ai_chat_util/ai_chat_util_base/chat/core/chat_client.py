@@ -4,7 +4,7 @@ from typing import Optional, Any, cast
 import asyncio
 
 from ai_chat_util.common.config.runtime import get_runtime_config, AiChatUtilConfig
-from ai_chat_util.ai_chat_util_base.chat.model.ai_chat_util_models import (
+from ai_chat_util.ai_chat_util_base.chat.model import (
     ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, 
     ChatContent, WebRequestModel, ChatRequest
 )

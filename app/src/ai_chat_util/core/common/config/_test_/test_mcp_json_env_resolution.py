@@ -139,7 +139,7 @@ def test_init_runtime_supports_method_based_office2pdf_config(
                 "method": "pywin32",
                 "pywin32": {"office_path": "${HOME}/Microsoft Office/root/Office16/WINWORD.EXE"},
                 "libreoffice_exec": {"libreoffice_path": "${HOME}/bin/soffice"},
-                "libreoffice_uno": {"host": "uno-host", "port": 8100},
+                "libreoffice_uno": {"api_url": "http://uno-host:2004"},
             },
         }
     }
@@ -155,8 +155,7 @@ def test_init_runtime_supports_method_based_office2pdf_config(
         == f"{tmp_path.as_posix()}/Microsoft Office/root/Office16/WINWORD.EXE"
     )
     assert cfg.office2pdf.libreoffice_exec.libreoffice_path == f"{tmp_path.as_posix()}/bin/soffice"
-    assert cfg.office2pdf.libreoffice_uno.host == "uno-host"
-    assert cfg.office2pdf.libreoffice_uno.port == 8100
+    assert cfg.office2pdf.libreoffice_uno.api_url == "http://uno-host:2004"
 
 def test_init_runtime_rejects_legacy_office2pdf_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg_path = tmp_path / "ai-chat-util-config.yml"

@@ -583,15 +583,14 @@ ai_chat_util_config:
       libreoffice_path: "C:\\Program Files\\LibreOffice\\program\\soffice.exe"
 
     libreoffice_uno:
-      host: "127.0.0.1"
-      port: 2002
-      connection_string: null
+      api_url: "http://127.0.0.1:2004"
 ```
 
 補足:
 
-- 現時点で実装済みの変換方式は `libreoffice_exec` のみです
-- `pywin32` と `libreoffice_uno` は設定スキーマと方式選択の入口まで実装済みで、実変換処理は今後追加予定です
+- `libreoffice_exec` と `libreoffice_uno` は実変換処理まで実装済みです
+- `libreoffice_uno` は Office 変換コンテナの HTTP API を呼び出します
+- UNO サーバ用の compose 例は [ai-platform-poc/infra/22-libreoffice-uno/README.md](/home/user/source/repos/ai-platform-poc/infra/22-libreoffice-uno/README.md) を参照してください
 - 後方互換のため、従来の `office2pdf.libreoffice_path` も引き続き受け付け、内部では `office2pdf.libreoffice_exec.libreoffice_path` として扱われます
 
 ### 環境変数（一覧）

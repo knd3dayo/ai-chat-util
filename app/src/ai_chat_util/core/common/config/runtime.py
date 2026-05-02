@@ -934,20 +934,13 @@ class Office2PDFLibreOfficeExecSection(BaseModel):
 class Office2PDFLibreOfficeUnoSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    host: str = Field(default="127.0.0.1")
-    port: int = Field(default=2002)
-    connection_string: str | None = Field(default=None)
+    api_url: str = Field(default="http://127.0.0.1:2004")
 
     @model_validator(mode="after")
     def _validate_connection(self) -> "Office2PDFLibreOfficeUnoSection":
-        if self.connection_string is not None:
-            self.connection_string = self.connection_string.strip() or None
-        if not self.connection_string:
-            self.host = self.host.strip()
-            if not self.host:
-                raise ValueError("office2pdf.libreoffice_uno.host は空文字にできません")
-            if self.port <= 0:
-                raise ValueError("office2pdf.libreoffice_uno.port は 1 以上である必要があります")
+        self.api_url = self.api_url.strip()
+        if not self.api_url:
+            raise ValueError("office2pdf.libreoffice_uno.api_url は空文字にできません")
         return self
 
 

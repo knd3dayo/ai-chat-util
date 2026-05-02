@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal, Protocol, cast
 
 import psutil  # type: ignore[import-not-found]
+import requests
 
 from ai_chat_util.core.common.config.runtime import get_runtime_config
 
@@ -26,13 +27,7 @@ class _Office2PDFLibreOfficeExecConfig(Protocol):
 
 class _Office2PDFLibreOfficeUnoConfig(Protocol):
     @property
-    def host(self) -> str: ...
-
-    @property
-    def port(self) -> int: ...
-
-    @property
-    def connection_string(self) -> str | None: ...
+    def api_url(self) -> str: ...
 
 
 class _Office2PDFConfigProtocol(Protocol):
@@ -52,16 +47,6 @@ class _Office2PDFConfigProtocol(Protocol):
 class _HasOffice2PDFConfig(Protocol):
     @property
     def office2pdf(self) -> _Office2PDFConfigProtocol: ...
-
-
-class _UnoDocumentProtocol(Protocol):
-    def supportsService(self, service_name: str) -> bool: ...
-
-    def storeToURL(self, url: str, properties: tuple[object, ...]) -> None: ...
-
-    def close(self, deliver_ownership: bool) -> None: ...
-
-    def dispose(self) -> None: ...
 
 
 PrintOrientation = Literal["portrait", "landscape"]
@@ -217,112 +202,8 @@ class LibreOfficeUnoOffice2PDFUtil:
     METHOD_NAME = "libreoffice_uno"
 
     @classmethod
-    def _normalize_print_orientation(
-        cls,
-        print_orientation: PrintOrientation | str | None,
-    ) -> PrintOrientation | None:
-        if print_orientation is None:
-            return None
-
-        normalized = str(print_orientation).strip().lower()
-        if normalized not in {"portrait", "landscape"}:
-            raise ValueError("print_orientation must be either 'portrait' or 'landscape'.")
-        return cast(PrintOrientation, normalized)
-
-    @classmethod
-    def _validate_fit_pages(cls, value: int | None, parameter_name: str) -> None:
-        if value is not None and value < 0:
-            raise ValueError(f"{parameter_name} must be greater than or equal to 0.")
-
-    @classmethod
-    def _get_calc_page_styles(cls, document: _UnoDocumentProtocol) -> list[Any]:
-        if not document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
-            raise RuntimeError("Print layout overrides are supported only for LibreOffice Calc documents.")
-
-        sheets = cast(Any, document).getSheets()
-        style_families = cast(Any, document).StyleFamilies
-        page_styles = style_families.getByName("PageStyles")
-        style_names: list[str] = []
-        for index in range(sheets.getCount()):
-            sheet = sheets.getByIndex(index)
-            style_name = str(sheet.PageStyle)
-            if style_name not in style_names:
-                style_names.append(style_name)
-        return [page_styles.getByName(style_name) for style_name in style_names]
-
-    @classmethod
-    def _apply_print_layout(
-        cls,
-        document: _UnoDocumentProtocol,
-        *,
-        print_orientation: PrintOrientation | str | None = None,
-        fit_width_pages: int | None = None,
-        fit_height_pages: int | None = None,
-    ) -> None:
-        normalized_orientation = cls._normalize_print_orientation(print_orientation)
-        cls._validate_fit_pages(fit_width_pages, "fit_width_pages")
-        cls._validate_fit_pages(fit_height_pages, "fit_height_pages")
-
-        if normalized_orientation is None and fit_width_pages is None and fit_height_pages is None:
-            return
-
-        page_styles = cls._get_calc_page_styles(document)
-        for style in page_styles:
-            if normalized_orientation is not None:
-                is_landscape = normalized_orientation == "landscape"
-                current_orientation = bool(getattr(style, "IsLandscape", False))
-                if current_orientation != is_landscape and hasattr(style, "Width") and hasattr(style, "Height"):
-                    width = style.Width
-                    style.Width = style.Height
-                    style.Height = width
-                style.IsLandscape = is_landscape
-            if fit_width_pages is not None:
-                style.ScaleToPagesX = fit_width_pages
-            if fit_height_pages is not None:
-                style.ScaleToPagesY = fit_height_pages
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return importlib.util.find_spec("uno") is not None
-
-    @classmethod
-    def _build_uno_connection_string(cls, connection_string: str | None, host: str, port: int) -> str:
-        if connection_string:
-            return connection_string.strip()
-        return f"uno:socket,host={host},port={port};urp;StarOffice.ComponentContext"
-
-    @classmethod
-    def _build_uno_property(cls, name: str, value: object):
-        from com.sun.star.beans import PropertyValue  # type: ignore[import-not-found]
-
-        prop = PropertyValue()
-        prop.Name = name
-        prop.Value = value
-        return prop
-
-    @classmethod
-    def _detect_uno_pdf_filter(cls, document: _UnoDocumentProtocol) -> str:
-        if document.supportsService("com.sun.star.text.GenericTextDocument"):
-            return "writer_pdf_Export"
-        if document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
-            return "calc_pdf_Export"
-        if document.supportsService("com.sun.star.presentation.PresentationDocument"):
-            return "impress_pdf_Export"
-        if document.supportsService("com.sun.star.drawing.DrawingDocument"):
-            return "draw_pdf_Export"
-        return "writer_pdf_Export"
-
-    @classmethod
-    def _close_uno_document(cls, document: _UnoDocumentProtocol) -> None:
-        try:
-            document.close(True)
-            return
-        except Exception:
-            pass
-        try:
-            document.dispose()
-        except Exception:
-            pass
+    def is_available(cls, api_url: str) -> bool:
+        return bool(api_url.strip())
 
     @classmethod
     def create_pdf_from_document_file(
@@ -330,63 +211,39 @@ class LibreOfficeUnoOffice2PDFUtil:
         input_path: str,
         output_path: str,
         *,
-        host: str,
-        port: int,
-        connection_string: str | None,
+        api_url: str,
         print_orientation: PrintOrientation | None = None,
         fit_width_pages: int | None = None,
         fit_height_pages: int | None = None,
     ) -> Path:
-        if importlib.util.find_spec("uno") is None:
-            raise RuntimeError("LibreOffice UNO conversion requires the 'uno' Python module.")
-
-        import uno  # type: ignore[import-not-found]
+        if _has_print_layout_override(print_orientation, fit_width_pages, fit_height_pages):
+            raise RuntimeError("Print layout overrides are not supported with office2pdf method 'libreoffice_uno'.")
 
         source, target = _resolve_target_path(input_path, output_path)
-
-        local_context = uno.getComponentContext()
-        resolver = local_context.ServiceManager.createInstanceWithContext(
-            "com.sun.star.bridge.UnoUrlResolver", local_context
-        )
-        resolved_connection_string = cls._build_uno_connection_string(connection_string, host, port)
+        resolved_api_url = api_url.strip()
+        if not resolved_api_url:
+            raise RuntimeError("office2pdf.libreoffice_uno.api_url is required.")
 
         try:
-            remote_context = resolver.resolve(resolved_connection_string)
-        except Exception as exc:
+            with source.open("rb") as input_file:
+                response = requests.post(
+                    resolved_api_url.rstrip("/") + "/convert",
+                    files={"file": (source.name, input_file, "application/octet-stream")},
+                    data={"convert_to": "pdf"},
+                    timeout=600,
+                )
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Failed to call LibreOffice UNO API at {resolved_api_url}") from exc
+
+        if response.status_code >= 400:
             raise RuntimeError(
-                f"Failed to connect to LibreOffice UNO server using '{resolved_connection_string}'"
-            ) from exc
+                f"LibreOffice UNO API conversion failed with status {response.status_code}: {response.text.strip()}"
+            )
 
-        document: _UnoDocumentProtocol | None = None
-        try:
-            desktop = remote_context.ServiceManager.createInstanceWithContext(
-                "com.sun.star.frame.Desktop", remote_context
-            )
-            input_url = uno.systemPathToFileUrl(str(source))
-            output_url = uno.systemPathToFileUrl(str(target))
-            load_props = (cls._build_uno_property("Hidden", True),)
-            document = cast(
-                _UnoDocumentProtocol,
-                desktop.loadComponentFromURL(input_url, "_blank", 0, load_props),
-            )
-            cls._apply_print_layout(
-                document,
-                print_orientation=print_orientation,
-                fit_width_pages=fit_width_pages,
-                fit_height_pages=fit_height_pages,
-            )
-            export_props = (
-                cls._build_uno_property("FilterName", cls._detect_uno_pdf_filter(document)),
-            )
-            document.storeToURL(output_url, export_props)
-        except Exception as exc:
-            raise RuntimeError(f"LibreOffice UNO failed to convert {source.name} to PDF") from exc
-        finally:
-            if document is not None:
-                cls._close_uno_document(document)
+        target.write_bytes(response.content)
 
         if not target.exists():
-            raise RuntimeError(f"LibreOffice UNO conversion did not produce expected PDF: {target}")
+            raise RuntimeError(f"LibreOffice UNO API conversion did not produce expected PDF: {target}")
 
         return target.resolve()
 
@@ -450,61 +307,30 @@ class LibreOfficeExecOffice2PDFUtil:
             pass
 
     @classmethod
-    def _wait_for_pdf(
+    def _resolve_produced_pdf_path(
         cls,
         expected_path: Path,
         output_dir: Path,
         *,
-        timeout_seconds: float | None,
-        stable_seconds: float = 1.0,
-        poll_interval: float = 0.25,
-        start_time_epoch: float | None = None,
-    ) -> Path:
-        deadline = None
-        if timeout_seconds is not None:
-            deadline = time.monotonic() + timeout_seconds
+        start_time_epoch: float,
+    ) -> Path | None:
+        if expected_path.exists():
+            return expected_path
 
-        last_size: int | None = None
-        last_change_t: float | None = None
-        start_epoch = start_time_epoch or time.time()
-
-        while True:
-            if deadline is not None and time.monotonic() > deadline:
-                raise TimeoutError("PDF generation wait timed out")
-
-            candidate = expected_path
-            if not candidate.exists():
-                newest: Path | None = None
-                newest_mtime = 0.0
+        newest: Path | None = None
+        newest_mtime = 0.0
+        try:
+            for candidate in output_dir.glob("*.pdf"):
                 try:
-                    for p in output_dir.glob("*.pdf"):
-                        try:
-                            st = p.stat()
-                        except FileNotFoundError:
-                            continue
-                        if st.st_mtime >= start_epoch and st.st_mtime >= newest_mtime:
-                            newest_mtime = st.st_mtime
-                            newest = p
-                except Exception:
-                    newest = None
-                if newest is not None:
-                    candidate = newest
-
-            if candidate.exists():
-                try:
-                    size = candidate.stat().st_size
+                    stat_result = candidate.stat()
                 except FileNotFoundError:
-                    size = None
-
-                if size is not None:
-                    now = time.monotonic()
-                    if last_size != size:
-                        last_size = size
-                        last_change_t = now
-                    elif last_change_t is not None and (now - last_change_t) >= stable_seconds:
-                        return candidate
-
-            time.sleep(poll_interval)
+                    continue
+                if stat_result.st_mtime >= start_time_epoch and stat_result.st_mtime >= newest_mtime:
+                    newest_mtime = stat_result.st_mtime
+                    newest = candidate
+        except Exception:
+            return None
+        return newest
 
     @classmethod
     def _run_command_with_timeout_return_proc(
@@ -577,8 +403,6 @@ class LibreOfficeExecOffice2PDFUtil:
         output_dir = target.parent.resolve()
         expected_produced_path = output_dir / (source.stem + ".pdf")
         start_epoch = time.time()
-        start_mono = time.monotonic()
-
         for p in (target, expected_produced_path):
             try:
                 if p.exists():
@@ -598,16 +422,9 @@ class LibreOfficeExecOffice2PDFUtil:
 
             try:
                 result, proc = cls._run_command_with_timeout_return_proc(command=command, timeout=timeout)
-                if timeout is None:
-                    remaining = None
-                else:
-                    elapsed = time.monotonic() - start_mono
-                    remaining = max(0.0, float(timeout) - elapsed)
-
-                produced_candidate = cls._wait_for_pdf(
+                produced_candidate = cls._resolve_produced_pdf_path(
                     expected_produced_path,
                     output_dir,
-                    timeout_seconds=remaining,
                     start_time_epoch=start_epoch,
                 )
             except subprocess.CalledProcessError as exc:
@@ -615,7 +432,7 @@ class LibreOfficeExecOffice2PDFUtil:
                 raise RuntimeError(
                     f"LibreOffice failed to convert {source.name}: {stderr.strip()}"
                 ) from exc
-            except (TimeoutError, cls._ConversionTimeout) as exc:
+            except cls._ConversionTimeout as exc:
                 try:
                     if "proc" in locals() and isinstance(locals().get("proc"), subprocess.Popen):
                         cls._kill_process_tree(locals()["proc"])
@@ -627,6 +444,13 @@ class LibreOfficeExecOffice2PDFUtil:
                 raise
             except Exception as exc:
                 raise RuntimeError(f"Failed to convert {source} to PDF") from exc
+
+        if produced_candidate is None:
+            stdout = result.stdout.decode(errors="ignore") if result.stdout else ""
+            stderr = result.stderr.decode(errors="ignore") if result.stderr else ""
+            raise RuntimeError(
+                f"Expected PDF not found at {target}; stdout: {stdout.strip()} stderr: {stderr.strip()}"
+            )
 
         produced_path = produced_candidate
         if produced_path.exists() and produced_path.resolve() != target.resolve():

@@ -172,8 +172,6 @@ class AnalyzeOfficeUtil:
         office_contents: list[ChatContent] = []
         file_util_llm_messages = FileUtilLLMMessages(llm_client)
         for file_path in file_path_list:
-            with open(file_path, "rb") as f:
-                office_data = f.read()
             pdf_content = file_util_llm_messages.create_office_content_from_file(
                 file_path, detail=detail
             )

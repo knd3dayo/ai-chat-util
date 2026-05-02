@@ -171,9 +171,7 @@ class AnalyzePDFUtil:
                 pdf_path = LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
                     input_path=office_path,
                     output_path=resolved_output_path,
-                    host=config.office2pdf.libreoffice_uno.host,
-                    port=config.office2pdf.libreoffice_uno.port,
-                    connection_string=config.office2pdf.libreoffice_uno.connection_string,
+                    api_url=config.office2pdf.libreoffice_uno.api_url,
                 )
             elif config.office2pdf.method == Pywin32Office2PDFUtil.METHOD_NAME:
                 pdf_path = Pywin32Office2PDFUtil.create_pdf_from_document_file(

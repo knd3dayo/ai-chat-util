@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import asyncio
 from unittest.mock import MagicMock
@@ -45,13 +46,11 @@ def test_create_pdf_from_document_file_rejects_uno_without_module(tmp_path: Path
     source = tmp_path / "sample.docx"
     source.write_bytes(b"dummy")
 
-    with pytest.raises(RuntimeError, match="UNO"):
+    with pytest.raises(RuntimeError, match="api_url"):
         LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
             input_path=str(source),
             output_path=str(source.with_suffix(".pdf")),
-            host="127.0.0.1",
-            port=2002,
-            connection_string=None,
+            api_url="",
         )
 
 
@@ -103,7 +102,37 @@ def test_create_pdf_from_document_file_via_exec_resolves_binary_and_paths(
     assert captured["resolved_binary"] == "/usr/bin/soffice"
 
 
-def test_create_pdf_from_document_file_calls_uno_directly(
+def test_create_pdf_from_document_file_via_exec_uses_generated_pdf_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "sample.docx"
+    source.write_bytes(b"dummy")
+    target = tmp_path / "sample.pdf"
+
+    def _fake_run(cls, command, timeout):
+        target.write_bytes(b"pdf")
+        proc = MagicMock()
+        proc.pid = 123
+        return subprocess.CompletedProcess(command, 0, b"", b""), proc
+
+    monkeypatch.setattr(
+        LibreOfficeExecOffice2PDFUtil,
+        "_run_command_with_timeout_return_proc",
+        classmethod(_fake_run),
+    )
+
+    result = LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file_via_libreoffice_exec(
+        input_path=str(source),
+        output_path=str(target),
+        libreoffice_path="/usr/bin/soffice",
+        timeout=5,
+    )
+
+    assert result == target
+
+
+def test_create_pdf_from_document_file_calls_uno_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -111,52 +140,31 @@ def test_create_pdf_from_document_file_calls_uno_directly(
     source.write_bytes(b"dummy")
     captured: dict[str, object] = {}
 
-    def _fake_convert(
-        cls,
-        input_path,
-        output_path=None,
-        *,
-        host: str,
-        port: int,
-        connection_string: str | None,
-        print_orientation=None,
-        fit_width_pages=None,
-        fit_height_pages=None,
-    ):
-        captured["source"] = Path(input_path)
-        resolved_output = Path(output_path) if output_path is not None else Path(input_path).with_suffix(".pdf")
-        captured["target"] = resolved_output
-        captured["host"] = host
-        captured["port"] = port
-        captured["connection_string"] = connection_string
-        captured["print_orientation"] = print_orientation
-        captured["fit_width_pages"] = fit_width_pages
-        captured["fit_height_pages"] = fit_height_pages
-        resolved_output.write_bytes(b"pdf")
-        return resolved_output
+    class _Response:
+        status_code = 200
+        text = ""
+        content = b"pdf"
 
-    monkeypatch.setattr(LibreOfficeUnoOffice2PDFUtil, "create_pdf_from_document_file", classmethod(_fake_convert))
+    def _fake_post(url, files, data, timeout):
+        captured["url"] = url
+        captured["filename"] = files["file"][0]
+        captured["convert_to"] = data["convert_to"]
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr("ai_chat_util.util.analyze_file_util.office2pdf.requests.post", _fake_post)
 
     result = LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
         input_path=str(source),
         output_path=_build_default_output_path(str(source)),
-        host="127.0.0.1",
-        port=2002,
-        connection_string=None,
-        print_orientation="landscape",
-        fit_width_pages=1,
-        fit_height_pages=2,
+        api_url="http://127.0.0.1:2004",
     )
 
     assert result == source.with_suffix(".pdf")
-    assert captured["source"] == source.resolve()
-    assert captured["target"] == source.with_suffix(".pdf")
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 2002
-    assert captured["connection_string"] is None
-    assert captured["print_orientation"] == "landscape"
-    assert captured["fit_width_pages"] == 1
-    assert captured["fit_height_pages"] == 2
+    assert captured["url"] == "http://127.0.0.1:2004/convert"
+    assert captured["filename"] == "sample.docx"
+    assert captured["convert_to"] == "pdf"
+    assert captured["timeout"] == 600
 
 
 def test_create_pdf_from_document_bytes_preserves_input_suffix(
@@ -183,6 +191,7 @@ def test_create_pdf_from_document_bytes_preserves_input_suffix(
     result = LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_bytes(
         input_bytes=b"dummy",
         output_path=str(output_path),
+        libreoffice_path="/usr/bin/soffice",
         input_filename="sample.docx",
     )
 
@@ -191,129 +200,17 @@ def test_create_pdf_from_document_bytes_preserves_input_suffix(
     assert Path(captured["input_path"]).suffix == ".docx"
 
 
-def test_apply_print_layout_updates_calc_page_styles() -> None:
-    class _FakeStyle:
-        def __init__(self) -> None:
-            self.IsLandscape = False
-            self.Width = 100
-            self.Height = 200
-            self.ScaleToPagesX = 0
-            self.ScaleToPagesY = 0
+def test_create_pdf_from_document_file_rejects_layout_override_for_uno_api(tmp_path: Path) -> None:
+    source = tmp_path / "sample.xlsx"
+    source.write_bytes(b"dummy")
 
-    class _FakePageStyles:
-        def __init__(self, styles: dict[str, _FakeStyle]) -> None:
-            self._styles = styles
-
-        def getByName(self, name: str):
-            return self._styles[name]
-
-    class _FakeStyleFamilies:
-        def __init__(self, page_styles: _FakePageStyles) -> None:
-            self._page_styles = page_styles
-
-        def getByName(self, name: str):
-            assert name == "PageStyles"
-            return self._page_styles
-
-    class _FakeSheet:
-        def __init__(self, page_style: str) -> None:
-            self.PageStyle = page_style
-
-    class _FakeSheets:
-        def __init__(self, sheets: list[_FakeSheet]) -> None:
-            self._sheets = sheets
-
-        def getCount(self) -> int:
-            return len(self._sheets)
-
-        def getByIndex(self, index: int) -> _FakeSheet:
-            return self._sheets[index]
-
-    class _FakeDocument:
-        def __init__(self) -> None:
-            self._style = _FakeStyle()
-            self.StyleFamilies = _FakeStyleFamilies(_FakePageStyles({"Default": self._style}))
-
-        def supportsService(self, service_name: str) -> bool:
-            return service_name == "com.sun.star.sheet.SpreadsheetDocument"
-
-        def getSheets(self) -> _FakeSheets:
-            return _FakeSheets([_FakeSheet("Default"), _FakeSheet("Default")])
-
-    document = _FakeDocument()
-
-    LibreOfficeUnoOffice2PDFUtil._apply_print_layout(
-        document,
-        print_orientation="landscape",
-        fit_width_pages=1,
-        fit_height_pages=2,
-    )
-
-    assert document._style.IsLandscape is True
-    assert document._style.Width == 200
-    assert document._style.Height == 100
-    assert document._style.ScaleToPagesX == 1
-    assert document._style.ScaleToPagesY == 2
-
-
-def test_apply_print_layout_keeps_existing_settings_when_unspecified() -> None:
-    class _FakeStyle:
-        def __init__(self) -> None:
-            self.IsLandscape = False
-            self.Width = 100
-            self.Height = 200
-            self.ScaleToPagesX = 3
-            self.ScaleToPagesY = 4
-
-    class _FakePageStyles:
-        def __init__(self, styles: dict[str, _FakeStyle]) -> None:
-            self._styles = styles
-
-        def getByName(self, name: str):
-            return self._styles[name]
-
-    class _FakeStyleFamilies:
-        def __init__(self, page_styles: _FakePageStyles) -> None:
-            self._page_styles = page_styles
-
-        def getByName(self, name: str):
-            assert name == "PageStyles"
-            return self._page_styles
-
-    class _FakeSheet:
-        def __init__(self, page_style: str) -> None:
-            self.PageStyle = page_style
-
-    class _FakeSheets:
-        def __init__(self, sheets: list[_FakeSheet]) -> None:
-            self._sheets = sheets
-
-        def getCount(self) -> int:
-            return len(self._sheets)
-
-        def getByIndex(self, index: int) -> _FakeSheet:
-            return self._sheets[index]
-
-    class _FakeDocument:
-        def __init__(self) -> None:
-            self._style = _FakeStyle()
-            self.StyleFamilies = _FakeStyleFamilies(_FakePageStyles({"Default": self._style}))
-
-        def supportsService(self, service_name: str) -> bool:
-            return service_name == "com.sun.star.sheet.SpreadsheetDocument"
-
-        def getSheets(self) -> _FakeSheets:
-            return _FakeSheets([_FakeSheet("Default")])
-
-    document = _FakeDocument()
-
-    LibreOfficeUnoOffice2PDFUtil._apply_print_layout(document, fit_width_pages=1)
-
-    assert document._style.IsLandscape is False
-    assert document._style.Width == 100
-    assert document._style.Height == 200
-    assert document._style.ScaleToPagesX == 1
-    assert document._style.ScaleToPagesY == 4
+    with pytest.raises(RuntimeError, match="not supported"):
+        LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
+            input_path=str(source),
+            output_path=str(source.with_suffix(".pdf")),
+            api_url="http://127.0.0.1:2004",
+            print_orientation="landscape",
+        )
 
 
 def test_convert_office_files_to_pdf_uses_runtime_method_pywin32(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -340,10 +237,8 @@ def test_convert_office_files_to_pdf_uses_runtime_method_uno(monkeypatch: pytest
     source.write_bytes(b"dummy")
     config = _config(method="libreoffice_uno")
 
-    def _fake_convert(cls, input_path, output_path=None, *, host, port, connection_string, print_orientation=None, fit_width_pages=None, fit_height_pages=None):
-        assert host == "127.0.0.1"
-        assert port == 2002
-        assert connection_string is None
+    def _fake_convert(cls, input_path, output_path=None, *, api_url, print_orientation=None, fit_width_pages=None, fit_height_pages=None):
+        assert api_url == "http://127.0.0.1:2004"
         target = Path(output_path) if output_path is not None else Path(input_path).with_suffix(".pdf")
         target.write_bytes(b"pdf")
         return target

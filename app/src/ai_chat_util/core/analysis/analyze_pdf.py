@@ -142,9 +142,7 @@ async def convert_office_files_to_pdf(
                 pdf_path = LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
                     input_path=office_path,
                     output_path=resolved_output_path,
-                    host=config.office2pdf.libreoffice_uno.host,
-                    port=config.office2pdf.libreoffice_uno.port,
-                    connection_string=config.office2pdf.libreoffice_uno.connection_string,
+                    api_url=config.office2pdf.libreoffice_uno.api_url,
                     print_orientation=print_orientation,
                     fit_width_pages=fit_width_pages,
                     fit_height_pages=fit_height_pages,

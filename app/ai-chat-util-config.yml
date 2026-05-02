@@ -170,11 +170,8 @@ ai_chat_util_config:
       libreoffice_path: null
 
     libreoffice_uno:
-      # Connection target for an existing LibreOffice UNO server.
-      host: 127.0.0.1
-      port: 2002
-      # Optional raw UNO connection string. If set, host/port are ignored.
-      connection_string: null
+      # HTTP API endpoint for the Office conversion container.
+      api_url: http://127.0.0.1:2004
 
 # --- coding-agent-util settings (integrated) ---
 # coding-agent-util-config.yml の内容を、このファイルの

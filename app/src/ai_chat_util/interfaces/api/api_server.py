@@ -56,7 +56,7 @@ from ai_chat_util.core.analysis.analyze_office import (
     analyze_office_urls,
 )
 
-from ai_chat_util.core.analyze_file_util.analyze_log import (
+from ai_chat_util.core.analysis.analyze_log import (
     extract_time_range_from_logfile,
     infer_log_header_pattern,
 )

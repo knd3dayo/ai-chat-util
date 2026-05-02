@@ -43,13 +43,14 @@ from ai_chat_util.core.analysis.analyze_office import (
 from ai_chat_util.core.analysis.analyze_file import (
     analyze_files,
 )
-from ai_chat_util.core.analysis.analyze_log import (
-    detect_log_format_and_search,
+from ai_chat_util.core.analyze_file_util.analyze_log import (
+    extract_time_range_from_logfile,
     infer_log_header_pattern,
-    extract_log_time_range,
 )
 from ai_chat_util.core.analysis.analyze_util import AnalyzeFileUtil
 
+from ...core.log import log_settings
+logger = log_settings.getLogger(__name__)
 
 def _build_tool_metadata_registry() -> dict[str, dict[str, str]]:
     return {
@@ -67,14 +68,6 @@ def _build_tool_metadata_registry() -> dict[str, dict[str, str]]:
             "usage_guidance": (
                 "For write-capable usage, call this tool with dry_run=true first to preview the target image_dir and file pattern. "
                 "Only after approval should you call it again with dry_run=false to create files."
-            ),
-        },
-        "extract_log_time_range": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "This tool writes extracted logs under the workspace artifacts directory. "
-                "Use infer_log_header_pattern first when the header pattern is unknown."
             ),
         },
     }
@@ -253,9 +246,8 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_office_urls": analyze_office_urls,
         "convert_office_files_to_pdf": convert_office_files_to_pdf,
         "convert_pdf_files_to_images": convert_pdf_files_to_images,
-        "detect_log_format_and_search": detect_log_format_and_search,
+        "extract_time_range_from_logfile": extract_time_range_from_logfile,
         "infer_log_header_pattern": infer_log_header_pattern,
-        "extract_log_time_range": extract_log_time_range,
         # chat/batch
         "run_chat": run_chat,
         "run_deepagent_chat": run_deepagent_chat,

@@ -2,6 +2,7 @@ from magika import Magika
 from magika.types import MagikaResult 
 from chardet.universaldetector import UniversalDetector
 from pathlib import Path
+from datetime import datetime
 
 from pydantic import BaseModel, Field, PrivateAttr
 import ai_chat_util.core.log.log_settings as log_settings
@@ -248,6 +249,50 @@ class FileServerRootListResponse(BaseModel):
     default_provider: FileServerProvider = Field(..., description="Default provider")
     default_root: str | None = Field(default=None, description="Default root name")
     roots: list[FileServerRootInfo] = Field(default_factory=list, description="Configured roots")
+
+
+class InferLogFormatData(BaseModel):
+    header_pattern: str = Field(..., description="Regular expression that matches the beginning of each record header and includes a named capture group (?P<timestamp>...) for the timestamp")
+    format_description: str = Field(..., description="Concise description of the likely log family or structure, such as log4j plus Java stack trace, syslog-style logs, or Windows Event Log XML")
+    timestamp_format: str = Field(..., description="datetime.strptime-compatible format string for the captured timestamp when it can be inferred")
+    confidence: float = Field(..., description="Confidence score for the inferred log header pattern and format description")
+    reason: str = Field(..., description="Short rationale for the inferred pattern and log format description")
+
+
+class LogSearchMatchData(BaseModel):
+    line_number: int = Field(..., description="1-based line number of the matched log line")
+    line: str = Field(..., description="Original log line that matched the pattern")
+    timestamp: datetime | None = Field(default=None, description="Extracted timestamp string when a header pattern with timestamp capture is used")
+
+    # 指定された開始時間(datetime)、終了時間(datetime)の範囲内のLogSearchMatchDataをフィルタリングする
+    @staticmethod
+    def filter_by_timestamp_range(
+        matches: list["LogSearchMatchData"],
+        start_time: datetime | None = None,
+        end_time: datetime | None = None
+    ) -> list["LogSearchMatchData"]:
+        if start_time is None and end_time is None:
+            return matches
+        
+        filtered = []
+        for match in matches:
+            if match.timestamp is None:
+                continue
+            if start_time is not None and match.timestamp < start_time:
+                continue
+            if end_time is not None and match.timestamp > end_time:
+                continue
+            filtered.append(match)
+        return filtered
+
+class ExtractLogTimeRangeData(BaseModel):
+    file_path: str = Field(..., description="Resolved path of the inspected log file")
+    output_path: str = Field(..., description="Resolved path of the extracted log file written to disk")
+    header_pattern: str = Field(..., description="Inferred header pattern used to identify log record boundaries")
+    timestamp_format: str = Field(..., description="datetime.strptime-compatible format string used to parse extracted timestamps")
+    matched_record_count: int = Field(..., description="Number of log records written to the output file")
+    first_timestamp: datetime | None = Field(default=None, description="First extracted record timestamp when any records matched")
+    last_timestamp: datetime | None = Field(default=None, description="Last extracted record timestamp when any records matched")
 
 
 FileServerEntry.model_rebuild()

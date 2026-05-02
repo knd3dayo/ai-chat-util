@@ -56,10 +56,9 @@ from ai_chat_util.core.analysis.analyze_office import (
     analyze_office_urls,
 )
 
-from ai_chat_util.core.analysis.analyze_log import (
-    detect_log_format_and_search,
+from ai_chat_util.core.analyze_file_util.analyze_log import (
+    extract_time_range_from_logfile,
     infer_log_header_pattern,
-    extract_log_time_range,
 )
 
 from ai_chat_util.core.analysis.analyze_file import (
@@ -113,9 +112,8 @@ router.add_api_route(path="/analyze_file_urls", endpoint=analyze_file_urls, meth
 # ドキュメント変換ツール
 router.add_api_route(path="/convert_office_files_to_pdf", endpoint=convert_office_files_to_pdf, methods=["POST"])
 router.add_api_route(path="/convert_pdf_files_to_images", endpoint=convert_pdf_files_to_images, methods=["POST"])
-router.add_api_route(path="/detect_log_format_and_search", endpoint=detect_log_format_and_search, methods=["POST"])
+router.add_api_route(path="/extract_time_range_from_logfile", endpoint=extract_time_range_from_logfile, methods=["POST"])
 router.add_api_route(path="/infer_log_header_pattern", endpoint=infer_log_header_pattern, methods=["POST"])
-router.add_api_route(path="/extract_log_time_range", endpoint=extract_log_time_range, methods=["POST"])
 
 # resource_app の関数をデフォルトで公開する
 router.add_api_route(path="/use_custom_pdf_analyzer", endpoint=use_custom_pdf_analyzer, methods=["GET"])

@@ -18,10 +18,16 @@ from ai_chat_util.core.chat.model import (
 )
 
 from ai_chat_util.core.analysis.model import FileUtilDocument
+from ai_chat_util.core.common.config.runtime import get_runtime_config
 import ai_chat_util.core.log.log_settings as log_settings
-from .office2pdf import Office2PDFUtil
 import fitz  # PyMuPDF
 from .file_util_llm_messages import FileUtilLLMMessages
+from ai_chat_util.util.analyze_file_util.office2pdf import (
+    LibreOfficeExecOffice2PDFUtil,
+    LibreOfficeUnoOffice2PDFUtil,
+    Pywin32Office2PDFUtil,
+    _build_default_output_path,
+)
 
 logger = log_settings.getLogger(__name__)
 
@@ -152,12 +158,31 @@ class AnalyzePDFUtil:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         results: list[dict[str, str]] = []
+        config = get_runtime_config()
         for office_path, planned_item in zip(file_path_list, planned):
-            pdf_path = Office2PDFUtil.create_pdf_from_document_file(
-                input_path=office_path,
-                output_path=output_dir,
-                configured_libreoffice_path=libreoffice_path,
-            )
+            resolved_output_path = output_dir if output_dir is not None else _build_default_output_path(office_path)
+            if config.office2pdf.method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
+                pdf_path = LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
+                    input_path=office_path,
+                    output_path=resolved_output_path,
+                    libreoffice_path=(libreoffice_path or config.office2pdf.libreoffice_exec.libreoffice_path),
+                )
+            elif config.office2pdf.method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
+                pdf_path = LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
+                    input_path=office_path,
+                    output_path=resolved_output_path,
+                    host=config.office2pdf.libreoffice_uno.host,
+                    port=config.office2pdf.libreoffice_uno.port,
+                    connection_string=config.office2pdf.libreoffice_uno.connection_string,
+                )
+            elif config.office2pdf.method == Pywin32Office2PDFUtil.METHOD_NAME:
+                pdf_path = Pywin32Office2PDFUtil.create_pdf_from_document_file(
+                    input_path=office_path,
+                    output_path=resolved_output_path,
+                    office_path=config.office2pdf.pywin32.office_path,
+                )
+            else:
+                raise RuntimeError(f"Unsupported Office2PDF method: {config.office2pdf.method}")
             results.append({"source_path": planned_item["source_path"], "pdf_path": str(pdf_path)})
         return results
 

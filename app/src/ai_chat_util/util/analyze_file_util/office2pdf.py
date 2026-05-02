@@ -2,35 +2,106 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shlex
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Literal, Protocol, cast
+
+import psutil  # type: ignore[import-not-found]
 
 from ai_chat_util.core.common.config.runtime import get_runtime_config
 
 
-class Office2PDFUtil:
-    DEFAULT_TIMEOUT_SECONDS = 600
+class _Office2PDFPyWin32Config(Protocol):
+    @property
+    def office_path(self) -> str | None: ...
+
+
+class _Office2PDFLibreOfficeExecConfig(Protocol):
+    @property
+    def libreoffice_path(self) -> str | None: ...
+
+
+class _Office2PDFLibreOfficeUnoConfig(Protocol):
+    @property
+    def host(self) -> str: ...
+
+    @property
+    def port(self) -> int: ...
+
+    @property
+    def connection_string(self) -> str | None: ...
+
+
+class _Office2PDFConfigProtocol(Protocol):
+    @property
+    def method(self) -> str: ...
+
+    @property
+    def pywin32(self) -> _Office2PDFPyWin32Config: ...
+
+    @property
+    def libreoffice_exec(self) -> _Office2PDFLibreOfficeExecConfig: ...
+
+    @property
+    def libreoffice_uno(self) -> _Office2PDFLibreOfficeUnoConfig: ...
+
+
+class _HasOffice2PDFConfig(Protocol):
+    @property
+    def office2pdf(self) -> _Office2PDFConfigProtocol: ...
+
+
+class _UnoDocumentProtocol(Protocol):
+    def supportsService(self, service_name: str) -> bool: ...
+
+    def storeToURL(self, url: str, properties: tuple[object, ...]) -> None: ...
+
+    def close(self, deliver_ownership: bool) -> None: ...
+
+    def dispose(self) -> None: ...
+
+
+PrintOrientation = Literal["portrait", "landscape"]
+
+
+def _resolve_target_path(
+    input_path: str,
+    output_path: str,
+) -> tuple[Path, Path]:
+    source = Path(input_path).expanduser()
+    if not source.exists():
+        raise FileNotFoundError(f"Input file not found: {source}")
+    source = source.resolve()
+
+    output_candidate = Path(output_path).expanduser()
+    if output_candidate.is_dir():
+        target = output_candidate / source.with_suffix(".pdf").name
+    else:
+        target = output_candidate
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return source, target
+
+
+def _build_default_output_path(input_path: str) -> str:
+    return str(Path(input_path).expanduser().with_suffix(".pdf"))
+
+
+def _has_print_layout_override(
+    print_orientation: PrintOrientation | None,
+    fit_width_pages: int | None,
+    fit_height_pages: int | None,
+) -> bool:
+    return print_orientation is not None or fit_width_pages is not None or fit_height_pages is not None
+
+
+class Pywin32Office2PDFUtil:
+    METHOD_NAME = "pywin32"
     _WORD_EXTENSIONS = {".doc", ".docx", ".docm", ".rtf"}
     _EXCEL_EXTENSIONS = {".xls", ".xlsx", ".xlsm", ".xlsb"}
     _POWERPOINT_EXTENSIONS = {".ppt", ".pptx", ".pptm"}
-
-    class _ConversionTimeout(RuntimeError):
-        """Internal exception used to distinguish timeout paths."""
-
-    @classmethod
-    def _get_effective_office2pdf_config(cls, config: object | None = None):
-        effective_config = config if config is not None else get_runtime_config()
-        return effective_config.office2pdf
-
-    @classmethod
-    def get_selected_method(cls, config: object | None = None) -> str:
-        return str(cls._get_effective_office2pdf_config(config).method)
 
     @classmethod
     def _is_resolvable_binary(cls, candidate: str | Path | None) -> bool:
@@ -44,7 +115,7 @@ class Office2PDFUtil:
         return shutil.which(str(candidate)) is not None
 
     @classmethod
-    def _is_pywin32_available(cls, office_path: str | Path | None) -> bool:
+    def is_available(cls, office_path: str | Path | None) -> bool:
         if os.name != "nt":
             return False
         if importlib.util.find_spec("win32com.client") is None:
@@ -52,59 +123,6 @@ class Office2PDFUtil:
         if office_path:
             return cls._is_resolvable_binary(office_path)
         return True
-
-    @classmethod
-    def _is_libreoffice_uno_available(cls) -> bool:
-        return importlib.util.find_spec("uno") is not None
-
-    @classmethod
-    def is_conversion_available(
-        cls,
-        *,
-        config: object | None = None,
-        libreoffice_path: str | Path | None = None,
-        configured_libreoffice_path: str | Path | None = None,
-    ) -> bool:
-        office2pdf_config = cls._get_effective_office2pdf_config(config)
-        method = cls.get_selected_method(config)
-
-        if method == "libreoffice_exec":
-            return cls.try_find_libreoffice_binary(
-                explicit_path=libreoffice_path,
-                configured_path=(
-                    configured_libreoffice_path or office2pdf_config.libreoffice_exec.libreoffice_path
-                ),
-            ) is not None
-
-        if method == "pywin32":
-            return cls._is_pywin32_available(office2pdf_config.pywin32.office_path)
-
-        if method == "libreoffice_uno":
-            return cls._is_libreoffice_uno_available()
-
-        return False
-
-    @classmethod
-    def _resolve_target_path(
-        cls,
-        input_path: str | Path,
-        output_path: str | Path | None = None,
-    ) -> tuple[Path, Path]:
-        source = Path(input_path).expanduser()
-        if not source.exists():
-            raise FileNotFoundError(f"Input file not found: {source}")
-        source = source.resolve()
-
-        if output_path is None:
-            target = source.with_suffix(".pdf")
-        else:
-            output_candidate = Path(output_path).expanduser()
-            if output_candidate.is_dir():
-                target = output_candidate / source.with_suffix(".pdf").name
-            else:
-                target = output_candidate
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return source, target
 
     @classmethod
     def _get_office_application_kind(cls, source: Path) -> str:
@@ -118,12 +136,19 @@ class Office2PDFUtil:
         raise RuntimeError(f"Unsupported Office file extension for PDF conversion: {ext or source.name}")
 
     @classmethod
-    def _create_pdf_via_pywin32(
+    def create_pdf_from_document_file(
         cls,
-        source: Path,
-        target: Path,
-        office_path: str | Path | None,
+        input_path: str,
+        output_path: str,
+        *,
+        office_path: str | Path | None = None,
+        print_orientation: PrintOrientation | None = None,
+        fit_width_pages: int | None = None,
+        fit_height_pages: int | None = None,
     ) -> Path:
+        if _has_print_layout_override(print_orientation, fit_width_pages, fit_height_pages):
+            raise RuntimeError("Print layout overrides require office2pdf method 'libreoffice_uno'.")
+
         if os.name != "nt":
             raise RuntimeError("pywin32 conversion is only supported on Windows.")
 
@@ -136,6 +161,7 @@ class Office2PDFUtil:
         import pythoncom  # type: ignore[import-not-found]
         from win32com.client import DispatchEx  # type: ignore[import-not-found]
 
+        source, target = _resolve_target_path(input_path, output_path)
         app = None
         document = None
         app_kind = cls._get_office_application_kind(source)
@@ -185,6 +211,80 @@ class Office2PDFUtil:
 
         return target.resolve()
 
+
+class LibreOfficeUnoOffice2PDFUtil:
+
+    METHOD_NAME = "libreoffice_uno"
+
+    @classmethod
+    def _normalize_print_orientation(
+        cls,
+        print_orientation: PrintOrientation | str | None,
+    ) -> PrintOrientation | None:
+        if print_orientation is None:
+            return None
+
+        normalized = str(print_orientation).strip().lower()
+        if normalized not in {"portrait", "landscape"}:
+            raise ValueError("print_orientation must be either 'portrait' or 'landscape'.")
+        return cast(PrintOrientation, normalized)
+
+    @classmethod
+    def _validate_fit_pages(cls, value: int | None, parameter_name: str) -> None:
+        if value is not None and value < 0:
+            raise ValueError(f"{parameter_name} must be greater than or equal to 0.")
+
+    @classmethod
+    def _get_calc_page_styles(cls, document: _UnoDocumentProtocol) -> list[Any]:
+        if not document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
+            raise RuntimeError("Print layout overrides are supported only for LibreOffice Calc documents.")
+
+        sheets = cast(Any, document).getSheets()
+        style_families = cast(Any, document).StyleFamilies
+        page_styles = style_families.getByName("PageStyles")
+        style_names: list[str] = []
+        for index in range(sheets.getCount()):
+            sheet = sheets.getByIndex(index)
+            style_name = str(sheet.PageStyle)
+            if style_name not in style_names:
+                style_names.append(style_name)
+        return [page_styles.getByName(style_name) for style_name in style_names]
+
+    @classmethod
+    def _apply_print_layout(
+        cls,
+        document: _UnoDocumentProtocol,
+        *,
+        print_orientation: PrintOrientation | str | None = None,
+        fit_width_pages: int | None = None,
+        fit_height_pages: int | None = None,
+    ) -> None:
+        normalized_orientation = cls._normalize_print_orientation(print_orientation)
+        cls._validate_fit_pages(fit_width_pages, "fit_width_pages")
+        cls._validate_fit_pages(fit_height_pages, "fit_height_pages")
+
+        if normalized_orientation is None and fit_width_pages is None and fit_height_pages is None:
+            return
+
+        page_styles = cls._get_calc_page_styles(document)
+        for style in page_styles:
+            if normalized_orientation is not None:
+                is_landscape = normalized_orientation == "landscape"
+                current_orientation = bool(getattr(style, "IsLandscape", False))
+                if current_orientation != is_landscape and hasattr(style, "Width") and hasattr(style, "Height"):
+                    width = style.Width
+                    style.Width = style.Height
+                    style.Height = width
+                style.IsLandscape = is_landscape
+            if fit_width_pages is not None:
+                style.ScaleToPagesX = fit_width_pages
+            if fit_height_pages is not None:
+                style.ScaleToPagesY = fit_height_pages
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return importlib.util.find_spec("uno") is not None
+
     @classmethod
     def _build_uno_connection_string(cls, connection_string: str | None, host: str, port: int) -> str:
         if connection_string:
@@ -201,7 +301,7 @@ class Office2PDFUtil:
         return prop
 
     @classmethod
-    def _detect_uno_pdf_filter(cls, document: object) -> str:
+    def _detect_uno_pdf_filter(cls, document: _UnoDocumentProtocol) -> str:
         if document.supportsService("com.sun.star.text.GenericTextDocument"):
             return "writer_pdf_Export"
         if document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
@@ -213,7 +313,7 @@ class Office2PDFUtil:
         return "writer_pdf_Export"
 
     @classmethod
-    def _close_uno_document(cls, document: object) -> None:
+    def _close_uno_document(cls, document: _UnoDocumentProtocol) -> None:
         try:
             document.close(True)
             return
@@ -225,19 +325,24 @@ class Office2PDFUtil:
             pass
 
     @classmethod
-    def _create_pdf_via_libreoffice_uno(
+    def create_pdf_from_document_file(
         cls,
-        source: Path,
-        target: Path,
+        input_path: str,
+        output_path: str,
         *,
         host: str,
         port: int,
         connection_string: str | None,
+        print_orientation: PrintOrientation | None = None,
+        fit_width_pages: int | None = None,
+        fit_height_pages: int | None = None,
     ) -> Path:
         if importlib.util.find_spec("uno") is None:
             raise RuntimeError("LibreOffice UNO conversion requires the 'uno' Python module.")
 
         import uno  # type: ignore[import-not-found]
+
+        source, target = _resolve_target_path(input_path, output_path)
 
         local_context = uno.getComponentContext()
         resolver = local_context.ServiceManager.createInstanceWithContext(
@@ -252,7 +357,7 @@ class Office2PDFUtil:
                 f"Failed to connect to LibreOffice UNO server using '{resolved_connection_string}'"
             ) from exc
 
-        document = None
+        document: _UnoDocumentProtocol | None = None
         try:
             desktop = remote_context.ServiceManager.createInstanceWithContext(
                 "com.sun.star.frame.Desktop", remote_context
@@ -260,7 +365,16 @@ class Office2PDFUtil:
             input_url = uno.systemPathToFileUrl(str(source))
             output_url = uno.systemPathToFileUrl(str(target))
             load_props = (cls._build_uno_property("Hidden", True),)
-            document = desktop.loadComponentFromURL(input_url, "_blank", 0, load_props)
+            document = cast(
+                _UnoDocumentProtocol,
+                desktop.loadComponentFromURL(input_url, "_blank", 0, load_props),
+            )
+            cls._apply_print_layout(
+                document,
+                print_orientation=print_orientation,
+                fit_width_pages=fit_width_pages,
+                fit_height_pages=fit_height_pages,
+            )
             export_props = (
                 cls._build_uno_property("FilterName", cls._detect_uno_pdf_filter(document)),
             )
@@ -276,9 +390,13 @@ class Office2PDFUtil:
 
         return target.resolve()
 
-    @classmethod
-    def _raise_unsupported_method(cls, method: str) -> None:
-        raise ValueError(f"Unsupported office2pdf method: {method}")
+
+class LibreOfficeExecOffice2PDFUtil:
+    METHOD_NAME = "libreoffice_exec"
+    DEFAULT_TIMEOUT_SECONDS = 600
+
+    class _ConversionTimeout(RuntimeError):
+        """Internal exception used to distinguish timeout paths."""
 
     @classmethod
     def _build_user_installation_arg(cls, user_profile_dir: Path) -> str:
@@ -290,23 +408,18 @@ class Office2PDFUtil:
         if proc.poll() is not None:
             return
 
-        if os.name == "nt":
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-            return
-
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            parent = psutil.Process(proc.pid)
+            children = parent.children(recursive=True)
+            for child in reversed(children):
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            try:
+                parent.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
         except Exception:
             try:
                 proc.kill()
@@ -322,57 +435,17 @@ class Office2PDFUtil:
         if not marker:
             return
 
-        if os.name == "nt":
-            ps = (
-                "$m = "
-                + shlex.quote(marker)
-                + ";"
-                "Get-CimInstance Win32_Process "
-                "| Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + $m + '*') } "
-                "| ForEach-Object { "
-                "  try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} "
-                "}"
-            )
-            try:
-                subprocess.run(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-Command",
-                        ps,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                pass
-            return
-
         try:
-            res = subprocess.run(
-                ["ps", "-eo", "pid,args"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            text = res.stdout.decode(errors="ignore")
-            for line in text.splitlines():
-                line = line.strip()
-                if not line:
+            for process in psutil.process_iter(["cmdline"]):
+                cmdline = process.info.get("cmdline")
+                if not cmdline:
                     continue
-                parts = line.split(maxsplit=1)
-                if len(parts) != 2:
+                if marker not in " ".join(cmdline):
                     continue
-                pid_s, args = parts
-                if marker in args:
-                    try:
-                        os.kill(int(pid_s), signal.SIGKILL)
-                    except Exception:
-                        pass
+                try:
+                    process.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
         except Exception:
             pass
 
@@ -469,13 +542,13 @@ class Office2PDFUtil:
     @classmethod
     def _build_command(
         cls,
-        libreoffice_binary: str,
+        libreoffice_path: str | Path,
         source: Path,
         output_dir: Path,
         extra_args: Iterable[str] | None = None,
     ) -> list[str]:
         command = [
-            libreoffice_binary,
+            str(libreoffice_path),
             "--headless",
             "--nologo",
             "--nolockcheck",
@@ -492,64 +565,15 @@ class Office2PDFUtil:
         return command
 
     @classmethod
-    def create_pdf_from_document_bytes(
+    def create_pdf_from_document_file_via_libreoffice_exec(
         cls,
-        input_bytes: bytes,
-        output_path: str | Path | None = None,
-        libreoffice_path: str | Path | None = None,
-        configured_libreoffice_path: str | Path | None = None,
+        input_path: str,
+        output_path: str,
+        libreoffice_path: str | Path,
         timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
-        temp_dir: str | Path | None = None,
-        config: object | None = None,
     ) -> Path:
-        with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdirname:
-            source_path = Path(tmpdirname) / "input_document"
-            with open(source_path, "wb") as source_file:
-                source_file.write(input_bytes)
+        source, target = _resolve_target_path(input_path, output_path)
 
-            return cls.create_pdf_from_document_file(
-                input_path=source_path,
-                output_path=output_path,
-                libreoffice_path=libreoffice_path,
-                configured_libreoffice_path=configured_libreoffice_path,
-                timeout=timeout,
-                config=config,
-            )
-
-    @classmethod
-    def create_pdf_from_document_file(
-        cls,
-        input_path: str | Path,
-        output_path: str | Path | None = None,
-        libreoffice_path: str | Path | None = None,
-        configured_libreoffice_path: str | Path | None = None,
-        timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
-        config: object | None = None,
-    ) -> Path:
-        source, target = cls._resolve_target_path(input_path, output_path)
-
-        office2pdf_config = cls._get_effective_office2pdf_config(config)
-        method = cls.get_selected_method(config)
-
-        if method == "pywin32":
-            return cls._create_pdf_via_pywin32(source, target, office2pdf_config.pywin32.office_path)
-
-        if method == "libreoffice_uno":
-            return cls._create_pdf_via_libreoffice_uno(
-                source,
-                target,
-                host=office2pdf_config.libreoffice_uno.host,
-                port=office2pdf_config.libreoffice_uno.port,
-                connection_string=office2pdf_config.libreoffice_uno.connection_string,
-            )
-
-        if method != "libreoffice_exec":
-            cls._raise_unsupported_method(method)
-
-        libreoffice_binary = cls.find_libreoffice_binary(
-            explicit_path=libreoffice_path,
-            configured_path=(configured_libreoffice_path or office2pdf_config.libreoffice_exec.libreoffice_path),
-        )
         output_dir = target.parent.resolve()
         expected_produced_path = output_dir / (source.stem + ".pdf")
         start_epoch = time.time()
@@ -566,7 +590,7 @@ class Office2PDFUtil:
             lo_profile_dir = Path(lo_profile_dirname)
             user_installation_arg = cls._build_user_installation_arg(lo_profile_dir)
             command = cls._build_command(
-                libreoffice_binary,
+                libreoffice_path,
                 source,
                 output_dir,
                 extra_args=[user_installation_arg],
@@ -618,6 +642,47 @@ class Office2PDFUtil:
         return target.resolve()
 
     @classmethod
+    def create_pdf_from_document_bytes(
+        cls,
+        input_bytes: bytes,
+        output_path: str ,
+        libreoffice_path: str ,
+        timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
+        temp_dir: str | Path | None = None,
+        input_filename: str | Path | None = None,
+    ) -> Path:
+        source_suffix = Path(input_filename).suffix if input_filename else ""
+        source_name = f"input_document{source_suffix}" if source_suffix else "input_document"
+
+        with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdirname:
+            source_path = Path(tmpdirname) / source_name
+            source_path.write_bytes(input_bytes)
+
+            return cls.create_pdf_from_document_file(
+                input_path=source_path.as_posix(),
+                output_path=output_path,
+                libreoffice_path=libreoffice_path,
+                timeout=timeout,
+            )
+
+    @classmethod
+    def create_pdf_from_document_file(
+        cls,
+        input_path: str,
+        output_path: str,
+        *,
+        libreoffice_path: str | Path | None = None,
+        timeout: int | None = DEFAULT_TIMEOUT_SECONDS,
+    ) -> Path:
+        libreoffice_binary = cls.find_libreoffice_binary(explicit_path=libreoffice_path)
+        return cls.create_pdf_from_document_file_via_libreoffice_exec(
+            input_path=input_path,
+            output_path=output_path,
+            libreoffice_path=libreoffice_binary,
+            timeout=timeout,
+        )
+
+    @classmethod
     def try_find_libreoffice_binary(
         cls,
         explicit_path: str | Path | None = None,
@@ -662,5 +727,8 @@ class Office2PDFUtil:
             "or ensure LibreOffice is on PATH."
         )
 
-
-__all__ = ["Office2PDFUtil"]
+__all__ = [
+    "LibreOfficeExecOffice2PDFUtil",
+    "LibreOfficeUnoOffice2PDFUtil",
+    "Pywin32Office2PDFUtil",
+]

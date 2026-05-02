@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from typing import Optional
 from io import BytesIO
 import os
 import uuid
 import tempfile
 import atexit
-import base64
-from abc import ABC, abstractmethod
 
+from pathlib import Path
+from pydantic import Field, Annotated
 from docx import Document as WordDocument
 from openpyxl import load_workbook
 from pptx import Presentation
@@ -19,7 +18,11 @@ from ai_chat_util.core.chat.model import (
     ChatContent, WebRequestModel
 )
 from ai_chat_util.core.analysis.model import FileUtilDocument
-from ai_chat_util.util.analyze_file_util.office2pdf import Office2PDFUtil
+from ai_chat_util.util.analyze_file_util.office2pdf import (
+    LibreOfficeExecOffice2PDFUtil,
+    LibreOfficeUnoOffice2PDFUtil,
+    Pywin32Office2PDFUtil,
+)
 from ai_chat_util.util.analyze_file_util.downloader import DownLoader
 from ai_chat_util.util.analyze_file_util import pdf_util
 from ai_chat_util.core.chat.abstract_chat_client import AbstractChatClient
@@ -222,7 +225,21 @@ class FileUtilLLMMessages:
         '''
         effective_config = self._get_effective_config()
         office2pdf_method = effective_config.office2pdf.method
-        if not Office2PDFUtil.is_conversion_available(config=effective_config):
+        if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
+            is_available = (
+                LibreOfficeExecOffice2PDFUtil.try_find_libreoffice_binary(
+                    configured_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
+                )
+                is not None
+            )
+        elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
+            is_available = LibreOfficeUnoOffice2PDFUtil.is_available()
+        elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
+            is_available = Pywin32Office2PDFUtil.is_available(effective_config.office2pdf.pywin32.office_path)
+        else:
+            is_available = False
+
+        if not is_available:
             raise RuntimeError(
                 f"Office2PDF method '{office2pdf_method}' is unavailable for {document_type.identifier}"
             )
@@ -234,11 +251,33 @@ class FileUtilLLMMessages:
                 temp_dir.name,
                 f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf"
             )
-            Office2PDFUtil.create_pdf_from_document_bytes(
-                input_bytes=document_type.data,
-                output_path=temp_file_path,
-                config=effective_config,
-            )
+            source_suffix = Path(document_type.identifier).suffix
+            source_name = f"input_document{source_suffix}" if source_suffix else "input_document"
+            source_path = Path(temp_dir.name) / source_name
+            source_path.write_bytes(document_type.data)
+
+            if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
+                LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
+                    input_path=str(source_path),
+                    output_path=temp_file_path,
+                    libreoffice_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
+                )
+            elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
+                LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
+                    input_path=str(source_path),
+                    output_path=temp_file_path,
+                    host=effective_config.office2pdf.libreoffice_uno.host,
+                    port=effective_config.office2pdf.libreoffice_uno.port,
+                    connection_string=effective_config.office2pdf.libreoffice_uno.connection_string,
+                )
+            elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
+                Pywin32Office2PDFUtil.create_pdf_from_document_file(
+                    input_path=str(source_path),
+                    output_path=temp_file_path,
+                    office_path=effective_config.office2pdf.pywin32.office_path,
+                )
+            else:
+                raise RuntimeError(f"Unsupported Office2PDF method: {office2pdf_method}")
             explanation_text = f"""
                 {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
                 ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。

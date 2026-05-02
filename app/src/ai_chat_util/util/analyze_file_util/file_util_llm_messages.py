@@ -5,9 +5,10 @@ import os
 import uuid
 import tempfile
 import atexit
+from typing import Annotated
 
 from pathlib import Path
-from pydantic import Field, Annotated
+from pydantic import Field
 from docx import Document as WordDocument
 from openpyxl import load_workbook
 from pptx import Presentation

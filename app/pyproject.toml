@@ -58,7 +58,7 @@ include = ["ai_chat_util*", "file_util*"]
 exclude = []
 
 [project.scripts]
-ai-chat-util = "ai_chat_util.cli.__main__:cli_main"
-coding-agent-api = "ai_chat_util.ai_chat_util_agent.coding._api_.api_server:main"
-coding-agent-mcp = "ai_chat_util.ai_chat_util_agent.coding.mcp.mcp_server:main"
-coding-agent-util = "ai_chat_util.ai_chat_util_agent.coding._cli_.main:main"
+ai-chat-util = "ai_chat_util.interfaces.cli.__main__:cli_main"
+coding-agent-api = "ai_chat_util.interfaces.api.coding_api_server:main"
+coding-agent-mcp = "ai_chat_util.interfaces.mcp.mcp_server:main"
+coding-agent-util = "ai_chat_util.interfaces.cli.coding_docker_main:app"

@@ -21,7 +21,7 @@ from ai_chat_util.core.analysis.model import FileUtilDocument
 from ai_chat_util.core.common.config.runtime import get_runtime_config
 import ai_chat_util.core.log.log_settings as log_settings
 import fitz  # PyMuPDF
-from .file_util_llm_messages import FileUtilLLMMessages
+from ai_chat_util.util.analyze_file_util.file_util_llm_messages import FileUtilLLMMessages
 from ai_chat_util.util.analyze_file_util.office2pdf import (
     LibreOfficeExecOffice2PDFUtil,
     LibreOfficeUnoOffice2PDFUtil,

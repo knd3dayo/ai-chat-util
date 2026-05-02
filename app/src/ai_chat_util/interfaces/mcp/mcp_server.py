@@ -48,9 +48,7 @@ from ai_chat_util.core.analysis.analyze_log import (
     infer_log_header_pattern,
     extract_log_time_range,
 )
-from ai_chat_util.core.analysis.analyze_util import (
-    analyze_documents_data,
-)
+from ai_chat_util.core.analysis.analyze_util import AnalyzeFileUtil
 
 
 def _build_tool_metadata_registry() -> dict[str, dict[str, str]]:
@@ -249,7 +247,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_pdf_files": analyze_pdf_files,
         "analyze_office_files": analyze_office_files,
         "analyze_files": analyze_files,
-        "analyze_documents_data": analyze_documents_data,
+        "analyze_documents_data": AnalyzeFileUtil.analyze_documents_data,
         "analyze_image_urls": analyze_image_urls,
         "analyze_pdf_urls": analyze_pdf_urls,
         "analyze_office_urls": analyze_office_urls,

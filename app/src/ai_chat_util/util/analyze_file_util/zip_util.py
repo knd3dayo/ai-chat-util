@@ -2,9 +2,18 @@ import locale
 import os
 from pathlib import Path
 
+import chardet
 import pyzipper as zipfile
 
 class ZipUtil:
+
+    _JAPANESE_RANGES = (
+        (0x3040, 0x30FF),
+        (0x3400, 0x4DBF),
+        (0x4E00, 0x9FFF),
+        (0xF900, 0xFAFF),
+        (0xFF66, 0xFF9F),
+    )
 
     @classmethod
     def __check_utf8_flag(cls, zip_ref: zipfile.ZipFile):
@@ -24,7 +33,7 @@ class ZipUtil:
             for info in zip_ref.infolist():
                 name = info.filename
                 if not is_utf:
-                    name = name.encode('cp437').decode(system_encoding, errors='replace')
+                    name = cls.__decode_legacy_filename(name, system_encoding)
                 info.filename = name
                 zip_ref.extract(info, path=extract_to)
 
@@ -36,6 +45,48 @@ class ZipUtil:
         return locale.getpreferredencoding()
 
     @classmethod
+    def __contains_japanese(cls, text: str) -> bool:
+        for char in text:
+            codepoint = ord(char)
+            for start, end in cls._JAPANESE_RANGES:
+                if start <= codepoint <= end:
+                    return True
+        return False
+
+    @classmethod
+    def __decode_legacy_filename(cls, name: str, system_encoding: str) -> str:
+        raw_name = name.encode("cp437")
+        if raw_name.isascii():
+            return name
+
+        detected = chardet.detect(raw_name)
+        candidate_encodings: list[str] = []
+
+        detected_encoding = detected.get("encoding")
+        detected_confidence = float(detected.get("confidence") or 0.0)
+        if detected_encoding and detected_confidence >= 0.5:
+            candidate_encodings.append(str(detected_encoding))
+
+        candidate_encodings.extend(["cp932", "shift_jis"])
+        if system_encoding.lower() not in {"utf-8", "utf_8"}:
+            candidate_encodings.append(system_encoding)
+
+        seen: set[str] = set()
+        for encoding in candidate_encodings:
+            normalized = encoding.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            try:
+                decoded = raw_name.decode(encoding)
+            except (LookupError, UnicodeDecodeError):
+                continue
+            if cls.__contains_japanese(decoded):
+                return decoded
+
+        return name
+
+    @classmethod
     def list_zip_contents(cls, file_path) -> list[str]:
         result = []
         with zipfile.ZipFile(file_path, 'r') as zip_ref:
@@ -44,7 +95,7 @@ class ZipUtil:
             for info in zip_ref.infolist():
                 name = info.filename
                 if not is_utf:
-                    name = name.encode('cp437').decode(system_encoding, errors='replace')
+                    name = cls.__decode_legacy_filename(name, system_encoding)
                 result.append(name)
         return result
 

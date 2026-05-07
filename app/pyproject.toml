@@ -48,6 +48,7 @@ dependencies = [
     "pysmb",
     "deepagents",
     "psutil",
+    "browser-use",
     "pywin32; sys_platform == 'win32'"
 ]
 

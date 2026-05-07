@@ -49,6 +49,11 @@ from ai_chat_util.core.analysis.analyze_log import (
 )
 from ai_chat_util.core.analysis.analyze_util import AnalyzeFileUtil
 
+from ai_chat_util.core.browser.browser_task import (
+    run_browser_task,
+    run_browser_task_with_output,
+)
+
 from ...core.log import log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -262,6 +267,9 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "run_mermaid_workflow_from_file": run_mermaid_workflow_from_file,
         "run_durable_workflow_from_file": run_durable_workflow_from_file,
         "resume_durable_workflow": resume_durable_workflow,
+        # browser automation
+        "run_browser_task": run_browser_task,
+        "run_browser_task_with_output": run_browser_task_with_output,
         # debug helper
         "get_loaded_config_info": get_loaded_config_info,
     }

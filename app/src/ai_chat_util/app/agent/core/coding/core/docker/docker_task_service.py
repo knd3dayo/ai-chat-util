@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional, AsyncGenerator, Generator
 import signal
-from python_on_whales import docker as whales, Container
+from python_on_whales import Container
 
 # 内部パッケージのインポート
 from ..abstract_agent_runner import AbstractAgentRunner
@@ -71,7 +71,8 @@ class DockerTaskService(AbstractTaskService):
     def cancel_task(self, task: TaskStatus) -> None:
         if task.status != "running" or not task.container_id:
             return
-        whales.container.kill(task.container_id)
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        DockerOpsUtil.kill_container(task.container_id)
 
     async def prepare(
         self,
@@ -219,10 +220,15 @@ class DockerTaskService(AbstractTaskService):
     @classmethod
     def prune_containers(cls, compose_service_name: str) -> Generator[str, None, None]:
         """掃除ロジック"""
-        containers = whales.container.list(filters={"label": f"managed_by={compose_service_name}"})
-        for c in containers:
-            c.remove(force=True)
-            yield f"Removed container {c.id[:12]}"
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        result = DockerOpsUtil.remove_containers(
+            label_filter=f"managed_by={compose_service_name}",
+            force=True,
+        )
+        if result.output:
+            yield result.output
+        if result.error:
+            yield f"Errors: {result.error}"
 
 
 

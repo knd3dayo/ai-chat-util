@@ -15,6 +15,29 @@ from ai_chat_util.app.agent.core.app import run_mermaid_workflow_from_file
 from ai_chat_util.app.workflow import WorkflowChatClient
 
 
+def _docker_compose_file_args(p: argparse.ArgumentParser) -> None:
+    """compose_path / compose_content 両方サポートする共通引数を追加する。"""
+    group = p.add_mutually_exclusive_group()
+    group.add_argument(
+        "--compose-file",
+        type=str,
+        default=None,
+        help="docker-compose.yml のファイルパス",
+    )
+    group.add_argument(
+        "--compose-content",
+        type=str,
+        default=None,
+        help="docker-compose.yml の内容（YAML 文字列）",
+    )
+    p.add_argument(
+        "--project-directory",
+        type=str,
+        default=None,
+        help="compose-content 内の相対 build context / volume パス解決に使う基準ディレクトリ",
+    )
+
+
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--loglevel",
@@ -374,6 +397,99 @@ def build_parser() -> argparse.ArgumentParser:
         help="実行前に Markdown と Mermaid を補正し、承認待ちで停止します",
     )
 
+    # ---- docker operations ----
+    # docker_compose_up
+    docker_up_parser = subparsers.add_parser(
+        "docker_compose_up",
+        help="docker compose up を実行してサービスを起動します",
+    )
+    docker_up_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
+    _docker_compose_file_args(docker_up_parser)
+    docker_up_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列。例: \'{"KEY": "val"}\'')
+    docker_up_parser.add_argument("--services", type=str, nargs="*", default=None, help="起動するサービス名（複数指定可）")
+    docker_up_parser.add_argument("--no-detach", action="store_true", help="フォアグラウンドで実行（デフォルトはバックグラウンド）")
+    docker_up_parser.add_argument("--build", action="store_true", help="起動前にイメージをビルドする")
+
+    # docker_compose_down
+    docker_down_parser = subparsers.add_parser(
+        "docker_compose_down",
+        help="docker compose down を実行してサービスを停止・削除します",
+    )
+    docker_down_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
+    _docker_compose_file_args(docker_down_parser)
+    docker_down_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
+    docker_down_parser.add_argument("--remove-volumes", action="store_true", help="ボリュームも削除する")
+
+    # docker_compose_restart
+    docker_restart_parser = subparsers.add_parser(
+        "docker_compose_restart",
+        help="docker compose restart を実行してサービスを再起動します",
+    )
+    docker_restart_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
+    _docker_compose_file_args(docker_restart_parser)
+    docker_restart_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
+    docker_restart_parser.add_argument("--services", type=str, nargs="*", default=None, help="再起動するサービス名（複数指定可）")
+
+    # docker_compose_logs
+    docker_logs_parser = subparsers.add_parser(
+        "docker_compose_logs",
+        help="docker compose logs を取得します",
+    )
+    docker_logs_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
+    _docker_compose_file_args(docker_logs_parser)
+    docker_logs_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
+    docker_logs_parser.add_argument("--services", type=str, nargs="*", default=None, help="ログを取得するサービス名（複数指定可）")
+    docker_logs_parser.add_argument("--tail", type=int, default=200, help="取得する末尾の行数（デフォルト: 200）")
+
+    # docker_list_containers
+    docker_list_parser = subparsers.add_parser(
+        "docker_list_containers",
+        help="Docker コンテナの一覧を取得します",
+    )
+    docker_list_parser.add_argument("--label", type=str, default=None, help='ラベルフィルター（"key=value" 形式）')
+    docker_list_parser.add_argument("--name", type=str, default=None, help="コンテナ名の部分一致フィルター")
+    docker_list_parser.add_argument("--running-only", action="store_true", help="実行中のコンテナのみ表示（デフォルトは全コンテナ）")
+
+    docker_list_images_parser = subparsers.add_parser(
+        "docker_list_images",
+        help="Docker イメージの一覧を取得します",
+    )
+    docker_list_images_parser.add_argument("--name", type=str, default=None, help="repository:tag の部分一致フィルター")
+
+    # docker_remove_containers
+    docker_rm_parser = subparsers.add_parser(
+        "docker_remove_containers",
+        help="Docker コンテナを削除します",
+    )
+    docker_rm_parser.add_argument("--container-ids", type=str, nargs="*", default=None, help="削除するコンテナ ID のリスト")
+    docker_rm_parser.add_argument("--label", type=str, default=None, help='ラベルフィルター（"key=value" 形式）にマッチするコンテナを全て削除')
+    docker_rm_parser.add_argument("--no-force", action="store_true", help="実行中のコンテナを強制削除しない")
+
+    docker_rmi_parser = subparsers.add_parser(
+        "docker_remove_images",
+        help="Docker イメージを削除します",
+    )
+    docker_rmi_parser.add_argument("--image-names", type=str, nargs="+", required=True, help="削除するイメージ名または ID")
+    docker_rmi_parser.add_argument("--force", action="store_true", help="使用中イメージも強制削除する")
+
+    # docker_generate_dockerfile
+    docker_gen_df_parser = subparsers.add_parser(
+        "docker_generate_dockerfile",
+        help="指示に基づいて Dockerfile を AI で生成します",
+    )
+    docker_gen_df_parser.add_argument("-p", "--instructions", type=str, required=True, help="Dockerfile の生成指示")
+    docker_gen_df_parser.add_argument("--base-image", type=str, default=None, help="ベースイメージ（例: python:3.12-slim）")
+    docker_gen_df_parser.add_argument("--language", type=str, default=None, help="言語/フレームワークのヒント（例: Python/FastAPI）")
+    docker_gen_df_parser.add_argument("--requirements", type=str, default=None, help="追加要件の説明")
+
+    # docker_generate_compose
+    docker_gen_compose_parser = subparsers.add_parser(
+        "docker_generate_compose",
+        help="指示に基づいて docker-compose.yml を AI で生成します",
+    )
+    docker_gen_compose_parser.add_argument("-p", "--instructions", type=str, required=True, help="docker-compose.yml の生成指示")
+    docker_gen_compose_parser.add_argument("--environment", type=str, default=None, help="環境の説明（例: 本番環境: nginx + FastAPI + PostgreSQL）")
+
     return parser
 
 
@@ -559,6 +675,128 @@ async def main(argv: Iterable[str] | None = None) -> None:
         )
         trace_id: str | None = None
         return await create_stdio_hitl_client(workflow_client, trace_id=trace_id).run(args.message)
+
+    if args.command == "docker_compose_up":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        env_dict = json.loads(args.env_vars) if args.env_vars else None
+        result = DockerOpsUtil.compose_up(
+            project_name=args.project_name,
+            compose_path=args.compose_file,
+            compose_content=args.compose_content,
+            project_directory=args.project_directory,
+            env_vars=env_dict,
+            service_names=args.services or None,
+            detach=not args.no_detach,
+            build=args.build,
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_compose_down":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        env_dict = json.loads(args.env_vars) if args.env_vars else None
+        result = DockerOpsUtil.compose_down(
+            project_name=args.project_name,
+            compose_path=args.compose_file,
+            compose_content=args.compose_content,
+            project_directory=args.project_directory,
+            env_vars=env_dict,
+            remove_volumes=args.remove_volumes,
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_compose_restart":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        env_dict = json.loads(args.env_vars) if args.env_vars else None
+        result = DockerOpsUtil.compose_restart(
+            project_name=args.project_name,
+            compose_path=args.compose_file,
+            compose_content=args.compose_content,
+            project_directory=args.project_directory,
+            env_vars=env_dict,
+            service_names=args.services or None,
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_compose_logs":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        env_dict = json.loads(args.env_vars) if args.env_vars else None
+        logs = DockerOpsUtil.compose_logs(
+            project_name=args.project_name,
+            compose_path=args.compose_file,
+            compose_content=args.compose_content,
+            project_directory=args.project_directory,
+            env_vars=env_dict,
+            service_names=args.services or None,
+            tail=args.tail,
+        )
+        print(logs)
+        return
+
+    if args.command == "docker_list_containers":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        containers = DockerOpsUtil.list_containers(
+            label_filter=args.label,
+            name_filter=args.name,
+            show_all=not args.running_only,
+        )
+        print(json.dumps([c.model_dump(mode="json") for c in containers], ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_list_images":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        images = DockerOpsUtil.list_images(
+            name_filter=args.name,
+        )
+        print(json.dumps([image.model_dump(mode="json") for image in images], ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_remove_containers":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        result = DockerOpsUtil.remove_containers(
+            container_ids=args.container_ids or None,
+            label_filter=args.label,
+            force=not args.no_force,
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_remove_images":
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        result = DockerOpsUtil.remove_images(
+            image_names=args.image_names,
+            force=args.force,
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "docker_generate_dockerfile":
+        from ai_chat_util.core.docker.docker_gen_util import DockerGenUtil
+        result = await DockerGenUtil.generate_dockerfile(
+            instructions=args.instructions,
+            base_image=args.base_image,
+            language=args.language,
+            additional_requirements=args.requirements,
+        )
+        print(result.content)
+        if result.explanation:
+            print("\n--- 説明 ---")
+            print(result.explanation)
+        return
+
+    if args.command == "docker_generate_compose":
+        from ai_chat_util.core.docker.docker_gen_util import DockerGenUtil
+        result = await DockerGenUtil.generate_compose(
+            instructions=args.instructions,
+            environment_description=args.environment,
+        )
+        print(result.content)
+        if result.explanation:
+            print("\n--- 説明 ---")
+            print(result.explanation)
+        return
 
     parser.print_help()
     raise SystemExit(1)

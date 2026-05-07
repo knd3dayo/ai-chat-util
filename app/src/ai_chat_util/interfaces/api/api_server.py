@@ -66,6 +66,21 @@ from ai_chat_util.core.analysis.analyze_file import (
     analyze_file_urls
 )
 
+from ai_chat_util.core.docker.docker_ops import (
+    docker_compose_up,
+    docker_compose_down,
+    docker_compose_restart,
+    docker_compose_logs,
+    docker_list_containers,
+    docker_list_images,
+    docker_remove_containers,
+    docker_remove_images,
+)
+from ai_chat_util.core.docker.docker_gen import (
+    docker_generate_dockerfile,
+    docker_generate_compose,
+)
+
 router = APIRouter()
 
 
@@ -170,6 +185,18 @@ router.add_api_route(path="/create_pdf_content_from_file", endpoint=create_pdf_c
 router.add_api_route(path="/create_office_content", endpoint=create_office_content, methods=["POST"])
 router.add_api_route(path="/create_office_content_from_file", endpoint=create_office_content_from_file, methods=["POST"])
 router.add_api_route(path="/create_multi_format_contents_from_file", endpoint=create_multi_format_contents_from_file, methods=["POST"])
+
+# docker operations
+router.add_api_route(path="/docker_compose_up", endpoint=docker_compose_up, methods=["POST"])
+router.add_api_route(path="/docker_compose_down", endpoint=docker_compose_down, methods=["POST"])
+router.add_api_route(path="/docker_compose_restart", endpoint=docker_compose_restart, methods=["POST"])
+router.add_api_route(path="/docker_compose_logs", endpoint=docker_compose_logs, methods=["POST"])
+router.add_api_route(path="/docker_list_containers", endpoint=docker_list_containers, methods=["GET", "POST"])
+router.add_api_route(path="/docker_list_images", endpoint=docker_list_images, methods=["GET", "POST"])
+router.add_api_route(path="/docker_remove_containers", endpoint=docker_remove_containers, methods=["POST"])
+router.add_api_route(path="/docker_remove_images", endpoint=docker_remove_images, methods=["POST"])
+router.add_api_route(path="/docker_generate_dockerfile", endpoint=docker_generate_dockerfile, methods=["POST"])
+router.add_api_route(path="/docker_generate_compose", endpoint=docker_generate_compose, methods=["POST"])
 
 # NOTE: include_router は、ルート定義が揃ってから呼ぶ（呼び出し時点の router.routes が登録される）
 app.include_router(prefix="/api/ai_chat_util", router=router)

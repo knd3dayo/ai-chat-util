@@ -54,6 +54,21 @@ from ai_chat_util.core.browser.browser_task import (
     run_browser_task_with_output,
 )
 
+from ai_chat_util.core.docker.docker_ops import (
+    docker_compose_up,
+    docker_compose_down,
+    docker_compose_restart,
+    docker_compose_logs,
+    docker_list_containers,
+    docker_list_images,
+    docker_remove_containers,
+    docker_remove_images,
+)
+from ai_chat_util.core.docker.docker_gen import (
+    docker_generate_dockerfile,
+    docker_generate_compose,
+)
+
 from ...core.log import log_settings
 logger = log_settings.getLogger(__name__)
 
@@ -73,6 +88,46 @@ def _build_tool_metadata_registry() -> dict[str, dict[str, str]]:
             "usage_guidance": (
                 "For write-capable usage, call this tool with dry_run=true first to preview the target image_dir and file pattern. "
                 "Only after approval should you call it again with dry_run=false to create files."
+            ),
+        },
+        "docker_compose_up": {
+            "requires_approval": "true",
+            "action_kind": "write",
+            "usage_guidance": (
+                "Starts Docker containers via docker compose. "
+                "Provide compose_content (YAML string) or compose_path (file path). "
+                "Use project_name to identify the project for subsequent down/restart/logs operations."
+            ),
+        },
+        "docker_compose_down": {
+            "requires_approval": "true",
+            "action_kind": "write",
+            "usage_guidance": (
+                "Stops and removes Docker containers. "
+                "Set remove_volumes=true only when volume data should also be deleted."
+            ),
+        },
+        "docker_compose_restart": {
+            "requires_approval": "true",
+            "action_kind": "write",
+            "usage_guidance": (
+                "Restarts Docker containers. Specify service_names to restart only specific services."
+            ),
+        },
+        "docker_remove_containers": {
+            "requires_approval": "true",
+            "action_kind": "write",
+            "usage_guidance": (
+                "Removes Docker containers by ID list or label filter. "
+                "Call docker_list_containers first to confirm which containers will be removed."
+            ),
+        },
+        "docker_remove_images": {
+            "requires_approval": "true",
+            "action_kind": "write",
+            "usage_guidance": (
+                "Removes Docker images by name or ID. "
+                "Stop dependent containers before calling this tool unless force=true is explicitly intended."
             ),
         },
     }
@@ -270,6 +325,18 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         # browser automation
         "run_browser_task": run_browser_task,
         "run_browser_task_with_output": run_browser_task_with_output,
+        # docker operations
+        "docker_compose_up": docker_compose_up,
+        "docker_compose_down": docker_compose_down,
+        "docker_compose_restart": docker_compose_restart,
+        "docker_compose_logs": docker_compose_logs,
+        "docker_list_containers": docker_list_containers,
+        "docker_list_images": docker_list_images,
+        "docker_remove_containers": docker_remove_containers,
+        "docker_remove_images": docker_remove_images,
+        # docker AI generation
+        "docker_generate_dockerfile": docker_generate_dockerfile,
+        "docker_generate_compose": docker_generate_compose,
         # debug helper
         "get_loaded_config_info": get_loaded_config_info,
     }

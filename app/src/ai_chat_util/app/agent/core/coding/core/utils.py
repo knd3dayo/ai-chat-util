@@ -50,10 +50,8 @@ class ExecutorUtil:
     @staticmethod
     def get_container_logs(container, tail: int = 200) -> tuple[str, str]:
         """docker コンテナの stdout/stderr を取得して (stdout, stderr) を返します。"""
-        # docker SDK の tail は str/int を受け付ける
-        out = container.logs(stdout=True, stderr=False, tail=tail)
-        err = container.logs(stdout=False, stderr=True, tail=tail)
-        return out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
+        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
+        return DockerOpsUtil.get_container_logs(container, tail)
 
     @staticmethod
     def extract_zip_to_dir(zip_file: Union[UploadFile, pathlib.Path], dest_dir: pathlib.Path) -> None:

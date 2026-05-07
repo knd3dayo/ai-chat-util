@@ -27,6 +27,7 @@ class BrowserTaskUtil:
         max_steps: int = 50,
         use_vision: bool = True,
         save_gif_path: str | None = None,
+        executable_path: str | Path | None = None,
     ) -> BrowserTaskResult:
         """Execute a browser automation task and return the result as plain text.
 
@@ -50,10 +51,13 @@ class BrowserTaskUtil:
             allowed_domains,
         )
 
-        browser_profile = BrowserProfile(
-            headless=headless,
-            allowed_domains=allowed_domains or [],
-        )
+        profile_kwargs: dict = {
+            "headless": headless,
+            "allowed_domains": allowed_domains or [],
+        }
+        if executable_path is not None:
+            profile_kwargs["executable_path"] = Path(executable_path)
+        browser_profile = BrowserProfile(**profile_kwargs)
         browser_session = BrowserSession(browser_profile=browser_profile)
 
         generate_gif: bool | str = save_gif_path if save_gif_path else False
@@ -93,6 +97,7 @@ class BrowserTaskUtil:
         max_steps: int = 50,
         use_vision: bool = True,
         save_gif_path: str | None = None,
+        executable_path: str | Path | None = None,
     ) -> BrowserTaskResult:
         """Execute a browser automation task with structured (Pydantic model) output.
 
@@ -118,10 +123,13 @@ class BrowserTaskUtil:
             allowed_domains,
         )
 
-        browser_profile = BrowserProfile(
-            headless=headless,
-            allowed_domains=allowed_domains or [],
-        )
+        profile_kwargs2: dict = {
+            "headless": headless,
+            "allowed_domains": allowed_domains or [],
+        }
+        if executable_path is not None:
+            profile_kwargs2["executable_path"] = Path(executable_path)
+        browser_profile = BrowserProfile(**profile_kwargs2)
         browser_session = BrowserSession(browser_profile=browser_profile)
 
         generate_gif: bool | str = save_gif_path if save_gif_path else False

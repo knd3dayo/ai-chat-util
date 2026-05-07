@@ -1,9 +1,23 @@
+from pathlib import Path
+
 from browser_use.llm.openai.chat import ChatOpenAI
 
 from ai_chat_util.core.common.config.runtime import get_runtime_config
 import ai_chat_util.core.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
+
+# Default Chromium binary installed by `playwright install chromium`
+_PLAYWRIGHT_CHROMIUM_GLOB = "~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome"
+
+
+def get_default_chromium_path() -> Path | None:
+    """Return the path of the Playwright-managed Chromium binary, or None if not found."""
+    import glob
+    matches = sorted(glob.glob(str(Path(_PLAYWRIGHT_CHROMIUM_GLOB).expanduser())))
+    if matches:
+        return Path(matches[-1])
+    return None
 
 
 def create_browser_llm() -> ChatOpenAI:

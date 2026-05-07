@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field, create_model
 
-from ai_chat_util.core.browser.base import create_browser_llm
+from ai_chat_util.core.browser.base import create_browser_llm, get_default_chromium_path
 from ai_chat_util.core.browser.browser_task_util import BrowserTaskUtil
 import ai_chat_util.core.log.log_settings as log_settings
 
@@ -50,6 +50,9 @@ async def run_browser_task(
         max_steps,
     )
     browser_llm = create_browser_llm()
+    executable_path = get_default_chromium_path()
+    if executable_path:
+        logger.debug("Using Chromium at %s", executable_path)
     try:
         result = await BrowserTaskUtil.run_task(
             task=task,
@@ -59,6 +62,7 @@ async def run_browser_task(
             max_steps=max_steps,
             use_vision=use_vision,
             save_gif_path=save_gif_path,
+            executable_path=executable_path,
         )
         return result.output
     except Exception:
@@ -117,6 +121,9 @@ async def run_browser_task_with_output(
         max_steps,
     )
     browser_llm = create_browser_llm()
+    executable_path = get_default_chromium_path()
+    if executable_path:
+        logger.debug("Using Chromium at %s", executable_path)
     try:
         schema_dict = json.loads(output_schema_json)
         properties: dict = schema_dict.get("properties", {})
@@ -149,6 +156,7 @@ async def run_browser_task_with_output(
             max_steps=max_steps,
             use_vision=use_vision,
             save_gif_path=save_gif_path,
+            executable_path=executable_path,
         )
         return result.output
     except Exception:

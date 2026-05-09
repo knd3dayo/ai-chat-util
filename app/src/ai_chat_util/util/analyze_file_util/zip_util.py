@@ -25,19 +25,60 @@ class ZipUtil:
 
     @classmethod
     def extract_zip(cls, file_path, extract_to, password=None) -> bool:
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            system_encoding = cls.__get_system_encoding()
-            is_utf = cls.__check_utf8_flag(zip_ref)
-            if password:
-                zip_ref.setpassword(password.encode())
-            for info in zip_ref.infolist():
-                name = info.filename
-                if not is_utf:
-                    name = cls.__decode_legacy_filename(name, system_encoding)
-                info.filename = name
-                zip_ref.extract(info, path=extract_to)
+        # First pass: extract to a temporary location and detect structure
+        temp_extract = Path(extract_to) / "_temp_zip_extract"
+        temp_extract.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                system_encoding = cls.__get_system_encoding()
+                is_utf = cls.__check_utf8_flag(zip_ref)
+                if password:
+                    zip_ref.setpassword(password.encode())
+                for info in zip_ref.infolist():
+                    name = info.filename
+                    if not is_utf:
+                        name = cls.__decode_legacy_filename(name, system_encoding)
+                    info.filename = name
+                    zip_ref.extract(info, path=str(temp_extract))
 
-        return True
+            # Check if all contents are in a single top-level directory
+            items = list(temp_extract.iterdir())
+            if len(items) == 1 and items[0].is_dir():
+                # All files are in a single subdirectory - move its contents up
+                subdir = items[0]
+                for item in subdir.iterdir():
+                    dest_path = Path(extract_to) / item.name
+                    # Handle existing files/directories
+                    if dest_path.exists():
+                        if dest_path.is_dir():
+                            import shutil
+                            shutil.rmtree(dest_path)
+                        else:
+                            dest_path.unlink()
+                    item.rename(dest_path)
+                subdir.rmdir()
+            else:
+                # Multiple top-level items or files - keep as-is, move from temp
+                for item in temp_extract.iterdir():
+                    dest_path = Path(extract_to) / item.name
+                    if dest_path.exists():
+                        if dest_path.is_dir():
+                            import shutil
+                            shutil.rmtree(dest_path)
+                        else:
+                            dest_path.unlink()
+                    item.rename(dest_path)
+            
+            # Clean up temp directory
+            temp_extract.rmdir()
+            return True
+        except Exception:
+            # On error, clean up temp and re-raise
+            import shutil
+            if temp_extract.exists():
+                shutil.rmtree(temp_extract, ignore_errors=True)
+            raise
 
 
     @classmethod

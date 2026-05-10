@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import time
 import traceback
 from pathlib import Path
@@ -73,10 +75,32 @@ class BrowserTaskUtil:
         )
 
         try:
-            history = await agent.run(max_steps=max_steps)
+            # Protect against agent.run hanging indefinitely by applying a timeout.
+            timeout_s = int(os.getenv("BROWSER_TASK_TIMEOUT", "60"))
+            try:
+                history = await asyncio.wait_for(agent.run(max_steps=max_steps), timeout=timeout_s)
+            except asyncio.TimeoutError as exc:  # pragma: no cover - runtime watchdog
+                logger.exception("BROWSER_TASK_TIMEOUT after %s seconds", timeout_s)
+                return BrowserTaskResult(
+                    output=_build_error_output("run_task", TimeoutError(f"agent.run timed out after {timeout_s} seconds")),
+                    is_done=False,
+                    n_steps=0,
+                )
+
             output: str = history.final_result() or ""
             is_done: bool = history.is_done()
             n_steps: int = len(history)
+            # If no output was produced and agent did not finish, provide a diagnostic hint
+            if not output and not is_done:
+                diag = {
+                    "ok": False,
+                    "operation": "run_task",
+                    "error_type": "NoOutput",
+                    "error_message": "Agent produced no output and did not finish. Possible browser launch or LLM error.",
+                    "hint": "Check that Playwright/browser binaries are installed and that the LLM configuration (API key/base_url) is correct.",
+                }
+                logger.warning("BROWSER_TASK_NO_OUTPUT likely failure: %s", diag)
+                return BrowserTaskResult(output=json.dumps(diag), is_done=is_done, n_steps=n_steps)
             logger.info(
                 "BROWSER_TASK_END is_done=%s n_steps=%d elapsed_ms=%d",
                 is_done,
@@ -153,10 +177,31 @@ class BrowserTaskUtil:
         )
 
         try:
-            history = await agent.run(max_steps=max_steps)
+            # Apply a timeout to avoid hanging indefinitely.
+            timeout_s = int(os.getenv("BROWSER_TASK_TIMEOUT", "60"))
+            try:
+                history = await asyncio.wait_for(agent.run(max_steps=max_steps), timeout=timeout_s)
+            except asyncio.TimeoutError as exc:  # pragma: no cover - runtime watchdog
+                logger.exception("BROWSER_TASK_STRUCTURED_TIMEOUT after %s seconds", timeout_s)
+                return BrowserTaskResult(
+                    output=_build_error_output("run_task_with_output", TimeoutError(f"agent.run timed out after {timeout_s} seconds")),
+                    is_done=False,
+                    n_steps=0,
+                )
+
             raw: str = history.final_result() or ""
             is_done: bool = history.is_done()
             n_steps: int = len(history)
+            if not raw and not is_done:
+                diag = {
+                    "ok": False,
+                    "operation": "run_task_with_output",
+                    "error_type": "NoOutput",
+                    "error_message": "Agent produced no output and did not finish. Possible browser launch or LLM error.",
+                    "hint": "Check that Playwright/browser binaries are installed and that the LLM configuration (API key/base_url) is correct.",
+                }
+                logger.warning("BROWSER_TASK_STRUCTURED_NO_OUTPUT likely failure: %s", diag)
+                return BrowserTaskResult(output=json.dumps(diag), is_done=is_done, n_steps=n_steps)
             logger.info(
                 "BROWSER_TASK_STRUCTURED_END is_done=%s n_steps=%d elapsed_ms=%d",
                 is_done,

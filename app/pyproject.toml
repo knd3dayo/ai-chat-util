@@ -49,6 +49,7 @@ dependencies = [
     "deepagents",
     "psutil",
     "browser-use",
+    "playwright",
     "pywin32; sys_platform == 'win32'"
 ]
 

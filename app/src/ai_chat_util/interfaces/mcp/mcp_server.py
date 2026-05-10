@@ -242,7 +242,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
                 with bind_current_request_headers(headers_obj):
                     try:
                         if is_async:
-                            result = await func(*args, **kwargs)
+                            result = await func(*args, **kwargs) # type: ignore
                         else:
                             result = func(*args, **kwargs)
                     except Exception:

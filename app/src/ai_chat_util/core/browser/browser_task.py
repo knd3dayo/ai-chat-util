@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from typing import Annotated
 
 from pydantic import Field, create_model
@@ -65,9 +66,9 @@ async def run_browser_task(
             executable_path=executable_path,
         )
         return result.output
-    except Exception:
+    except Exception as exc:
         logger.exception("MCP_TOOL_ERR tool=run_browser_task")
-        raise
+        return _format_exception_response("run_browser_task", exc)
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info("MCP_TOOL_END tool=run_browser_task elapsed_ms=%s", elapsed_ms)
@@ -159,9 +160,9 @@ async def run_browser_task_with_output(
             executable_path=executable_path,
         )
         return result.output
-    except Exception:
+    except Exception as exc:
         logger.exception("MCP_TOOL_ERR tool=run_browser_task_with_output")
-        raise
+        return _format_exception_response("run_browser_task_with_output", exc)
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.info("MCP_TOOL_END tool=run_browser_task_with_output elapsed_ms=%s", elapsed_ms)
@@ -178,3 +179,17 @@ def _json_schema_type_to_python(type_str: str) -> type:
         "object": dict,
     }
     return mapping.get(type_str, str)
+
+
+def _format_exception_response(tool_name: str, exc: Exception) -> str:
+    """Return a JSON string with error details and full traceback for callers."""
+    return json.dumps(
+        {
+            "ok": False,
+            "tool": tool_name,
+            "exception_occurred": True,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+    )

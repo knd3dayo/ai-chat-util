@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 import traceback
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import Field, create_model
 
@@ -12,6 +12,14 @@ from ai_chat_util.core.browser.browser_task_util import BrowserTaskUtil
 import ai_chat_util.core.log.log_settings as log_settings
 
 logger = log_settings.getLogger(__name__)
+
+
+_JSON_SCHEMA_PRIMITIVE_TYPES: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
 
 
 async def run_browser_task(
@@ -127,26 +135,13 @@ async def run_browser_task_with_output(
         logger.debug("Using Chromium at %s", executable_path)
     try:
         schema_dict = json.loads(output_schema_json)
-        properties: dict = schema_dict.get("properties", {})
-        if not properties:
-            raise ValueError(
-                "output_schema_json must be a JSON object schema with a 'properties' key. "
-                f"Got: {output_schema_json!r}"
-            )
-
-        # Build a dynamic Pydantic model from the JSON Schema properties
-        field_definitions: dict = {}
-        for field_name, field_info in properties.items():
-            field_type_str: str = field_info.get("type", "string")
-            python_type = _json_schema_type_to_python(field_type_str)
-            description = field_info.get("description", "")
-            required: list = schema_dict.get("required", [])
-            if field_name in required:
-                field_definitions[field_name] = (python_type, Field(description=description))
-            else:
-                field_definitions[field_name] = (python_type | None, Field(default=None, description=description))
-
-        output_model = create_model("BrowserOutput", **field_definitions)
+        output_model = _build_output_model_from_schema(schema_dict)
+        model_schema = output_model.model_json_schema()
+        logger.debug(
+            "BROWSER_OUTPUT_SCHEMA_BUILT fields=%s array_item_types=%s",
+            sorted((model_schema.get("properties") or {}).keys()),
+            _extract_array_item_types(model_schema),
+        )
 
         result = await BrowserTaskUtil.run_task_with_output(
             task=task,
@@ -170,15 +165,112 @@ async def run_browser_task_with_output(
 
 def _json_schema_type_to_python(type_str: str) -> type:
     """Map a JSON Schema primitive type string to a Python type."""
-    mapping: dict[str, type] = {
-        "string": str,
-        "integer": int,
-        "number": float,
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
-    return mapping.get(type_str, str)
+    return _JSON_SCHEMA_PRIMITIVE_TYPES[type_str]
+
+
+def _build_output_model_from_schema(schema_dict: dict[str, Any]) -> type[Any]:
+    """Build a dynamic Pydantic model from a constrained JSON Schema subset."""
+    properties, required_fields = _validate_output_schema(schema_dict)
+
+    field_definitions: dict[str, tuple[Any, Field]] = {}
+    for field_name, field_schema in properties.items():
+        python_type = _json_schema_field_to_python(field_name, field_schema)
+        description = str(field_schema.get("description", ""))
+        if field_name in required_fields:
+            field_definitions[field_name] = (python_type, Field(description=description))
+        else:
+            field_definitions[field_name] = (python_type | None, Field(default=None, description=description))
+
+    return create_model("BrowserOutput", **field_definitions)
+
+
+def _validate_output_schema(schema_dict: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Validate supported output schema shape and return normalized properties/required set."""
+    properties_obj = schema_dict.get("properties")
+    if not isinstance(properties_obj, dict) or not properties_obj:
+        raise ValueError("output_schema_json must be a JSON object schema with a non-empty 'properties' key.")
+
+    required_obj = schema_dict.get("required", [])
+    if not isinstance(required_obj, list) or not all(isinstance(x, str) for x in required_obj):
+        raise ValueError("output_schema_json 'required' must be a list of property names when present.")
+    required_fields = set(required_obj)
+
+    normalized_properties: dict[str, dict[str, Any]] = {}
+    for field_name, field_schema in properties_obj.items():
+        if not isinstance(field_schema, dict):
+            raise ValueError(f"Property '{field_name}' must be an object schema.")
+        field_type = field_schema.get("type")
+        if not isinstance(field_type, str):
+            raise ValueError(f"Property '{field_name}' must define a string 'type'.")
+        if field_type == "array":
+            items_schema = field_schema.get("items")
+            if not isinstance(items_schema, dict) or not isinstance(items_schema.get("type"), str):
+                raise ValueError(f"Array property '{field_name}' must define 'items.type'.")
+        normalized_properties[field_name] = field_schema
+
+    return normalized_properties, required_fields
+
+
+def _json_schema_field_to_python(field_name: str, field_schema: dict[str, Any]) -> Any:
+    """Convert one JSON Schema field into a Python typing annotation."""
+    field_type = field_schema["type"]
+
+    if field_type in _JSON_SCHEMA_PRIMITIVE_TYPES:
+        return _json_schema_type_to_python(field_type)
+    if field_type == "object":
+        return dict[str, Any]
+    if field_type == "array":
+        items_schema = field_schema["items"]
+        return list[_json_schema_array_item_to_python(field_name, items_schema)]
+
+    raise ValueError(f"Unsupported type for property '{field_name}': {field_type!r}")
+
+
+def _json_schema_array_item_to_python(field_name: str, items_schema: dict[str, Any]) -> Any:
+    """Convert JSON Schema array item schema into a Python typing annotation."""
+    item_type = items_schema.get("type")
+    if item_type in _JSON_SCHEMA_PRIMITIVE_TYPES:
+        return _json_schema_type_to_python(item_type)
+    if item_type == "object":
+        return dict[str, Any]
+    if item_type == "array":
+        nested_items_schema = items_schema.get("items")
+        if not isinstance(nested_items_schema, dict):
+            raise ValueError(f"Nested array in property '{field_name}' must define object 'items'.")
+        return list[_json_schema_array_item_to_python(field_name, nested_items_schema)]
+
+    raise ValueError(f"Unsupported array items.type for property '{field_name}': {item_type!r}")
+
+
+def _extract_array_item_types(model_schema: dict[str, Any]) -> dict[str, str]:
+    """Extract top-level array item types from generated model schema for diagnostics."""
+    extracted: dict[str, str] = {}
+    properties = model_schema.get("properties")
+    if not isinstance(properties, dict):
+        return extracted
+
+    for field_name, field_schema in properties.items():
+        if not isinstance(field_schema, dict):
+            continue
+
+        raw_schema = field_schema
+        candidates = field_schema.get("anyOf")
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if isinstance(candidate, dict) and candidate.get("type") == "array":
+                    raw_schema = candidate
+                    break
+
+        if raw_schema.get("type") != "array":
+            continue
+
+        items = raw_schema.get("items")
+        if isinstance(items, dict):
+            extracted[field_name] = str(items.get("type", "(missing)"))
+        else:
+            extracted[field_name] = "(missing)"
+
+    return extracted
 
 
 def _format_exception_response(tool_name: str, exc: Exception) -> str:

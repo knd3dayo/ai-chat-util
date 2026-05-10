@@ -91,3 +91,28 @@ async def analyze_files(
         detail,
     )
     return response.output
+
+
+async def analyze_documents_data(
+        document_type_list: Annotated[list[FileUtilDocument], Field(description="List of file documents with bytes payload and identifier")],
+        prompt: Annotated[str, Field(description="Prompt to analyze the files")],
+        detail: Annotated[
+            Literal["low", "high", "auto"],
+            Field(
+                description=(
+                    "Detail level for analysis. Use 'auto' for model default, 'low' for cost-aware, 'high' for richer extraction"
+                )
+            ),
+        ] = "auto",
+    ) -> Annotated[str, Field(description="Analysis result of the files")]:
+    """
+    This function analyzes file documents provided as in-memory data and returns the analysis result.
+    """
+    llm_client = create_llm_client()
+    response = await AnalyzeFileUtil.analyze_documents_data(
+        llm_client,
+        document_type_list,
+        prompt,
+        detail,
+    )
+    return response.output

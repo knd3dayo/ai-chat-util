@@ -42,12 +42,12 @@ from ai_chat_util.core.analysis.analyze_office import (
 )
 from ai_chat_util.core.analysis.analyze_file import (
     analyze_files,
+    analyze_documents_data,
 )
 from ai_chat_util.core.analysis.analyze_log import (
     extract_time_range_from_logfile,
     infer_log_header_pattern,
 )
-from ai_chat_util.core.analysis.analyze_util import AnalyzeFileUtil
 
 from ai_chat_util.core.browser.browser_task import (
     run_browser_task,
@@ -300,7 +300,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_pdf_files": analyze_pdf_files,
         "analyze_office_files": analyze_office_files,
         "analyze_files": analyze_files,
-        "analyze_documents_data": AnalyzeFileUtil.analyze_documents_data,
+        "analyze_documents_data": analyze_documents_data,
         "analyze_image_urls": analyze_image_urls,
         "analyze_pdf_urls": analyze_pdf_urls,
         "analyze_office_urls": analyze_office_urls,

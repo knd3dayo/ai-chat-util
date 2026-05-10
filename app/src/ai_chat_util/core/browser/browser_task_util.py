@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -82,8 +84,15 @@ class BrowserTaskUtil:
                 int((time.perf_counter() - started) * 1000),
             )
             return BrowserTaskResult(output=output, is_done=is_done, n_steps=n_steps)
+        except Exception as exc:
+            logger.exception("BROWSER_TASK_ERR")
+            return BrowserTaskResult(
+                output=_build_error_output("run_task", exc),
+                is_done=False,
+                n_steps=0,
+            )
         finally:
-            await browser_session.kill()
+            await _safe_kill(browser_session)
 
     @classmethod
     async def run_task_with_output(
@@ -155,5 +164,33 @@ class BrowserTaskUtil:
                 int((time.perf_counter() - started) * 1000),
             )
             return BrowserTaskResult(output=raw, is_done=is_done, n_steps=n_steps)
+        except Exception as exc:
+            logger.exception("BROWSER_TASK_STRUCTURED_ERR")
+            return BrowserTaskResult(
+                output=_build_error_output("run_task_with_output", exc),
+                is_done=False,
+                n_steps=0,
+            )
         finally:
-            await browser_session.kill()
+            await _safe_kill(browser_session)
+
+
+def _build_error_output(operation: str, exc: Exception) -> str:
+    """Build a JSON string that callers can parse when task execution fails."""
+    return json.dumps(
+        {
+            "ok": False,
+            "operation": operation,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+    )
+
+
+async def _safe_kill(browser_session: BrowserSession) -> None:
+    """Close browser session without masking previous errors/returns."""
+    try:
+        await browser_session.kill()
+    except Exception:
+        logger.exception("BROWSER_SESSION_KILL_ERR")

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from io import BytesIO
+import itertools
 import os
 import uuid
 import tempfile
-import atexit
 from typing import Annotated
 
 from pathlib import Path
@@ -79,15 +79,15 @@ class FileUtilLLMMessages:
             sheet = workbook[sheet_name]
             parts.append(f"[Sheet] {sheet_name}")
             row_count = 0
-            for row in sheet.iter_rows(values_only=True):
+            for row in itertools.islice(sheet.iter_rows(values_only=True), self._OFFICE_EXTRACT_MAX_ROWS_PER_SHEET + 1):
                 values = ["" if value is None else str(value).strip() for value in row[: self._OFFICE_EXTRACT_MAX_COLS_PER_ROW]]
                 if not any(values):
                     continue
-                parts.append(" | ".join(values))
-                row_count += 1
                 if row_count >= self._OFFICE_EXTRACT_MAX_ROWS_PER_SHEET:
                     parts.append("[Truncated additional rows]")
                     break
+                parts.append(" | ".join(values))
+                row_count += 1
 
         workbook.close()
         return "\n".join(parts).strip()
@@ -151,20 +151,18 @@ class FileUtilLLMMessages:
         return self.create_image_content(FileUtilDocument.from_file(file_path), detail)
 
     def create_image_content_from_url(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [file_url],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-        document = FileUtilDocument.from_file(file_paths[0])
-        return self.llm_client.get_message_factory()._create_image_content_(
-            document.identifier, document.data, detail
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requests_verify, ca_bundle = self._get_network_download_options()
+            file_paths = DownLoader.download_files(
+                [file_url],
+                tmpdir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
+            document = FileUtilDocument.from_file(file_paths[0])
+            return self.llm_client.get_message_factory()._create_image_content_(
+                document.identifier, document.data, detail
+            )
 
     async def create_image_content_from_url_async(self, file_url: WebRequestModel, detail: str) -> list["ChatContent"]:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -198,17 +196,15 @@ class FileUtilLLMMessages:
             return self.create_pdf_content(FileUtilDocument.from_file(file_path), detail=detail)
 
     def create_pdf_content_from_url(self, file_url: str, detail: str = "auto") -> list["ChatContent"]:
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-        return self.create_pdf_content_from_file(file_paths[0], detail=detail)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requests_verify, ca_bundle = self._get_network_download_options()
+            file_paths = DownLoader.download_files(
+                [WebRequestModel(url=file_url)],
+                tmpdir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
+            return self.create_pdf_content_from_file(file_paths[0], detail=detail)
 
     def _create_custom_pdf_content_from_file(self, file_path: str, detail: str = "auto") -> list["ChatContent"]:
         '''
@@ -246,47 +242,46 @@ class FileUtilLLMMessages:
             )
 
         try:
-            temp_dir = tempfile.TemporaryDirectory()
-            atexit.register(temp_dir.cleanup)
-            temp_file_path = os.path.join(
-                temp_dir.name,
-                f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf"
-            )
-            source_suffix = Path(document_type.identifier).suffix
-            source_name = f"input_document{source_suffix}" if source_suffix else "input_document"
-            source_path = Path(temp_dir.name) / source_name
-            source_path.write_bytes(document_type.data)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_file_path = os.path.join(
+                    temp_dir,
+                    f"{os.path.basename(document_type.identifier)}_{uuid.uuid4()}.pdf"
+                )
+                source_suffix = Path(document_type.identifier).suffix
+                source_name = f"input_document{source_suffix}" if source_suffix else "input_document"
+                source_path = Path(temp_dir) / source_name
+                source_path.write_bytes(document_type.data)
 
-            if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
-                LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    libreoffice_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
-                )
-            elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
-                LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    api_url=effective_config.office2pdf.libreoffice_uno.api_url,
-                )
-            elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
-                Pywin32Office2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    office_path=effective_config.office2pdf.pywin32.office_path,
-                )
-            else:
-                raise RuntimeError(f"Unsupported Office2PDF method: {office2pdf_method}")
-            explanation_text = f"""
+                if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
+                    LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        libreoffice_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
+                    )
+                elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
+                    LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        api_url=effective_config.office2pdf.libreoffice_uno.api_url,
+                    )
+                elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
+                    Pywin32Office2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        office_path=effective_config.office2pdf.pywin32.office_path,
+                    )
+                else:
+                    raise RuntimeError(f"Unsupported Office2PDF method: {office2pdf_method}")
+                explanation_text = f"""
                 {temp_file_path}は、元のOfficeドキュメント: {document_type.identifier} をPDFに変換したものです。
                 ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
                 """
-            explanation_content = self.create_text_content(text=explanation_text)
-            pdf_contents = [explanation_content]
-
-            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
-
-            return pdf_contents
+                explanation_content = self.create_text_content(text=explanation_text)
+                pdf_contents = [explanation_content]
+                pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
+                return pdf_contents
+        except RuntimeError:
+            raise
         except Exception:
             logger.warning(
                 "Failed to convert office document to PDF with method %s for %s",
@@ -328,42 +323,43 @@ class FileUtilLLMMessages:
             )
 
         try:
-            temp_dir = tempfile.TemporaryDirectory(dir=source_path.parent)
-            atexit.register(temp_dir.cleanup)
-            temp_file_path = os.path.join(
-                temp_dir.name,
-                f"{source_path.stem}_{uuid.uuid4()}.pdf"
-            )
+            with tempfile.TemporaryDirectory(dir=source_path.parent) as temp_dir:
+                temp_file_path = os.path.join(
+                    temp_dir,
+                    f"{source_path.stem}_{uuid.uuid4()}.pdf"
+                )
 
-            if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
-                LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    libreoffice_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
-                )
-            elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
-                LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    api_url=effective_config.office2pdf.libreoffice_uno.api_url,
-                )
-            elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
-                Pywin32Office2PDFUtil.create_pdf_from_document_file(
-                    input_path=str(source_path),
-                    output_path=temp_file_path,
-                    office_path=effective_config.office2pdf.pywin32.office_path,
-                )
-            else:
-                raise RuntimeError(f"Unsupported Office2PDF method: {office2pdf_method}")
+                if office2pdf_method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
+                    LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        libreoffice_path=effective_config.office2pdf.libreoffice_exec.libreoffice_path,
+                    )
+                elif office2pdf_method == LibreOfficeUnoOffice2PDFUtil.METHOD_NAME:
+                    LibreOfficeUnoOffice2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        api_url=effective_config.office2pdf.libreoffice_uno.api_url,
+                    )
+                elif office2pdf_method == Pywin32Office2PDFUtil.METHOD_NAME:
+                    Pywin32Office2PDFUtil.create_pdf_from_document_file(
+                        input_path=str(source_path),
+                        output_path=temp_file_path,
+                        office_path=effective_config.office2pdf.pywin32.office_path,
+                    )
+                else:
+                    raise RuntimeError(f"Unsupported Office2PDF method: {office2pdf_method}")
 
-            explanation_text = f"""
+                explanation_text = f"""
                 {temp_file_path}は、元のOfficeドキュメント: {file_path} をPDFに変換したものです。
                 ユーザーにどのファイルを元にしたのかを伝えるため、回答を行う際には、元のファイル名を使用してください。
                 """
-            explanation_content = self.create_text_content(text=explanation_text)
-            pdf_contents = [explanation_content]
-            pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
-            return pdf_contents
+                explanation_content = self.create_text_content(text=explanation_text)
+                pdf_contents = [explanation_content]
+                pdf_contents.extend(self.create_pdf_content_from_file(temp_file_path, detail=detail))
+                return pdf_contents
+        except RuntimeError:
+            raise
         except Exception:
             logger.warning(
                 "Failed to convert office document to PDF with method %s for %s",
@@ -379,22 +375,20 @@ class FileUtilLLMMessages:
         '''
         複数のOfficeドキュメントとプロンプトからドキュメント解析を行う。各ドキュメントのテキスト抽出、各ドキュメントの説明、プロンプト応答を生成して返す
         '''
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requests_verify, ca_bundle = self._get_network_download_options()
+            file_paths = DownLoader.download_files(
+                [WebRequestModel(url=file_url)],
+                tmpdir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
 
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-
-        office_contents = []
-        for file_path in file_paths:
-            content = self.create_office_content_from_file(
-                file_path, detail=detail)
-            office_contents.extend(content)
+            office_contents = []
+            for file_path in file_paths:
+                content = self.create_office_content_from_file(
+                    file_path, detail=detail)
+                office_contents.extend(content)
 
         return office_contents
 
@@ -451,17 +445,16 @@ class FileUtilLLMMessages:
         '''
         複数形式ファイルから、テキスト抽出と画像抽出を行い、ChatContentのリストを生成して返す
         '''
-        tmpdir = tempfile.TemporaryDirectory()
-        atexit.register(tmpdir.cleanup)
-        requests_verify, ca_bundle = self._get_network_download_options()
-        file_paths = DownLoader.download_files(
-            [WebRequestModel(url=file_url)],
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requests_verify, ca_bundle = self._get_network_download_options()
+            file_paths = DownLoader.download_files(
+                [WebRequestModel(url=file_url)],
+                tmpdir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
 
-        return self.create_multi_format_contents_from_file(
-            file_paths[0], detail=detail
-        )
+            return self.create_multi_format_contents_from_file(
+                file_paths[0], detail=detail
+            )
 

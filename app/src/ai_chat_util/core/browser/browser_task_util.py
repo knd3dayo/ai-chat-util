@@ -79,6 +79,16 @@ class BrowserTaskUtil:
             if err_json is not None:
                 return BrowserTaskResult(output=err_json, is_done=False, n_steps=0)
 
+            # mypy/pylance: _run_agent_with_timeout returns Optional[history] on error paths,
+            # but above we already handled err_json != None. Guard defensively so static
+            # type checkers know history is not None and to avoid runtime surprises.
+            if history is None:
+                return BrowserTaskResult(
+                    output=_build_error_output("run_task", RuntimeError("agent returned no history")),
+                    is_done=False,
+                    n_steps=0,
+                )
+
             output: str = history.final_result() or ""
             is_done: bool = history.is_done()
             n_steps: int = len(history)
@@ -166,6 +176,13 @@ class BrowserTaskUtil:
             if err_json is not None:
                 return BrowserTaskResult(output=err_json, is_done=False, n_steps=0)
 
+            if history is None:
+                return BrowserTaskResult(
+                    output=_build_error_output("run_task_with_output", RuntimeError("agent returned no history")),
+                    is_done=False,
+                    n_steps=0,
+                )
+
             raw: str = history.final_result() or ""
             is_done: bool = history.is_done()
             n_steps: int = len(history)
@@ -211,7 +228,7 @@ async def _safe_kill(browser_session: BrowserSession) -> None:
         logger.exception("BROWSER_SESSION_KILL_ERR")
 
 
-async def _run_agent_with_timeout(agent: Any, max_steps: int, operation: str) -> tuple[object | None, str | None]:
+async def _run_agent_with_timeout(agent: Any, max_steps: int, operation: str) -> tuple[Any | None, str | None]:
     """Run agent.run with a timeout and return (history, error_json_or_none).
 
     On success returns (history, None). On failure returns (None, json_error_string).

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any, Sequence
 
@@ -63,7 +64,7 @@ class DownLoader:
         requests_verify: bool = True,
         ca_bundle: str | None = None,
     ) -> list[str]:
-        """Download files asynchronously for async workflows."""
+        """Download files asynchronously and in parallel for async workflows."""
         try:
             import httpx
         except Exception as e:
@@ -72,18 +73,20 @@ class DownLoader:
         verify = _get_verify_option(requests_verify=requests_verify, ca_bundle=ca_bundle)
         timeout = httpx.Timeout(60.0, connect=10.0)
 
-        file_paths: list[str] = []
+        async def _fetch_one(client: httpx.AsyncClient, item: Any) -> str:
+            resp = await client.get(item.url, headers=_get_headers(item))
+            resp.raise_for_status()
+            file_path = os.path.join(download_dir, _get_file_name_from_url(item.url))
+            with open(file_path, "wb") as f:
+                f.write(resp.content)
+            return file_path
+
         async with httpx.AsyncClient(verify=verify, timeout=timeout, follow_redirects=True) as client:
-            for item in urls:
-                resp = await client.get(item.url, headers=_get_headers(item))
-                resp.raise_for_status()
+            file_paths: list[str] = await asyncio.gather(
+                *[_fetch_one(client, item) for item in urls]
+            )
 
-                file_path = os.path.join(download_dir, _get_file_name_from_url(item.url))
-                with open(file_path, "wb") as f:
-                    f.write(resp.content)
-                file_paths.append(file_path)
-
-        return file_paths
+        return list(file_paths)
 
 
 __all__ = ["DownLoader"]

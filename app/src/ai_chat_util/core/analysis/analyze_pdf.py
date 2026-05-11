@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
+import asyncio
 import tempfile
-import atexit
 import time
 from itertools import count
 from pathlib import Path
@@ -52,23 +52,22 @@ async def analyze_pdf_urls(
         len(pdf_path_urls or []),
         detail,
     )
-    tmpdir = tempfile.TemporaryDirectory()
-    atexit.register(tmpdir.cleanup)
     llm_client = create_llm_client()
     try:
-        requests_verify, ca_bundle = _get_network_download_options()
-        path_list = DownLoader.download_files(
-            pdf_path_urls,
-            tmpdir.name,
-            requests_verify=requests_verify,
-            ca_bundle=ca_bundle,
-        )
-        response = await AnalyzePDFUtil.analyze_pdf_files(
-            llm_client,
-            path_list,
-            prompt,
-            detail,
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requests_verify, ca_bundle = _get_network_download_options()
+            path_list = await DownLoader.download_files_async(
+                pdf_path_urls,
+                tmpdir,
+                requests_verify=requests_verify,
+                ca_bundle=ca_bundle,
+            )
+            response = await AnalyzePDFUtil.analyze_pdf_files(
+                llm_client,
+                path_list,
+                prompt,
+                detail,
+            )
         return response.output
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=analyze_pdf_urls")
@@ -129,8 +128,7 @@ async def convert_office_files_to_pdf(
         if output_dir is not None:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-        results: list[dict[str, str]] = []
-        for office_path in office_path_list:
+        def _convert_one(office_path: str) -> dict[str, str]:
             resolved_output_path = output_dir if output_dir is not None else _build_default_output_path(office_path)
             if config.office2pdf.method == LibreOfficeExecOffice2PDFUtil.METHOD_NAME:
                 pdf_path = LibreOfficeExecOffice2PDFUtil.create_pdf_from_document_file(
@@ -158,8 +156,12 @@ async def convert_office_files_to_pdf(
                 )
             else:
                 raise RuntimeError(f"Unsupported Office2PDF method: {config.office2pdf.method}")
-            results.append({"source_path": office_path, "pdf_path": str(pdf_path)})
-        return results
+            return {"source_path": office_path, "pdf_path": str(pdf_path)}
+
+        results: list[dict[str, str]] = await asyncio.gather(
+            *[asyncio.to_thread(_convert_one, p) for p in office_path_list]
+        )
+        return list(results)
     
     except Exception:
         logger.exception("MCP_TOOL_ERR tool=convert_office_files_to_pdf")

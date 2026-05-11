@@ -35,10 +35,13 @@ class ZipUtil:
                 is_utf = cls.__check_utf8_flag(zip_ref)
                 if password:
                     zip_ref.setpassword(password.encode())
+                cached_encoding: str | None = None
                 for info in zip_ref.infolist():
                     name = info.filename
                     if not is_utf:
-                        name = cls.__decode_legacy_filename(name, system_encoding)
+                        name, cached_encoding = cls.__decode_legacy_filename(
+                            name, system_encoding, cached_encoding=cached_encoding
+                        )
                     info.filename = name
                     zip_ref.extract(info, path=str(temp_extract))
 
@@ -95,18 +98,30 @@ class ZipUtil:
         return False
 
     @classmethod
-    def __decode_legacy_filename(cls, name: str, system_encoding: str) -> str:
+    def __decode_legacy_filename(
+        cls, name: str, system_encoding: str, cached_encoding: str | None = None
+    ) -> tuple[str, str | None]:
+        """Decode a legacy (non-UTF-8) ZIP filename.
+
+        Returns a ``(decoded_name, detected_encoding)`` tuple so callers can
+        cache the encoding and skip ``chardet.detect`` for subsequent entries.
+        If ``cached_encoding`` is provided it is tried first before falling
+        back to chardet.
+        """
         raw_name = name.encode("cp437")
         if raw_name.isascii():
-            return name
+            return name, cached_encoding
 
-        detected = chardet.detect(raw_name)
         candidate_encodings: list[str] = []
 
-        detected_encoding = detected.get("encoding")
-        detected_confidence = float(detected.get("confidence") or 0.0)
-        if detected_encoding and detected_confidence >= 0.5:
-            candidate_encodings.append(str(detected_encoding))
+        if cached_encoding:
+            candidate_encodings.append(cached_encoding)
+        else:
+            detected = chardet.detect(raw_name)
+            detected_encoding = detected.get("encoding")
+            detected_confidence = float(detected.get("confidence") or 0.0)
+            if detected_encoding and detected_confidence >= 0.5:
+                candidate_encodings.append(str(detected_encoding))
 
         candidate_encodings.extend(["cp932", "shift_jis"])
         if system_encoding.lower() not in {"utf-8", "utf_8"}:
@@ -123,9 +138,9 @@ class ZipUtil:
             except (LookupError, UnicodeDecodeError):
                 continue
             if cls.__contains_japanese(decoded):
-                return decoded
+                return decoded, encoding
 
-        return name
+        return name, cached_encoding
 
     @classmethod
     def list_zip_contents(cls, file_path) -> list[str]:
@@ -133,10 +148,13 @@ class ZipUtil:
         with zipfile.ZipFile(file_path, 'r') as zip_ref:
             is_utf = cls.__check_utf8_flag(zip_ref)
             system_encoding = cls.__get_system_encoding()
+            cached_encoding: str | None = None
             for info in zip_ref.infolist():
                 name = info.filename
                 if not is_utf:
-                    name = cls.__decode_legacy_filename(name, system_encoding)
+                    name, cached_encoding = cls.__decode_legacy_filename(
+                        name, system_encoding, cached_encoding=cached_encoding
+                    )
                 result.append(name)
         return result
 

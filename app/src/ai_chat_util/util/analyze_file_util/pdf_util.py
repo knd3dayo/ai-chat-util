@@ -19,7 +19,9 @@ def _extract_content(doc: Document) -> list[dict[str, Any]]:
             results.append({"type": "text", "text": text})
 
         pix = page.get_pixmap()
-        results.append({"type": "image", "bytes": pix.tobytes("png")})
+        png_bytes = pix.tobytes("png")
+        del pix
+        results.append({"type": "image", "bytes": png_bytes})
 
     return results
 

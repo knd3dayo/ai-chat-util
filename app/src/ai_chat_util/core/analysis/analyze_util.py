@@ -652,7 +652,7 @@ class AnalyzeLogUtil:
         end_time: datetime,
         sample_line_limit: int = 100,
         additional_instructions: str | None = None,
-    ) -> ExtractLogTimeRangeData | None:
+    ) -> ExtractLogTimeRangeData:
         """ログファイルから指定された時刻範囲のレコードを抽出してファイルに保存する。
 
         ログフォーマットをLLMで推論し、ヘッダーパターンを使ってログを検索・抽出する。
@@ -687,7 +687,15 @@ class AnalyzeLogUtil:
         # 推論したパターンでログを検索する
         header_matches = cls.search_log_with_pattern(text, inferred)
         if not header_matches:
-            return None
+            return ExtractLogTimeRangeData(
+                file_path=str(path),
+                output_path="",
+                header_pattern=inferred.header_pattern,
+                timestamp_format=inferred.timestamp_format,
+                matched_record_count=0,
+                first_timestamp=None,
+                last_timestamp=None,
+            )
 
         # 時刻範囲でレコードを抽出する
         extracted_lines, filtered_matches = cls._extract_records_in_time_range(

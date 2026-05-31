@@ -1,3 +1,9 @@
+"""ログ解析ツール公開モジュール。
+
+ログヘッダー形式の推定や、指定時刻範囲でのログ抽出を行う
+構造化レスポンス付きのMCPツール関数を提供する。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime

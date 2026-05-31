@@ -1,3 +1,9 @@
+"""PDF解析とOffice変換ツール公開モジュール。
+
+PDFファイル解析に加え、Office文書をPDFへ変換する機能を
+公開し、解析前処理を含むMCPツール関数を提供する。
+"""
+
 from typing import Annotated, Literal
 import asyncio
 import tempfile

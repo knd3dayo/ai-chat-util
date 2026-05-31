@@ -1,3 +1,10 @@
+"""ファイル解析ツール公開モジュール。
+
+テキスト・画像・PDF・Office 文書を対象に、
+URL指定またはローカルパス指定で解析処理を呼び出す
+MCPツール関数を提供する。
+"""
+
 from typing import Annotated, Literal
 import tempfile
 import atexit

@@ -1,3 +1,10 @@
+"""分析系MCPツールの共通基盤モジュール。
+
+タイムアウト設定、ネットワークダウンロード設定、
+ファイル種別判定や抽出補助など、分析機能で共有する
+ユーティリティ関数群を提供する。
+"""
+
 from pathlib import Path
 from typing import Annotated, Optional
 

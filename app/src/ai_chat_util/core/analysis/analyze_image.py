@@ -1,3 +1,9 @@
+"""画像解析ツール公開モジュール。
+
+URLまたはローカルファイルとして指定された画像を対象に、
+LLMを用いた解析処理を実行するMCPツール関数を提供する。
+"""
+
 from typing import Annotated, Literal
 import tempfile
 import atexit

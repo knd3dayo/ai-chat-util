@@ -1,3 +1,10 @@
+"""analysis ドメインで利用するデータモデル定義。
+
+ファイル種別判定モデル、ファイルサーバ応答モデル、
+ログ解析結果モデルなど、分析ツール間で共通利用する
+Pydantic ベースの型を提供する。
+"""
+
 from magika import Magika
 from magika.types import MagikaResult 
 from chardet.universaldetector import UniversalDetector

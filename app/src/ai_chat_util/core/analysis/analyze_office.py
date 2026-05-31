@@ -1,3 +1,9 @@
+"""Office文書解析ツール公開モジュール。
+
+Word・Excel・PowerPoint などのOfficeファイルを対象に、
+URL指定およびローカル指定で解析するMCPツール関数を提供する。
+"""
+
 from typing import Annotated, Literal
 import tempfile
 import atexit

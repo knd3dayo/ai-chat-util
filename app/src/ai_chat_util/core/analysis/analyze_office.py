@@ -14,7 +14,6 @@ from ...util.analyze_file_util.analyze_util import AnalyzeOfficeUtil
 from .base import _get_network_download_options
 from ai_chat_util.core.chat import create_llm_client
 from ai_chat_util.core.chat.model import WebRequestModel
-from ai_chat_util.core.analysis.model import FileUtilDocument
 from ai_chat_util.util.analyze_file_util.downloader import DownLoader
 
 import ai_chat_util.core.log.log_settings as log_settings

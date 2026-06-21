@@ -93,6 +93,21 @@ async def extract_excel_sheet(
     response = ExcelUtil.extract_text_from_sheet(file_path, sheet_name)
     return response
 
+
+async def detect_excel_tables_in_sheet(
+    file_path: Annotated[str, Field(description="Path to the Excel file to detect tables from")],
+    sheet_name: Annotated[Optional[str], Field(description="Name of the sheet to scan. If omitted, active sheet is used.")] = None,
+    empty_row_tolerance: Annotated[int, Field(description="Number of consecutive empty rows to tolerate before table end.")] = 2,
+) -> Annotated[list[dict[str, object]], Field(description="Detected table ranges with start/end row/column and A1 range")]:
+    """
+    This function detects table ranges in a specified Excel sheet.
+    """
+    return ExcelUtil.detect_tables_in_sheet(
+        file_path,
+        sheet_name=sheet_name,
+        empty_row_tolerance=empty_row_tolerance,
+    )
+
 # extract_base64_to_text
 async def extract_base64_to_text(
     extension: Annotated[str, Field(description="File extension of the base64 data")],

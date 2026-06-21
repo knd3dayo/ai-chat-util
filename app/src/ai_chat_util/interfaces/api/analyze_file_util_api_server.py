@@ -13,6 +13,7 @@ from ai_chat_util.core.analysis.base import (
     get_mime_type,
     get_sheet_names,
     extract_excel_sheet,
+    detect_excel_tables_in_sheet,
     extract_text_from_file,
     extract_base64_to_text,
     list_zip_contents,
@@ -71,6 +72,9 @@ router.add_api_route(path='/get_mime_type', endpoint=get_mime_type, methods=['GE
 router.add_api_route(path='/get_sheet_names', endpoint=get_sheet_names, methods=['GET'])
 # extract_excel_sheet
 router.add_api_route(path='/extract_excel_sheet', endpoint=extract_excel_sheet, methods=['POST'])
+
+# detect_excel_tables_in_sheet
+router.add_api_route(path='/detect_excel_tables_in_sheet', endpoint=detect_excel_tables_in_sheet, methods=['GET'])
 
 # extract_text_from_file
 router.add_api_route(path='/extract_text_from_file', endpoint=extract_text_from_file, methods=['POST'])

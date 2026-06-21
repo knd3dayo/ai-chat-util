@@ -10,6 +10,7 @@ from ai_chat_util.core.analysis.base import (
     get_mime_type,
     get_sheet_names,
     extract_excel_sheet,
+    detect_excel_tables_in_sheet,
     extract_text_from_file,
     extract_base64_to_text,
     list_zip_contents,
@@ -59,6 +60,7 @@ async def main():
         mcp.tool()(get_mime_type)
         mcp.tool()(get_sheet_names)
         mcp.tool()(extract_excel_sheet)
+        mcp.tool()(detect_excel_tables_in_sheet)
         mcp.tool()(extract_text_from_file)
         mcp.tool()(list_zip_contents)
         mcp.tool()(extract_zip)

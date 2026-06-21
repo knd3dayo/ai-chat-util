@@ -1,25 +1,161 @@
 import asyncio
 from dotenv import load_dotenv
 import argparse
+from typing import Annotated, Optional
+
 from fastmcp import FastMCP
+from pydantic import Field
+
 from ai_chat_util.core.common.config.runtime import init_runtime
+from ai_chat_util.core.analysis.model import (
+    FileServerListResponse,
+    FileServerProvider,
+    FileServerRootListResponse,
+    MCPBooleanResult,
+    MCPDetectExcelTablesResult,
+    MCPDocumentTypeResult,
+    MCPImportExcelDataResult,
+    MCPMimeTypeResult,
+    MCPSheetNamesResult,
+    MCPTextResult,
+    MCPZipContentsResult,
+)
 from ai_chat_util.core.analysis.base import (
-    list_file_server_roots,
-    list_file_server_entries,
-    get_document_type,
-    get_mime_type,
-    get_sheet_names,
-    extract_excel_sheet,
-    detect_excel_tables_in_sheet,
-    extract_text_from_file,
-    extract_base64_to_text,
-    list_zip_contents,
-    extract_zip,
-    create_zip,
-    export_data_to_excel,
-    import_data_from_excel,
+    list_file_server_roots as base_list_file_server_roots,
+    list_file_server_entries as base_list_file_server_entries,
+    get_document_type as base_get_document_type,
+    get_mime_type as base_get_mime_type,
+    get_sheet_names as base_get_sheet_names,
+    extract_excel_sheet as base_extract_excel_sheet,
+    detect_excel_tables_in_sheet as base_detect_excel_tables_in_sheet,
+    extract_text_from_file as base_extract_text_from_file,
+    extract_base64_to_text as base_extract_base64_to_text,
+    list_zip_contents as base_list_zip_contents,
+    extract_zip as base_extract_zip,
+    create_zip as base_create_zip,
+    export_data_to_excel as base_export_data_to_excel,
+    import_data_from_excel as base_import_data_from_excel,
 )
 mcp = FastMCP("file_util") #type :ignore
+
+
+async def get_document_type(
+    file_path: Annotated[str, Field(description="Path to the file to get types for")]
+) -> MCPDocumentTypeResult:
+    document_type = await base_get_document_type(file_path)
+    return MCPDocumentTypeResult(document_type=document_type)
+
+
+async def get_mime_type(
+    file_path: Annotated[str, Field(description="Path to the file to get MIME type for")]
+) -> MCPMimeTypeResult:
+    mime_type = await base_get_mime_type(file_path)
+    return MCPMimeTypeResult(mime_type=mime_type)
+
+
+async def get_sheet_names(
+    file_path: Annotated[str, Field(description="Path to the Excel file to get sheet names for")]
+) -> MCPSheetNamesResult:
+    sheet_names = await base_get_sheet_names(file_path)
+    return MCPSheetNamesResult(sheet_names=sheet_names)
+
+
+async def extract_excel_sheet(
+    file_path: Annotated[str, Field(description="Path to the Excel file to extract text from")],
+    sheet_name: Annotated[str, Field(description="Name of the sheet to extract text from")],
+) -> MCPTextResult:
+    text = await base_extract_excel_sheet(file_path, sheet_name)
+    return MCPTextResult(text=text)
+
+
+async def detect_excel_tables_in_sheet(
+    file_path: Annotated[str, Field(description="Path to the Excel file to detect tables from")],
+    sheet_name: Annotated[Optional[str], Field(description="Name of the sheet to scan. If omitted, active sheet is used.")] = None,
+    empty_row_tolerance: Annotated[int, Field(description="Number of consecutive empty rows to tolerate before table end.")] = 2,
+) -> MCPDetectExcelTablesResult:
+    tables = await base_detect_excel_tables_in_sheet(file_path, sheet_name, empty_row_tolerance)
+    return MCPDetectExcelTablesResult(tables=tables)
+
+
+async def extract_text_from_file(
+    file_path: Annotated[str, Field(description="Path to the file to extract text from")]
+) -> MCPTextResult:
+    text = await base_extract_text_from_file(file_path)
+    return MCPTextResult(text=text)
+
+
+async def extract_base64_to_text(
+    extension: Annotated[str, Field(description="File extension of the base64 data")],
+    base64_data: Annotated[str, Field(description="Base64 encoded data to extract text from")],
+) -> MCPTextResult:
+    text = await base_extract_base64_to_text(extension, base64_data)
+    return MCPTextResult(text=text)
+
+
+async def list_zip_contents(
+    file_path: Annotated[str, Field(description="Path to the ZIP file to list contents from. **Absolute path required**")]
+) -> MCPZipContentsResult:
+    contents = await base_list_zip_contents(file_path)
+    return MCPZipContentsResult(contents=contents)
+
+
+async def extract_zip(
+    file_path: Annotated[str, Field(description="Path to the ZIP file to extract. **Absolute path required**")],
+    extract_to: Annotated[str, Field(description="Directory to extract the ZIP contents to. **Absolute path required**")],
+    password: Annotated[Optional[str], Field(description="Password for the ZIP file, if any")] = None,
+) -> MCPBooleanResult:
+    ok = await base_extract_zip(file_path, extract_to, password)
+    return MCPBooleanResult(ok=ok)
+
+
+async def create_zip(
+    file_paths: Annotated[list[str], Field(description="List of file or directory paths to include in the ZIP. **Absolute paths required**")],
+    output_zip: Annotated[str, Field(description="Path to the output ZIP file. **Absolute path required**")],
+    password: Annotated[Optional[str], Field(description="Password for the ZIP file, if any")] = None,
+) -> MCPBooleanResult:
+    ok = await base_create_zip(file_paths, output_zip, password)
+    return MCPBooleanResult(ok=ok)
+
+
+async def export_data_to_excel(
+    data: Annotated[dict[str, list], Field(description="Data to export to Excel, with keys as column headers and values as lists of column data")],
+    output_file: Annotated[str, Field(description="Path to the output Excel file")],
+    sheet_name: Annotated[Optional[str], Field(description="Name of the sheet to create in the Excel file")] = "Sheet1",
+) -> MCPBooleanResult:
+    ok = await base_export_data_to_excel(data, output_file, sheet_name)
+    return MCPBooleanResult(ok=ok)
+
+
+async def import_data_from_excel(
+    input_file: Annotated[str, Field(description="Path to the Excel file to import data from")],
+    sheet_name: Annotated[Optional[str], Field(description="Name of the sheet to import data from")] = "Sheet1",
+) -> MCPImportExcelDataResult:
+    data = await base_import_data_from_excel(input_file, sheet_name)
+    return MCPImportExcelDataResult(data=data)
+
+
+async def list_file_server_roots() -> FileServerRootListResponse:
+    return await base_list_file_server_roots()
+
+
+async def list_file_server_entries(
+    provider: Annotated[Optional[FileServerProvider], Field(description="Storage provider to use. Omit to use default_root")] = None,
+    root_name: Annotated[Optional[str], Field(description="Configured root name to browse")] = None,
+    path: Annotated[str, Field(description="Path relative to the configured root")] = ".",
+    recursive: Annotated[bool, Field(description="Whether to return child directories recursively")] = False,
+    max_depth: Annotated[Optional[int], Field(description="Maximum child depth when recursive is true")] = None,
+    include_hidden: Annotated[Optional[bool], Field(description="Whether to include dotfiles and hidden entries")] = None,
+    include_mime: Annotated[Optional[bool], Field(description="Whether to detect MIME type for files")] = None,
+) -> FileServerListResponse:
+    return await base_list_file_server_entries(
+        provider=provider,
+        root_name=root_name,
+        path=path,
+        recursive=recursive,
+        max_depth=max_depth,
+        include_hidden=include_hidden,
+        include_mime=include_mime,
+    )
 
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:

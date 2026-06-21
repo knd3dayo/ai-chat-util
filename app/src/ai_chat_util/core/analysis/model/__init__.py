@@ -302,5 +302,37 @@ class ExtractLogTimeRangeData(BaseModel):
     last_timestamp: datetime | None = Field(default=None, description="Last extracted record timestamp when any records matched")
 
 
+class MCPDocumentTypeResult(BaseModel):
+    document_type: FileUtilDocumentType = Field(..., description="Detected document type")
+
+
+class MCPMimeTypeResult(BaseModel):
+    mime_type: str | None = Field(default=None, description="Detected MIME type")
+
+
+class MCPSheetNamesResult(BaseModel):
+    sheet_names: list[str] = Field(default_factory=list, description="Sheet names in the Excel file")
+
+
+class MCPTextResult(BaseModel):
+    text: str = Field(..., description="Extracted text result")
+
+
+class MCPDetectExcelTablesResult(BaseModel):
+    tables: list[dict[str, object]] = Field(default_factory=list, description="Detected table ranges")
+
+
+class MCPZipContentsResult(BaseModel):
+    contents: list[str] = Field(default_factory=list, description="Zip file contents")
+
+
+class MCPBooleanResult(BaseModel):
+    ok: bool = Field(..., description="Operation result")
+
+
+class MCPImportExcelDataResult(BaseModel):
+    data: dict[str, list] = Field(default_factory=dict, description="Imported Excel data")
+
+
 FileServerEntry.model_rebuild()
     

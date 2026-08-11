@@ -64,11 +64,6 @@ ai_chat_util_config:
     #     x-mcp-env-HTTP_PROXY: os.environ/HTTP_PROXY
     extra_headers: null
 
-    coding_agent_endpoint:
-      # coding-agent 系 route に割り当てる MCP サーバー key
-      # ai_chat_util_config.mcp.mcp_config_path で指定された JSON のキーと一致させます
-      # 既定値は coding-agent ですが、deepagent など任意 key に差し替え可能です
-      mcp_server_name: coding-agent
 
   file_server:
     enabled: true
@@ -103,36 +98,6 @@ ai_chat_util_config:
   features:
     allow_outside_modifications: false
     use_custom_pdf_analyzer: false
-    # 上位の型選択 Coordinator。disabled のままなら従来入口だけを使います。
-    type_selection_mode: disabled
-    # 明確なシグナルがない場合の既定ルート。
-    type_selection_default_route: supervisor
-    # workflow を選ぶには request 側で workflow_file_path を指定することを要求します。
-    type_selection_workflow_requires_definition: true
-    # workflow 定義がある場合は WF 型を優先します。
-    type_selection_prefer_workflow_when_definition_available: true
-    # predictability / approval_frequency / side effects を WF 型判定へ使う設定です。
-    type_selection_workflow_on_high_predictability: true
-    type_selection_workflow_on_high_approval_frequency: true
-    type_selection_workflow_on_side_effects: true
-    # coding/deep の明示要求や高探索性を自律型判定へ使う設定です。
-    type_selection_autonomous_on_explicit_coding_request: true
-    type_selection_autonomous_on_explicit_deep_request: true
-    type_selection_autonomous_on_high_exploration: true
-    # WF が適しそうだが workflow 定義が未指定の場合は clarification を返します。
-    type_selection_require_clarification_on_missing_workflow_definition: true
-    # 上位候補のスコア差が小さい場合に clarification を返す閾値です。
-    type_selection_ambiguity_gap: 0.1
-    routing_mode: legacy
-    routing_confidence_threshold: 0.6
-    # DeepAgents route を使う場合に true にします。
-    # 利用前に `cd app && uv sync --extra deepagents` などで追加依存をインストールしてください。
-    enable_deep_agent: false
-    # 複雑な調査系要求で優先する route。
-    # - coding_agent: execute/status/get_result を使う既存経路
-    # - deep_agent: DeepAgents ベースの調査経路
-    preferred_coding_route: coding_agent
-    sufficiency_check_enabled: false
     audit_log_enabled: false
     audit_log_path: null
 
@@ -172,52 +137,3 @@ ai_chat_util_config:
     libreoffice_uno:
       # HTTP API endpoint for the Office conversion container.
       api_url: http://127.0.0.1:2004
-
-# --- coding-agent-util settings (integrated) ---
-# coding-agent-util-config.yml の内容を、このファイルの
-# ルート直下の `coding_agent_util:` 配下に統合します。
-coding_agent_util:
-    
-  backend:
-    # docker | compose | process | windows_process | linux_process
-    # NOTE:
-    # - `process` は実行環境に応じて Windows/Linux を自動判定します。
-    # - `windows_process` / `linux_process` は強制指定です。
-    # - `subprocess` は後方互換のため受け付けますが、`process` に統一してください。
-    task_backend: process
-
-  monitor:
-    disable_detach_monitor: false
-    detach_monitor_interval: 2.0
-    debug_container: false
-
-  paths:
-    workspace_root: /tmp/coding_agent_tasks
-    host_projects_root: /tmp/coding_agent_projects
-    # executor_allowed_workspace_root: /tmp
-    # workspace_path_rewrites:
-    #   - from: /srv/ai_platform/workspaces
-    #     to: /workspaces
-
-  host:
-    uid: null
-    gid: null
-
-  process:
-    # Example (override as needed):
-    # - opencode:  opencode run
-    # - codex:    codex ...
-    # - claude:   claude ...
-    command: opencode run
-
-  compose:
-    directory: .
-    file: docker-compose.yml
-    service_name: executor-service
-    # Example:
-    # command: opencode run
-    command: ""
-
-  logging:
-    level: INFO
-    # file: /tmp/coding-agent-util.log

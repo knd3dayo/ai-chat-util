@@ -1,152 +1,56 @@
-import asyncio
 import argparse
+import asyncio
 import inspect
 import time
 from functools import wraps
-from typing import Callable, Mapping
-from fastmcp import FastMCP, Context
+from typing import Callable
 
-from ai_chat_util.core.common.config.runtime import init_runtime
-from ai_chat_util.core.common.config.runtime import apply_logging_overrides
-from ai_chat_util.core.request_headers import RequestHeaders, bind_current_request_headers
+from fastmcp import Context, FastMCP
 
-from ai_chat_util.core.resource_app import get_loaded_config_info
-
-from ai_chat_util.app.agent.core.app import (
-    run_chat,
-    run_deepagent_chat,
-    run_durable_workflow_from_file,
-    run_mermaid_workflow_from_file,
-    resume_durable_workflow,
-    run_simple_chat,
-    run_batch_chat,
-    run_deepagent_batch_chat,
-    run_simple_batch_chat,
-    run_batch_chat_from_excel,
-    run_deepagent_batch_chat_from_excel,
+from ai_chat_util.core.analysis.analyze_file import (
+    analyze_documents_data,
+    analyze_files,
 )
-
 from ai_chat_util.core.analysis.analyze_image import (
     analyze_image_files,
     analyze_image_urls,
-)
-from ai_chat_util.core.analysis.analyze_pdf import (
-    analyze_pdf_files,
-    convert_office_files_to_pdf,
-    convert_pdf_files_to_images,
-    analyze_pdf_urls,
-)
-from ai_chat_util.core.analysis.analyze_office import (
-    analyze_office_urls,
-    analyze_office_files,
-)
-from ai_chat_util.core.analysis.analyze_file import (
-    analyze_files,
-    analyze_documents_data,
 )
 from ai_chat_util.core.analysis.analyze_log import (
     extract_time_range_from_logfile,
     infer_log_header_pattern,
 )
-
+from ai_chat_util.core.analysis.analyze_office import (
+    analyze_office_files,
+    analyze_office_urls,
+)
+from ai_chat_util.core.analysis.analyze_pdf import (
+    analyze_pdf_files,
+    analyze_pdf_urls,
+    convert_office_files_to_pdf,
+    convert_pdf_files_to_images,
+)
 from ai_chat_util.core.browser.browser_task import (
     run_browser_task,
     run_browser_task_with_output,
 )
-
-from ai_chat_util.core.docker.docker_ops import (
-    docker_compose_up,
-    docker_compose_down,
-    docker_compose_restart,
-    docker_compose_logs,
-    docker_list_containers,
-    docker_list_images,
-    docker_remove_containers,
-    docker_remove_images,
+from ai_chat_util.core.chat import create_llm_client
+from ai_chat_util.core.chat.batch_client import BatchClient
+from ai_chat_util.core.chat.model import ChatRequest, ChatResponse
+from ai_chat_util.core.common.config.runtime import (
+    apply_logging_overrides,
+    init_runtime,
 )
-from ai_chat_util.core.docker.docker_gen import (
-    docker_generate_dockerfile,
-    docker_generate_compose,
+from ai_chat_util.core.request_headers import (
+    RequestHeaders,
+    bind_current_request_headers,
 )
+from ai_chat_util.core.resource_app import get_loaded_config_info
 
 from ...core.log import log_settings
+
 logger = log_settings.getLogger(__name__)
 
-def _build_tool_metadata_registry() -> dict[str, dict[str, str]]:
-    return {
-        "convert_office_files_to_pdf": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "For write-capable usage, call this tool with dry_run=true first to preview the target pdf_path values. "
-                "Only after approval should you call it again with dry_run=false to create files."
-            ),
-        },
-        "convert_pdf_files_to_images": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "For write-capable usage, call this tool with dry_run=true first to preview the target image_dir and file pattern. "
-                "Only after approval should you call it again with dry_run=false to create files."
-            ),
-        },
-        "docker_compose_up": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "Starts Docker containers via docker compose. "
-                "Provide compose_content (YAML string) or compose_path (file path). "
-                "Use project_name to identify the project for subsequent down/restart/logs operations."
-            ),
-        },
-        "docker_compose_down": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "Stops and removes Docker containers. "
-                "Set remove_volumes=true only when volume data should also be deleted."
-            ),
-        },
-        "docker_compose_restart": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "Restarts Docker containers. Specify service_names to restart only specific services."
-            ),
-        },
-        "docker_remove_containers": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "Removes Docker containers by ID list or label filter. "
-                "Call docker_list_containers first to confirm which containers will be removed."
-            ),
-        },
-        "docker_remove_images": {
-            "requires_approval": "true",
-            "action_kind": "write",
-            "usage_guidance": (
-                "Removes Docker images by name or ID. "
-                "Stop dependent containers before calling this tool unless force=true is explicitly intended."
-            ),
-        },
-    }
 
-
-def _compose_tool_doc(base_doc: str, metadata: Mapping[str, str] | None) -> str:
-    doc = (base_doc or "").rstrip()
-    if not metadata:
-        return doc
-
-    metadata_lines = ["[MCP_META]"]
-    for key, value in metadata.items():
-        metadata_lines.append(f"{key}={value}")
-    if doc:
-        return doc + "\n\n" + "\n".join(metadata_lines)
-    return "\n".join(metadata_lines)
-
-
-# 引数解析用の関数
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode")
     parser.add_argument(
@@ -158,7 +62,6 @@ def parse_args() -> argparse.Namespace:
             "後続処理に伝播します。未指定の場合は AI_CHAT_UTIL_CONFIG / カレント / プロジェクトルートの順で探索します。"
         ),
     )
-    # -m オプションを追加
     parser.add_argument(
         "-m",
         "--mode",
@@ -168,7 +71,6 @@ def parse_args() -> argparse.Namespace:
             "Transport mode: 'stdio' (default), 'sse', or 'http' (streamable-http)."
         ),
     )
-    # -t tools オプションを追加 toolsはカンマ区切りの文字列. search_wikipedia_ja_mcp, vector_search, etc. 指定されていない場合は空文字を設定
     parser.add_argument(
         "-t",
         "--tools",
@@ -185,11 +87,8 @@ def parse_args() -> argparse.Namespace:
         default="0.0.0.0",
         help="Bind host for sse/http",
     )
-    # -p オプションを追加　ポート番号を指定する modeがsseの場合に使用.defaultは5001
     parser.add_argument("-p", "--port", type=int, default=5001, help="Port number to run the server on. Default is 5001.")
-    # -v LOG_LEVEL オプションを追加 ログレベルを指定する. デフォルトは空白文字
     parser.add_argument("-v", "--log_level", type=str, default="", help="Log level to set for the server. Default is empty, which uses the default log level.")
-
     parser.add_argument(
         "--log_file",
         type=str,
@@ -199,12 +98,50 @@ def parse_args() -> argparse.Namespace:
             "Use this when running in stdio mode to avoid mixing logs into stdout."
         ),
     )
-
     return parser.parse_args()
 
-def prepare_mcp(mcp: FastMCP, tools_option: str):
-    tool_metadata = _build_tool_metadata_registry()
 
+async def run_chat(chat_request: ChatRequest) -> ChatResponse:
+    llm_client = create_llm_client()
+    return await llm_client.chat(chat_request)
+
+
+async def run_simple_chat(prompt: str) -> str:
+    llm_client = create_llm_client()
+    return await llm_client.simple_chat(prompt)
+
+
+async def run_batch_chat(chat_requests: list[ChatRequest], concurrency: int = 5) -> list[ChatResponse]:
+    llm_batch_client = BatchClient()
+    rows = await llm_batch_client.run_batch_chat(chat_requests=chat_requests, concurrency=concurrency)
+    return [response for _, response in rows]
+
+
+async def run_batch_chat_from_excel(
+    prompt: str,
+    input_excel_path: str,
+    output_excel_path: str = "output.xlsx",
+    content_column: str = "content",
+    file_path_column: str = "file_path",
+    output_column: str = "output",
+    detail: str = "auto",
+    concurrency: int = 16,
+) -> dict[str, str]:
+    llm_batch_client = BatchClient()
+    await llm_batch_client.run_batch_chat_from_excel(
+        prompt=prompt,
+        input_excel_path=input_excel_path,
+        output_excel_path=output_excel_path,
+        content_column=content_column,
+        file_path_column=file_path_column,
+        output_column=output_column,
+        detail=detail,
+        concurrency=concurrency,
+    )
+    return {"output_excel_path": output_excel_path}
+
+
+def prepare_mcp(mcp: FastMCP, tools_option: str):
     def _summarize_mcp_args(tool_name: str, args: tuple[object, ...], kwargs: dict[str, object]) -> dict[str, object]:
         return {
             "tool": tool_name,
@@ -242,7 +179,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
                 with bind_current_request_headers(headers_obj):
                     try:
                         if is_async:
-                            result = await func(*args, **kwargs) # type: ignore
+                            result = await func(*args, **kwargs)  # type: ignore
                         else:
                             result = func(*args, **kwargs)
                     except Exception:
@@ -272,9 +209,6 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
                 return result
 
             wrapper.__name__ = tool_name
-            metadata = tool_metadata.get(tool_name, {})
-            base_doc = str(getattr(func, "__doc__", "") or "").rstrip()
-            wrapper.__doc__ = _compose_tool_doc(base_doc, metadata)
             sig = inspect.signature(func)
             params = list(sig.parameters.values())
             if "context" not in [param.name for param in params]:
@@ -295,7 +229,6 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         return decorator
 
     tool_registry: dict[str, Callable[..., object]] = {
-        # analysis tools
         "analyze_image_files": analyze_image_files,
         "analyze_pdf_files": analyze_pdf_files,
         "analyze_office_files": analyze_office_files,
@@ -308,36 +241,12 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "convert_pdf_files_to_images": convert_pdf_files_to_images,
         "extract_time_range_from_logfile": extract_time_range_from_logfile,
         "infer_log_header_pattern": infer_log_header_pattern,
-        # chat/batch
         "run_chat": run_chat,
-        "run_deepagent_chat": run_deepagent_chat,
         "run_simple_chat": run_simple_chat,
         "run_batch_chat": run_batch_chat,
-        "run_deepagent_batch_chat": run_deepagent_batch_chat,
-        "deepagent_batch_chat": run_deepagent_batch_chat,
-        "run_simple_batch_chat": run_simple_batch_chat,
         "run_batch_chat_from_excel": run_batch_chat_from_excel,
-        "run_deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
-        "deepagent_batch_chat_from_excel": run_deepagent_batch_chat_from_excel,
-        "run_mermaid_workflow_from_file": run_mermaid_workflow_from_file,
-        "run_durable_workflow_from_file": run_durable_workflow_from_file,
-        "resume_durable_workflow": resume_durable_workflow,
-        # browser automation
         "run_browser_task": run_browser_task,
         "run_browser_task_with_output": run_browser_task_with_output,
-        # docker operations
-        "docker_compose_up": docker_compose_up,
-        "docker_compose_down": docker_compose_down,
-        "docker_compose_restart": docker_compose_restart,
-        "docker_compose_logs": docker_compose_logs,
-        "docker_list_containers": docker_list_containers,
-        "docker_list_images": docker_list_images,
-        "docker_remove_containers": docker_remove_containers,
-        "docker_remove_images": docker_remove_images,
-        # docker AI generation
-        "docker_generate_dockerfile": docker_generate_dockerfile,
-        "docker_generate_compose": docker_generate_compose,
-        # debug helper
         "get_loaded_config_info": get_loaded_config_info,
     }
     allowed_registry = dict(tool_registry)
@@ -353,30 +262,21 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
             header_aware_tool(mcp, tool_name=tool)(allowed_registry[tool])
         return
 
-    # デフォルトのツールを登録（後方互換: 以前の default と同等 + analyze_documents_data）
     for name in allowed_registry.keys():
         header_aware_tool(mcp, tool_name=name)(allowed_registry[name])
-    
+
 
 async def main():
-    # 引数を解析
     args = parse_args()
-
-    # Initialize runtime config first (ai-chat-util-config.yml required)
     init_runtime(args.config or None)
-
-    # Apply process-local logging overrides (especially useful for stdio MCP server).
     apply_logging_overrides(
         level=(args.log_level or None),
         file=(args.log_file or None),
     )
 
     mode = args.mode
-
     mcp = FastMCP("ai_chat_util")
-
     prepare_mcp(mcp, args.tools)
-
 
     if mode == "stdio":
         await mcp.run_async()
@@ -388,7 +288,6 @@ async def main():
         await mcp.run_async(transport="sse", host=host, port=port)
         return
 
-    # mode == "http"
     await mcp.run_async(transport="streamable-http", host=host, port=port)
 
 

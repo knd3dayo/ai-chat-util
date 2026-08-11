@@ -3,39 +3,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from typing import Any, Iterable, cast
-from ai_chat_util.app.agent.core.agent_client_factory import AgentFactory
-from ai_chat_util.core.analysis.analyze_image import AnalyzeImageUtil
-from ai_chat_util.core.analysis.analyze_util import AnalyzePDFUtil, AnalyzeOfficeUtil, AnalyzeFileUtil
+from typing import Iterable
+
+from ai_chat_util.core.analysis.analyze_image import analyze_image_files
+from ai_chat_util.core.analysis.analyze_pdf import analyze_pdf_files
+from ai_chat_util.core.analysis.analyze_office import analyze_office_files
+from ai_chat_util.core.analysis.analyze_file import analyze_files
 from ai_chat_util.core.chat import create_llm_client
-from ai_chat_util.app.agent.core.hitl import create_stdio_hitl_client
-from ai_chat_util.core.common.config.runtime import init_runtime, apply_logging_overrides, get_runtime_config_info
-from ai_chat_util.core.chat.model import ChatRequestContext
-from ai_chat_util.app.agent.core.app import run_mermaid_workflow_from_file
-from ai_chat_util.app.workflow import WorkflowChatClient
-
-
-def _docker_compose_file_args(p: argparse.ArgumentParser) -> None:
-    """compose_path / compose_content 両方サポートする共通引数を追加する。"""
-    group = p.add_mutually_exclusive_group()
-    group.add_argument(
-        "--compose-file",
-        type=str,
-        default=None,
-        help="docker-compose.yml のファイルパス",
-    )
-    group.add_argument(
-        "--compose-content",
-        type=str,
-        default=None,
-        help="docker-compose.yml の内容（YAML 文字列）",
-    )
-    p.add_argument(
-        "--project-directory",
-        type=str,
-        default=None,
-        help="compose-content 内の相対 build context / volume パス解決に使う基準ディレクトリ",
-    )
+from ai_chat_util.core.chat.batch_client import BatchClient
+from ai_chat_util.core.common.config.runtime import (
+    apply_logging_overrides,
+    get_runtime_config_info,
+    init_runtime,
+)
 
 
 def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
@@ -51,6 +31,17 @@ def _add_common_logging_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="ログのファイル出力先を上書きします。未指定の場合は ai-chat-util-config.yml の設定を使用します。",
     )
+
+
+def _validate_non_empty(text: str, parser: argparse.ArgumentParser) -> str:
+    if not text.strip():
+        parser.print_help()
+        raise SystemExit(1)
+    return text
+
+
+def _print_header(command: str) -> None:
+    print(f"Executing command: {command}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,7 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # chat
     chat_parser = subparsers.add_parser("chat", help="LLM へテキストでチャットします")
     chat_parser.add_argument(
         "-p",
@@ -78,68 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプト文字列",
     )
-    agent_chat_parser = subparsers.add_parser("agent_chat", help="MCP を使用してテキストでチャットします")
-    agent_chat_parser.add_argument(
-        "-p",
-        "--prompt",
-        type=str,
-        required=True,
-        help="送信するプロンプト文字列",
-    )
-    agent_chat_parser.add_argument(
-        "--workflow-file",
-        type=str,
-        default="",
-        help="workflow backend で実行する Markdown workflow ファイルのパス",
-    )
-    agent_chat_parser.add_argument(
-        "--workflow-plan-mode",
-        action="store_true",
-        help="workflow backend を plan mode で起動します",
-    )
-    agent_chat_parser.add_argument(
-        "--workflow-non-durable",
-        action="store_true",
-        help="workflow backend を durable pause/resume なしで起動します",
-    )
-    agent_chat_parser.add_argument(
-        "--workflow-max-node-visits",
-        type=int,
-        default=8,
-        help="workflow 実行時の単一ノード訪問回数上限",
-    )
-    agent_chat_parser.add_argument(
-        "--predictability",
-        choices=["low", "medium", "high"],
-        default="",
-        help="要求の予見性ヒント",
-    )
-    agent_chat_parser.add_argument(
-        "--approval-frequency",
-        choices=["low", "medium", "high"],
-        default="",
-        help="承認頻度ヒント",
-    )
-    agent_chat_parser.add_argument(
-        "--exploration-level",
-        choices=["low", "medium", "high"],
-        default="",
-        help="探索性ヒント",
-    )
-    agent_chat_parser.add_argument(
-        "--has-side-effects",
-        action="store_true",
-        help="副作用ありの処理として扱います",
-    )
-    deepagent_chat_parser = subparsers.add_parser("run_deepagent_chat", help="DeepAgents を使用してテキストでチャットします")
-    deepagent_chat_parser.add_argument(
-        "-p",
-        "--prompt",
-        type=str,
-        required=True,
-        help="送信するプロンプト文字列",
-    )
-    # batch_chat
+
     batch_chat_parser = subparsers.add_parser(
         "batch_chat", help="LLM へテキストでバッチチャットします"
     )
@@ -150,86 +79,53 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="送信するプロンプトテンプレート文字列",
     )
-    agent_batch_chat_parser = subparsers.add_parser(
-        "agent_batch_chat", help="MCP を使用してテキストでバッチチャットします"
-    )
-    agent_batch_chat_parser.add_argument(
-        "-p",
-        "--prompt",
+    batch_chat_parser.add_argument(
+        "-i",
+        "--input_excel_path",
         type=str,
         required=True,
-        help="送信するプロンプトテンプレート文字列",
+        help="処理対象のメッセージとファイルパスを記載したExcelファイルのパス",
     )
-    deepagent_batch_chat_parser = subparsers.add_parser(
-        "run_deepagent_batch_chat", help="DeepAgents を使用してテキストでバッチチャットします"
-    )
-    deepagent_batch_chat_parser.add_argument(
-        "-p",
-        "--prompt",
+    batch_chat_parser.add_argument(
+        "-o",
+        "--output_excel_path",
         type=str,
-        required=True,
-        help="送信するプロンプトテンプレート文字列",
+        default="output.xlsx",
+        required=False,
+        help="結果を出力するExcelファイルのパス",
     )
-    deepagent_batch_alias_parser = subparsers.add_parser(
-        "deepagent_batch_chat", help="DeepAgents を使用してテキストでバッチチャットします"
+    batch_chat_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=16,
+        required=False,
+        help="同時実行数の上限（デフォルト: 16）",
     )
-    deepagent_batch_alias_parser.add_argument(
-        "-p",
-        "--prompt",
+    batch_chat_parser.add_argument(
+        "--content_column",
         type=str,
-        required=True,
-        help="送信するプロンプトテンプレート文字列",
+        default="content",
+        help="入力Excelファイル内のメッセージを含む列名（デフォルト: content）",
+    )
+    batch_chat_parser.add_argument(
+        "--file_path_column",
+        type=str,
+        default="file_path",
+        help="入力Excelファイル内のファイルパスを含む列名（デフォルト: file_path）",
+    )
+    batch_chat_parser.add_argument(
+        "--output_column",
+        type=str,
+        default="output",
+        help="出力Excelファイル内のLLM応答を含む列名（デフォルト: output）",
+    )
+    batch_chat_parser.add_argument(
+        "--image_detail",
+        type=str,
+        default="auto",
+        help="画像解析のdetail（low/high/auto）。既定は auto",
     )
 
-    for current_batch_parser in (batch_chat_parser, agent_batch_chat_parser, deepagent_batch_chat_parser, deepagent_batch_alias_parser):
-        current_batch_parser.add_argument(
-            "-i",
-            "--input_excel_path",
-            type=str,
-            required=True,
-            help="処理対象のメッセージとファイルパスを記載したExcelファイルのパス",
-        )
-        current_batch_parser.add_argument(
-            "-o",
-            "--output_excel_path",
-            type=str,
-            default="output.xlsx",
-            required=False,
-            help="結果を出力するExcelファイルのパス",
-        )
-        current_batch_parser.add_argument(
-            "--concurrency",
-            type=int,
-            default=16,
-            required=False,
-            help="同時実行数の上限（デフォルト: 16）",
-        )
-        current_batch_parser.add_argument(
-            "--content_column",
-            type=str,
-            default="content",
-            help="入力Excelファイル内のメッセージを含む列名（デフォルト: content）",
-        )
-        current_batch_parser.add_argument(
-            "--file_path_column",
-            type=str,
-            default="file_path",
-            help="入力Excelファイル内のファイルパスを含む列名（デフォルト: file_path）",
-        )
-        current_batch_parser.add_argument(
-            "--output_column",
-            type=str,
-            default="output",
-            help="出力Excelファイル内のLLM応答を含む列名（デフォルト: output）",
-        )
-        current_batch_parser.add_argument(
-            "--image_detail",
-            type=str,
-            default="auto",
-            help="画像解析のdetail（low/high/auto）。既定は auto",
-        )
-    
-    # analyze_image_files
     image_parser = subparsers.add_parser(
         "analyze_image_files", help="画像ファイルを解析します"
     )
@@ -255,7 +151,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="画像解析のdetail（low/high/auto）。既定は auto",
     )
 
-    # analyze_pdf_files
     pdf_parser = subparsers.add_parser("analyze_pdf_files", help="PDFファイルを解析します")
     pdf_parser.add_argument(
         "-i",
@@ -281,7 +176,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # analyze_office_files
     office_parser = subparsers.add_parser(
         "analyze_office_files", help="Officeドキュメント（Word/Excel/PowerPoint等）をPDF化した後、解析します"
     )
@@ -309,7 +203,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # analyze_multi_format_files
     multi_parser = subparsers.add_parser(
         "analyze_files",
         help="複数形式（テキスト/画像/PDF/Office）ファイルをまとめて解析します",
@@ -342,210 +235,14 @@ def build_parser() -> argparse.ArgumentParser:
         "show_config",
         help="実際に読み込まれた設定ファイルのパスと内容を表示します",
     )
-
-    workflow_parser = subparsers.add_parser(
-        "run_workflow",
-        help="Markdown で定義されたWF型ワークフローを同期ワンショットで実行します",
-    )
-    workflow_parser.add_argument(
-        "-f",
-        "--file",
-        type=str,
-        required=True,
-        help="mermaid ブロックをちょうど1つ含む Markdown ファイルのパス",
-    )
-    workflow_parser.add_argument(
-        "-m",
-        "--message",
-        type=str,
-        default="",
-        help="ワークフローへ渡す初期入力",
-    )
-    workflow_parser.add_argument(
-        "--max-node-visits",
-        type=int,
-        default=8,
-        help="ループ安全弁として同一ノードの最大実行回数を指定します",
-    )
-    durable_workflow_parser = subparsers.add_parser(
-        "run_workflow_durable",
-        help="Markdown で定義されたWF型ワークフローを durable pause/resume 付きで実行します",
-    )
-    durable_workflow_parser.add_argument(
-        "-f",
-        "--file",
-        type=str,
-        required=True,
-        help="mermaid ブロックをちょうど1つ含む Markdown ファイルのパス",
-    )
-    durable_workflow_parser.add_argument(
-        "-m",
-        "--message",
-        type=str,
-        default="",
-        help="ワークフローへ渡す初期入力",
-    )
-    durable_workflow_parser.add_argument(
-        "--max-node-visits",
-        type=int,
-        default=8,
-        help="ループ安全弁として同一ノードの最大実行回数を指定します",
-    )
-    durable_workflow_parser.add_argument(
-        "--plan-mode",
-        action="store_true",
-        help="実行前に Markdown と Mermaid を補正し、承認待ちで停止します",
-    )
-
-    # ---- docker operations ----
-    # docker_compose_up
-    docker_up_parser = subparsers.add_parser(
-        "docker_compose_up",
-        help="docker compose up を実行してサービスを起動します",
-    )
-    docker_up_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
-    _docker_compose_file_args(docker_up_parser)
-    docker_up_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列。例: \'{"KEY": "val"}\'')
-    docker_up_parser.add_argument("--services", type=str, nargs="*", default=None, help="起動するサービス名（複数指定可）")
-    docker_up_parser.add_argument("--no-detach", action="store_true", help="フォアグラウンドで実行（デフォルトはバックグラウンド）")
-    docker_up_parser.add_argument("--build", action="store_true", help="起動前にイメージをビルドする")
-
-    # docker_compose_down
-    docker_down_parser = subparsers.add_parser(
-        "docker_compose_down",
-        help="docker compose down を実行してサービスを停止・削除します",
-    )
-    docker_down_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
-    _docker_compose_file_args(docker_down_parser)
-    docker_down_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
-    docker_down_parser.add_argument("--remove-volumes", action="store_true", help="ボリュームも削除する")
-
-    # docker_compose_restart
-    docker_restart_parser = subparsers.add_parser(
-        "docker_compose_restart",
-        help="docker compose restart を実行してサービスを再起動します",
-    )
-    docker_restart_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
-    _docker_compose_file_args(docker_restart_parser)
-    docker_restart_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
-    docker_restart_parser.add_argument("--services", type=str, nargs="*", default=None, help="再起動するサービス名（複数指定可）")
-
-    # docker_compose_logs
-    docker_logs_parser = subparsers.add_parser(
-        "docker_compose_logs",
-        help="docker compose logs を取得します",
-    )
-    docker_logs_parser.add_argument("--project-name", type=str, required=True, help="compose プロジェクト名")
-    _docker_compose_file_args(docker_logs_parser)
-    docker_logs_parser.add_argument("--env-vars", type=str, default="", help='環境変数 JSON 辞書文字列')
-    docker_logs_parser.add_argument("--services", type=str, nargs="*", default=None, help="ログを取得するサービス名（複数指定可）")
-    docker_logs_parser.add_argument("--tail", type=int, default=200, help="取得する末尾の行数（デフォルト: 200）")
-
-    # docker_list_containers
-    docker_list_parser = subparsers.add_parser(
-        "docker_list_containers",
-        help="Docker コンテナの一覧を取得します",
-    )
-    docker_list_parser.add_argument("--label", type=str, default=None, help='ラベルフィルター（"key=value" 形式）')
-    docker_list_parser.add_argument("--name", type=str, default=None, help="コンテナ名の部分一致フィルター")
-    docker_list_parser.add_argument("--running-only", action="store_true", help="実行中のコンテナのみ表示（デフォルトは全コンテナ）")
-
-    docker_list_images_parser = subparsers.add_parser(
-        "docker_list_images",
-        help="Docker イメージの一覧を取得します",
-    )
-    docker_list_images_parser.add_argument("--name", type=str, default=None, help="repository:tag の部分一致フィルター")
-
-    # docker_remove_containers
-    docker_rm_parser = subparsers.add_parser(
-        "docker_remove_containers",
-        help="Docker コンテナを削除します",
-    )
-    docker_rm_parser.add_argument("--container-ids", type=str, nargs="*", default=None, help="削除するコンテナ ID のリスト")
-    docker_rm_parser.add_argument("--label", type=str, default=None, help='ラベルフィルター（"key=value" 形式）にマッチするコンテナを全て削除')
-    docker_rm_parser.add_argument("--no-force", action="store_true", help="実行中のコンテナを強制削除しない")
-
-    docker_rmi_parser = subparsers.add_parser(
-        "docker_remove_images",
-        help="Docker イメージを削除します",
-    )
-    docker_rmi_parser.add_argument("--image-names", type=str, nargs="+", required=True, help="削除するイメージ名または ID")
-    docker_rmi_parser.add_argument("--force", action="store_true", help="使用中イメージも強制削除する")
-
-    # docker_generate_dockerfile
-    docker_gen_df_parser = subparsers.add_parser(
-        "docker_generate_dockerfile",
-        help="指示に基づいて Dockerfile を AI で生成します",
-    )
-    docker_gen_df_parser.add_argument("-p", "--instructions", type=str, required=True, help="Dockerfile の生成指示")
-    docker_gen_df_parser.add_argument("--base-image", type=str, default=None, help="ベースイメージ（例: python:3.12-slim）")
-    docker_gen_df_parser.add_argument("--language", type=str, default=None, help="言語/フレームワークのヒント（例: Python/FastAPI）")
-    docker_gen_df_parser.add_argument("--requirements", type=str, default=None, help="追加要件の説明")
-
-    # docker_generate_compose
-    docker_gen_compose_parser = subparsers.add_parser(
-        "docker_generate_compose",
-        help="指示に基づいて docker-compose.yml を AI で生成します",
-    )
-    docker_gen_compose_parser.add_argument("-p", "--instructions", type=str, required=True, help="docker-compose.yml の生成指示")
-    docker_gen_compose_parser.add_argument("--environment", type=str, default=None, help="環境の説明（例: 本番環境: nginx + FastAPI + PostgreSQL）")
-
     return parser
 
-
-def _validate_non_empty(text: str, parser: argparse.ArgumentParser) -> str:
-    if not text.strip():
-        parser.print_help()
-        raise SystemExit(1)
-    return text
-
-def _print_header(command: str) -> None:
-    print(f"Executing command: {command}")
-
-
-def _build_agent_request_context(args: argparse.Namespace) -> ChatRequestContext | None:
-    workflow_file = str(getattr(args, "workflow_file", "") or "").strip()
-    predictability = str(getattr(args, "predictability", "") or "").strip()
-    approval_frequency = str(getattr(args, "approval_frequency", "") or "").strip()
-    exploration_level = str(getattr(args, "exploration_level", "") or "").strip()
-    has_side_effects = bool(getattr(args, "has_side_effects", False))
-    workflow_plan_mode = bool(getattr(args, "workflow_plan_mode", False))
-    workflow_durable = not bool(getattr(args, "workflow_non_durable", False))
-    workflow_max_node_visits = int(getattr(args, "workflow_max_node_visits", 8) or 8)
-
-    if not any(
-        [
-            workflow_file,
-            predictability,
-            approval_frequency,
-            exploration_level,
-            has_side_effects,
-            workflow_plan_mode,
-            not workflow_durable,
-            workflow_max_node_visits != 8,
-        ]
-    ):
-        return None
-
-    return ChatRequestContext(
-        workflow_file_path=(workflow_file or None),
-        workflow_plan_mode=workflow_plan_mode,
-        workflow_durable=workflow_durable,
-        workflow_max_node_visits=workflow_max_node_visits,
-        predictability=cast(Any, predictability or None),
-        approval_frequency=cast(Any, approval_frequency or None),
-        exploration_level=cast(Any, exploration_level or None),
-        has_side_effects=(True if has_side_effects else None),
-    )
 
 async def main(argv: Iterable[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    # Initialize runtime config first (ai-chat-util-config.yml required)
     init_runtime(args.config or None)
-
-    # Optional logging overrides (process-local; does not touch env)
     apply_logging_overrides(level=args.loglevel or None, file=args.logfile or None)
 
     _print_header(args.command)
@@ -553,63 +250,13 @@ async def main(argv: Iterable[str] | None = None) -> None:
     if args.command == "chat":
         _validate_non_empty(args.prompt, parser)
         llm_client = create_llm_client()
-        trace_id: str | None = None
-        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
+        response = await llm_client.simple_chat(args.prompt)
+        print(response)
+        return
 
-    if args.command == "agent_chat":
-        _validate_non_empty(args.prompt, parser)
-        llm_client = AgentFactory.create_mcp_client(default_request_context=_build_agent_request_context(args))
-        trace_id: str | None = None
-        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
-
-    if args.command == "run_deepagent_chat":
-        _validate_non_empty(args.prompt, parser)
-        llm_client = AgentFactory.create_deepagent_client()
-        trace_id: str | None = None
-        return await create_stdio_hitl_client(llm_client, trace_id=trace_id).run(args.prompt)
-    
     if args.command == "batch_chat":
         _validate_non_empty(args.prompt, parser)
-        # Heavy deps (e.g., pandas) are only needed for batch_chat.
-        from ai_chat_util.core.chat.batch_client import BatchClient
-
         llm_batch_client = BatchClient()
-        await llm_batch_client.run_batch_chat_from_excel(
-            input_excel_path=args.input_excel_path,
-            output_excel_path=args.output_excel_path,
-            prompt=args.prompt,
-            content_column=args.content_column,
-            file_path_column=args.file_path_column,
-            output_column=args.output_column,
-            concurrency=args.concurrency,
-            detail=args.image_detail,
-        )
-        print(f"Batch chat completed. Results saved to {args.output_excel_path}")
-        return
-
-    if args.command == "agent_batch_chat":
-        _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.app.agent.core import MCPBatchClient
-
-        llm_batch_client = MCPBatchClient()
-        await llm_batch_client.run_batch_chat_from_excel(
-            input_excel_path=args.input_excel_path,
-            output_excel_path=args.output_excel_path,
-            prompt=args.prompt,
-            content_column=args.content_column,
-            file_path_column=args.file_path_column,
-            output_column=args.output_column,
-            concurrency=args.concurrency,
-            detail=args.image_detail,
-        )
-        print(f"Batch chat completed. Results saved to {args.output_excel_path}")
-        return
-
-    if args.command in {"run_deepagent_batch_chat", "deepagent_batch_chat"}:
-        _validate_non_empty(args.prompt, parser)
-        from ai_chat_util.app.agent.core import DeepAgentBatchClient
-
-        llm_batch_client = DeepAgentBatchClient()
         await llm_batch_client.run_batch_chat_from_excel(
             input_excel_path=args.input_excel_path,
             output_excel_path=args.output_excel_path,
@@ -625,189 +272,38 @@ async def main(argv: Iterable[str] | None = None) -> None:
 
     if args.command == "analyze_image_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = create_llm_client()
-        response = await AnalyzeImageUtil.analyze_image_files(llm_client, args.image_path_list, args.prompt, args.detail)
-        print(response.output)
+        response = await analyze_image_files(args.image_path_list, args.prompt, args.detail)
+        print(response)
         return
 
     if args.command == "analyze_pdf_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = create_llm_client()
-        response = await AnalyzePDFUtil.analyze_pdf_files(llm_client, args.pdf_path_list, args.prompt, args.detail)
-        print(response.output)
+        response = await analyze_pdf_files(args.pdf_path_list, args.prompt, args.detail)
+        print(response)
         return
 
     if args.command == "analyze_office_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = create_llm_client()
-        response = await AnalyzeOfficeUtil.analyze_office_files(llm_client, args.office_path_list, args.prompt, args.detail)
-        print(response.output)
+        response = await analyze_office_files(args.office_path_list, args.prompt, args.detail)
+        print(response)
         return
 
     if args.command == "analyze_files":
         _validate_non_empty(args.prompt, parser)
-        llm_client = create_llm_client()
-        response = await AnalyzeFileUtil.analyze_files(llm_client, args.file_path_list, args.prompt, args.detail)
-        print(response.output)
+        response = await analyze_files(args.file_path_list, args.prompt, args.detail)
+        print(response)
         return
 
     if args.command == "show_config":
         print(json.dumps(get_runtime_config_info(), ensure_ascii=False, indent=2))
         return
 
-    if args.command == "run_workflow":
-        response = await run_mermaid_workflow_from_file(
-            workflow_file_path=args.file,
-            message=args.message,
-            max_node_visits=args.max_node_visits,
-            durable=False,
-            enable_tool_approval_nodes=False,
-        )
-        print(response.final_output)
-        return
-
-    if args.command == "run_workflow_durable":
-        workflow_client = WorkflowChatClient(
-            args.file,
-            max_node_visits=args.max_node_visits,
-            plan_mode=args.plan_mode,
-            durable=True,
-        )
-        trace_id: str | None = None
-        return await create_stdio_hitl_client(workflow_client, trace_id=trace_id).run(args.message)
-
-    if args.command == "docker_compose_up":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        env_dict = json.loads(args.env_vars) if args.env_vars else None
-        result = DockerOpsUtil.compose_up(
-            project_name=args.project_name,
-            compose_path=args.compose_file,
-            compose_content=args.compose_content,
-            project_directory=args.project_directory,
-            env_vars=env_dict,
-            service_names=args.services or None,
-            detach=not args.no_detach,
-            build=args.build,
-        )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_compose_down":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        env_dict = json.loads(args.env_vars) if args.env_vars else None
-        result = DockerOpsUtil.compose_down(
-            project_name=args.project_name,
-            compose_path=args.compose_file,
-            compose_content=args.compose_content,
-            project_directory=args.project_directory,
-            env_vars=env_dict,
-            remove_volumes=args.remove_volumes,
-        )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_compose_restart":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        env_dict = json.loads(args.env_vars) if args.env_vars else None
-        result = DockerOpsUtil.compose_restart(
-            project_name=args.project_name,
-            compose_path=args.compose_file,
-            compose_content=args.compose_content,
-            project_directory=args.project_directory,
-            env_vars=env_dict,
-            service_names=args.services or None,
-        )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_compose_logs":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        env_dict = json.loads(args.env_vars) if args.env_vars else None
-        logs = DockerOpsUtil.compose_logs(
-            project_name=args.project_name,
-            compose_path=args.compose_file,
-            compose_content=args.compose_content,
-            project_directory=args.project_directory,
-            env_vars=env_dict,
-            service_names=args.services or None,
-            tail=args.tail,
-        )
-        print(logs)
-        return
-
-    if args.command == "docker_list_containers":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        containers = DockerOpsUtil.list_containers(
-            label_filter=args.label,
-            name_filter=args.name,
-            show_all=not args.running_only,
-        )
-        print(json.dumps([c.model_dump(mode="json") for c in containers], ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_list_images":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        images = DockerOpsUtil.list_images(
-            name_filter=args.name,
-        )
-        print(json.dumps([image.model_dump(mode="json") for image in images], ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_remove_containers":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        result = DockerOpsUtil.remove_containers(
-            container_ids=args.container_ids or None,
-            label_filter=args.label,
-            force=not args.no_force,
-        )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_remove_images":
-        from ai_chat_util.core.docker.docker_ops_util import DockerOpsUtil
-        result = DockerOpsUtil.remove_images(
-            image_names=args.image_names,
-            force=args.force,
-        )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "docker_generate_dockerfile":
-        from ai_chat_util.core.docker.docker_gen_util import DockerGenUtil
-        result = await DockerGenUtil.generate_dockerfile(
-            instructions=args.instructions,
-            base_image=args.base_image,
-            language=args.language,
-            additional_requirements=args.requirements,
-        )
-        print(result.content)
-        if result.explanation:
-            print("\n--- 説明 ---")
-            print(result.explanation)
-        return
-
-    if args.command == "docker_generate_compose":
-        from ai_chat_util.core.docker.docker_gen_util import DockerGenUtil
-        result = await DockerGenUtil.generate_compose(
-            instructions=args.instructions,
-            environment_description=args.environment,
-        )
-        print(result.content)
-        if result.explanation:
-            print("\n--- 説明 ---")
-            print(result.explanation)
-        return
-
     parser.print_help()
     raise SystemExit(1)
 
+
 def cli_main() -> None:
-    """console_scripts 用の同期エントリポイント。
-
-    `[project.scripts]` から呼ばれる関数は同期関数である必要があるため、
-    ここで asyncio.run して async main() を起動する。
-    """
-
+    """console_scripts 用の同期エントリポイント。"""
     try:
         asyncio.run(main())
     except SystemExit:

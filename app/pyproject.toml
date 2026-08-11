@@ -23,16 +23,12 @@ dependencies = [
     "anthropic",
     "google-generativeai",
     "langchain",
-    "langgraph-supervisor",
     "langchain-litellm",
     "langchain-mcp-adapters",
     "aiosqlite",
-    "langgraph-checkpoint",
-    "langgraph-checkpoint-sqlite",
     "fastmcp",
     "fastapi",
     "PyMuPDF",
-    "python_on_whales",
     "tabulate",
     "pytest",
     "magika",
@@ -46,7 +42,6 @@ dependencies = [
     "aiofiles",
     "pyzipper",
     "pysmb",
-    "deepagents",
     "psutil",
     "browser-use",
     "playwright",
@@ -61,6 +56,4 @@ exclude = []
 
 [project.scripts]
 ai-chat-util = "ai_chat_util.interfaces.cli.__main__:cli_main"
-coding-agent-api = "ai_chat_util.interfaces.api.coding_api_server:main"
-coding-agent-mcp = "ai_chat_util.interfaces.mcp.mcp_server:main"
-coding-agent-util = "ai_chat_util.interfaces.cli.coding_docker_main:app"
+ai-chat-util-mcp = "ai_chat_util.interfaces.mcp.mcp_server:main"

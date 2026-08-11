@@ -45,7 +45,8 @@ dependencies = [
     "psutil",
     "browser-use",
     "playwright",
-    "pywin32; sys_platform == 'win32'"
+    "pywin32; sys_platform == 'win32'",
+    "mistune>=3.3.4",
 ]
 
 

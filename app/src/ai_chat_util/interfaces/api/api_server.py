@@ -40,6 +40,9 @@ from ai_chat_util.core.analysis.analyze_office import (
     analyze_office_files,
     analyze_office_urls,
 )
+from ai_chat_util.core.analysis.analyze_office_xml import (
+    analyze_office_xml_files,
+)
 from ai_chat_util.core.analysis.analyze_log import (
     extract_time_range_from_logfile,
     infer_log_header_pattern,
@@ -126,6 +129,7 @@ async def run_batch_chat_from_excel(request: BatchChatFromExcelRequest) -> dict[
 router.add_api_route(path="/analyze_image_files", endpoint=analyze_image_files, methods=["POST"])
 router.add_api_route(path="/analyze_pdf_files", endpoint=analyze_pdf_files, methods=["POST"])
 router.add_api_route(path="/analyze_office_files", endpoint=analyze_office_files, methods=["POST"])
+router.add_api_route(path="/analyze_office_xml_files", endpoint=analyze_office_xml_files, methods=["POST"])
 router.add_api_route(path="/analyze_files", endpoint=analyze_files, methods=["POST"])
 router.add_api_route(path="/analyze_image_urls", endpoint=analyze_image_urls, methods=["POST"])
 router.add_api_route(path="/analyze_pdf_urls", endpoint=analyze_pdf_urls, methods=["POST"])

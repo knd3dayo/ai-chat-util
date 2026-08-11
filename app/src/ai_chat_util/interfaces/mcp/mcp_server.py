@@ -23,6 +23,9 @@ from ai_chat_util.core.analysis.analyze_office import (
     analyze_office_files,
     analyze_office_urls,
 )
+from ai_chat_util.core.analysis.analyze_office_xml import (
+    analyze_office_xml_files,
+)
 from ai_chat_util.core.analysis.analyze_pdf import (
     analyze_pdf_files,
     analyze_pdf_urls,
@@ -232,6 +235,7 @@ def prepare_mcp(mcp: FastMCP, tools_option: str):
         "analyze_image_files": analyze_image_files,
         "analyze_pdf_files": analyze_pdf_files,
         "analyze_office_files": analyze_office_files,
+        "analyze_office_xml_files": analyze_office_xml_files,
         "analyze_files": analyze_files,
         "analyze_documents_data": analyze_documents_data,
         "analyze_image_urls": analyze_image_urls,

@@ -8,7 +8,11 @@ from typing import Iterable
 from ai_chat_util.core.analysis.analyze_image import analyze_image_files
 from ai_chat_util.core.analysis.analyze_pdf import analyze_pdf_files
 from ai_chat_util.core.analysis.analyze_office import analyze_office_files
+from ai_chat_util.core.analysis.analyze_office_xml import analyze_office_xml_files
 from ai_chat_util.core.analysis.analyze_file import analyze_files
+from ai_chat_util.util.analyze_file_util.markdown_to_docx import MarkdownToDocxUtil
+from ai_chat_util.util.analyze_file_util.markdown_to_pptx import MarkdownToPptxUtil
+from ai_chat_util.util.analyze_file_util.markdown_to_excel import MarkdownToExcelUtil
 from ai_chat_util.core.chat import create_llm_client
 from ai_chat_util.core.chat.batch_client import BatchClient
 from ai_chat_util.core.common.config.runtime import (
@@ -203,6 +207,89 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    office_xml_parser = subparsers.add_parser(
+        "analyze_office_xml_files",
+        help="Officeファイルの内部 XML / フォント / 書式 / 画像情報を抽出して解析します",
+    )
+    office_xml_parser.add_argument(
+        "-i",
+        "--office_path_list",
+        type=str,
+        nargs="+",
+        required=True,
+        help="Office開発ファイルパス（複数指定可）",
+    )
+    office_xml_parser.add_argument(
+        "-p",
+        "--prompt",
+        type=str,
+        required=True,
+        help="解析指示プロンプト",
+    )
+    office_xml_parser.add_argument(
+        "--detail",
+        type=str,
+        default="auto",
+        help="互換パラメータ（未使用）",
+    )
+
+    markdown_to_docx_parser = subparsers.add_parser(
+        "markdown_to_docx",
+        help="Markdown 文書を Word (.docx) に変換します",
+    )
+    markdown_to_docx_parser.add_argument(
+        "-i",
+        "--input_markdown",
+        type=str,
+        required=True,
+        help="入力 Markdown 文字列",
+    )
+    markdown_to_docx_parser.add_argument(
+        "-o",
+        "--output_path",
+        type=str,
+        required=True,
+        help="出力 Word ファイルパス",
+    )
+
+    markdown_to_pptx_parser = subparsers.add_parser(
+        "markdown_to_pptx",
+        help="Markdown 文書を PowerPoint (.pptx) に変換します",
+    )
+    markdown_to_pptx_parser.add_argument(
+        "-i",
+        "--input_markdown",
+        type=str,
+        required=True,
+        help="入力 Markdown 文字列",
+    )
+    markdown_to_pptx_parser.add_argument(
+        "-o",
+        "--output_path",
+        type=str,
+        required=True,
+        help="出力 PowerPoint ファイルパス",
+    )
+
+    markdown_to_excel_parser = subparsers.add_parser(
+        "markdown_to_excel",
+        help="Markdown 文書を Excel (.xlsx) に変換します",
+    )
+    markdown_to_excel_parser.add_argument(
+        "-i",
+        "--input_markdown",
+        type=str,
+        required=True,
+        help="入力 Markdown 文字列",
+    )
+    markdown_to_excel_parser.add_argument(
+        "-o",
+        "--output_path",
+        type=str,
+        required=True,
+        help="出力 Excel ファイルパス",
+    )
+
     multi_parser = subparsers.add_parser(
         "analyze_files",
         help="複数形式（テキスト/画像/PDF/Office）ファイルをまとめて解析します",
@@ -286,6 +373,30 @@ async def main(argv: Iterable[str] | None = None) -> None:
         _validate_non_empty(args.prompt, parser)
         response = await analyze_office_files(args.office_path_list, args.prompt, args.detail)
         print(response)
+        return
+
+    if args.command == "analyze_office_xml_files":
+        _validate_non_empty(args.prompt, parser)
+        response = await analyze_office_xml_files(args.office_path_list, args.prompt, args.detail)
+        print(response)
+        return
+
+    if args.command == "markdown_to_docx":
+        _validate_non_empty(args.input_markdown, parser)
+        output_path = MarkdownToDocxUtil.convert_markdown_to_docx(args.input_markdown, args.output_path)
+        print(output_path)
+        return
+
+    if args.command == "markdown_to_pptx":
+        _validate_non_empty(args.input_markdown, parser)
+        output_path = MarkdownToPptxUtil.convert_markdown_to_pptx(args.input_markdown, args.output_path)
+        print(output_path)
+        return
+
+    if args.command == "markdown_to_excel":
+        _validate_non_empty(args.input_markdown, parser)
+        output_path = MarkdownToExcelUtil.convert_markdown_to_excel(args.input_markdown, args.output_path)
+        print(output_path)
         return
 
     if args.command == "analyze_files":

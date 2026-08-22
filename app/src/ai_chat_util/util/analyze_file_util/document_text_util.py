@@ -9,6 +9,8 @@ from openpyxl import load_workbook
 from pdfminer.high_level import extract_text as extract_pdf_text
 from pptx import Presentation
 
+from document_content_util import DocumentExtractor, ExtractionUnsupported
+
 
 class DocumentTextUtil:
     TEXT_FILE_SUFFIXES = {
@@ -63,18 +65,22 @@ class DocumentTextUtil:
     @classmethod
     def extract_text_from_path(cls, path: str | Path) -> str:
         resolved_path = Path(path)
-        suffix = resolved_path.suffix.lower()
-        if suffix in cls.TEXT_FILE_SUFFIXES:
-            return resolved_path.read_text(encoding="utf-8", errors="ignore")
-        if suffix == ".pdf":
-            return extract_pdf_text(str(resolved_path))
-        if suffix == ".docx":
-            return cls.extract_docx_text(resolved_path)
-        if suffix == ".pptx":
-            return cls.extract_pptx_text(resolved_path)
-        if suffix in {".xlsx", ".xlsm"}:
-            return cls.extract_xlsx_text(resolved_path)
-        raise ValueError(f"Text extraction is not supported for file type: {resolved_path.suffix or '<none>'}")
+        try:
+            return DocumentExtractor.default().extract_local(resolved_path).text
+        except ExtractionUnsupported:
+            # Keep the legacy Office/PDF fallback until optional extractors are installed.
+            suffix = resolved_path.suffix.lower()
+            if suffix == ".pdf":
+                return extract_pdf_text(str(resolved_path))
+            if suffix == ".docx":
+                return cls.extract_docx_text(resolved_path)
+            if suffix == ".pptx":
+                return cls.extract_pptx_text(resolved_path)
+            if suffix in {".xlsx", ".xlsm"}:
+                return cls.extract_xlsx_text(resolved_path)
+            raise ValueError(
+                f"Text extraction is not supported for file type: {resolved_path.suffix or '<none>'}"
+            )
 
     @classmethod
     def extract_base64_to_text(cls, extension: str, base64_data: str) -> str:

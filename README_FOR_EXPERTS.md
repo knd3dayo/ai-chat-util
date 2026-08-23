@@ -26,11 +26,11 @@
 
 主要レイヤは次の通りです。
 
-- Core chat: [app/src/ai_chat_util/core/chat](app/src/ai_chat_util/core/chat)
-- File analysis: [app/src/ai_chat_util/core/analysis](app/src/ai_chat_util/core/analysis)
-- API interface: [app/src/ai_chat_util/interfaces/api/api_server.py](app/src/ai_chat_util/interfaces/api/api_server.py)
-- CLI interface: [app/src/ai_chat_util/interfaces/cli/__main__.py](app/src/ai_chat_util/interfaces/cli/__main__.py)
-- MCP interface: [app/src/ai_chat_util/interfaces/mcp/mcp_server.py](app/src/ai_chat_util/interfaces/mcp/mcp_server.py)
+- Core chat: [src/ai_chat_util/core/chat](src/ai_chat_util/core/chat)
+- File analysis: [src/ai_chat_util/core/analysis](src/ai_chat_util/core/analysis)
+- API interface: [src/ai_chat_util/interfaces/api/api_server.py](src/ai_chat_util/interfaces/api/api_server.py)
+- CLI interface: [src/ai_chat_util/interfaces/cli/__main__.py](src/ai_chat_util/interfaces/cli/__main__.py)
+- MCP interface: [src/ai_chat_util/interfaces/mcp/mcp_server.py](src/ai_chat_util/interfaces/mcp/mcp_server.py)
 
 データフローは概ね以下です。
 
@@ -40,7 +40,7 @@
 
 ## Runtime Configuration
 
-標準設定ファイルは [app/ai-chat-util-config.yml](app/ai-chat-util-config.yml) です。
+標準設定ファイルは [ai-chat-util-config.yml](ai-chat-util-config.yml) です。
 
 - 読み込み順序
 1. CLI/API 起動時の --config
@@ -71,7 +71,7 @@
 
 ## CLI Reference
 
-エントリポイントは [app/pyproject.toml](app/pyproject.toml) の ai-chat-util です。
+エントリポイントは [pyproject.toml](pyproject.toml) の ai-chat-util です。
 
 現行サブコマンド。
 
@@ -90,7 +90,7 @@
 
 ## API Reference
 
-実装は [app/src/ai_chat_util/interfaces/api/api_server.py](app/src/ai_chat_util/interfaces/api/api_server.py) です。
+実装は [src/ai_chat_util/interfaces/api/api_server.py](src/ai_chat_util/interfaces/api/api_server.py) です。
 プレフィックスは /api/ai_chat_util。
 
 代表エンドポイント。
@@ -112,8 +112,8 @@
 
 ## MCP Reference
 
-実装は [app/src/ai_chat_util/interfaces/mcp/mcp_server.py](app/src/ai_chat_util/interfaces/mcp/mcp_server.py) です。
-エントリポイントは [app/pyproject.toml](app/pyproject.toml) の ai-chat-util-mcp。
+実装は [src/ai_chat_util/interfaces/mcp/mcp_server.py](src/ai_chat_util/interfaces/mcp/mcp_server.py) です。
+エントリポイントは [pyproject.toml](pyproject.toml) の ai-chat-util-mcp。
 
 現行ツール群（抜粋）。
 

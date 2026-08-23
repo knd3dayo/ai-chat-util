@@ -25,10 +25,10 @@ uv sync
 非秘密設定は YAML、秘密情報は環境変数または .env で管理します。
 
 ```bash
-cp app/ai-chat-util-config.yml ./ai-chat-util-config.yml
+cp ./ai-chat-util-config.yml ./config.yml
 ```
 
-設定ファイルのベースは [app/ai-chat-util-config.yml](app/ai-chat-util-config.yml) です。API キーなどの秘密情報は YAML に直書きせず、環境変数参照を使ってください。
+設定ファイルのベースは [ai-chat-util-config.yml](ai-chat-util-config.yml) です。API キーなどの秘密情報は YAML に直書きせず、環境変数参照を使ってください。
 
 例:
 
@@ -52,13 +52,13 @@ ai_chat_util_config:
 通常チャット:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは"
+uv run -m ai_chat_util.cli --config ./ai-chat-util-config.yml chat -p "こんにちは"
 ```
 
 複数ファイル解析:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
+uv run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
   -i note.txt document.pdf image.png \
   -p "内容を要約してください"
 ```
@@ -66,7 +66,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
 Office 文書解析の例:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
+uv run -m ai_chat_util.cli --config ./ai-chat-util-config.yml analyze_files \
   -i data/sample.docx data/sample.xlsx data/sample.pptx \
   -p "各ファイルの概要を要約してください"
 ```
@@ -74,7 +74,7 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
 Excel バッチ:
 
 ```bash
-uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml batch_chat \
+uv run -m ai_chat_util.cli --config ./ai-chat-util-config.yml batch_chat \
   -i data/input.xlsx \
   -p "要約してください" \
   -o output.xlsx
@@ -93,10 +93,10 @@ uv --directory ./app run -m ai_chat_util.cli --config ./ai-chat-util-config.yml 
 stdio で起動する最小例です。
 
 ```bash
-uv --directory ./app run -m ai_chat_util.mcp.mcp_server
+uv run -m ai_chat_util.mcp.mcp_server
 ```
 
-クライアント設定例は [app/sample_cline_mcp_settings.json](app/sample_cline_mcp_settings.json) を参照してください。
+クライアント設定例は [sample_cline_mcp_settings.json](sample_cline_mcp_settings.json) を参照してください。
 
 ### API サーバー
 
@@ -104,7 +104,7 @@ FastAPI サーバーを使う場合は、設定ファイルへのパスを環境
 
 ```bash
 export AI_CHAT_UTIL_CONFIG=$PWD/ai-chat-util-config.yml
-uv --directory ./app run uvicorn ai_chat_util.interfaces.api.api_server:app
+uv run uvicorn ai_chat_util.interfaces.api.api_server:app
 ```
 
 chat リクエスト例:

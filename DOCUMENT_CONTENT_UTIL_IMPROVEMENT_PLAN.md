@@ -34,7 +34,7 @@ CLI / API / MCP / アプリケーション
 
 ### 3.1 再利用可能な決定的処理
 
-現在、主に`app/src/ai_chat_util/util/analyze_file_util/`に存在する。
+現在、主に`src/ai_chat_util/util/analyze_file_util/`に存在する。
 
 - MagikaによるMIMEタイプ判定
 - chardetによる文字コード判定

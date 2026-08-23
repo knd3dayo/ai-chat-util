@@ -17,6 +17,7 @@
 次の機能は削除済みです。
 
 - Docker 実行/生成機能
+- Fileサーバー機能
 - agent/workflow ルーティング
 - DeepAgent 系エントリポイント
 - coding-agent 専用 API/CLI/runtime
@@ -55,11 +56,18 @@
 
 - llm
 - mcp
-- file_server
 - features（現行は analyzer 系や監査ログ中心）
 - logging
 - network
 - office2pdf
+
+削除済み（設定不可）セクション。
+
+- ai_chat_util_config.file_server
+- coding_agent_util.compose
+- coding_agent_util.backend.task_backend=docker|compose
+
+上記キーは ai-chat-util では受け付けません。misc-util 側の設定へ移行してください。
 
 ## CLI Reference
 
@@ -136,11 +144,12 @@
 
 ## Migration Notes
 
-Docker/agent/workflow から移行する場合の注意。
+Docker/Fileサーバー/agent/workflow から移行する場合の注意。
 
 1. 旧コマンド（agent_chat, run_workflow, docker_compose_* 等）は利用不可
-2. 旧 endpoint（/agent_chat, /run_deepagent_* など）は提供しない
-3. MCP の script 名は ai-chat-util-mcp
-4. coding-agent 系 script は廃止
+2. file_server 関連 endpoint/tool は利用不可
+3. 旧 endpoint（/agent_chat, /run_deepagent_* など）は提供しない
+4. MCP の script 名は ai-chat-util-mcp
+5. coding-agent 系 script は廃止
 
 必要なら、旧運用スクリプトは chat / batch_chat / analyze_* ベースに置き換えてください。

@@ -2,7 +2,7 @@
 
 ai_chat_util は、生成AIを使ったチャット、文書解析、バッチ処理、MCP 連携をまとめて扱うためのユーティリティです。初見の人が最短で試せるように、この README はクイックスタート中心に整理しています。
 
-高度な技術者または AI エージェント向けの詳細仕様、設定項目、運用メモ、アーキテクチャ、file_server の詳細は [README_FOR_EXPERTS.md](README_FOR_EXPERTS.md) を参照してください。
+高度な技術者または AI エージェント向けの詳細仕様、設定項目、運用メモ、アーキテクチャは [README_FOR_EXPERTS.md](README_FOR_EXPERTS.md) を参照してください。
 
 ## できること
 
@@ -128,7 +128,7 @@ curl -X POST http://127.0.0.1:8000/api/ai_chat_util/chat \
 
 ## 補足
 
-- ワークスペース構成、依存ルール、監査ログ、MCP 詳細設定、file_server などは [README_FOR_EXPERTS.md](README_FOR_EXPERTS.md) に分離しています。
+- ワークスペース構成、依存ルール、監査ログ、MCP 詳細設定などは [README_FOR_EXPERTS.md](README_FOR_EXPERTS.md) に分離しています。
 
 ## 詳細ドキュメント
 

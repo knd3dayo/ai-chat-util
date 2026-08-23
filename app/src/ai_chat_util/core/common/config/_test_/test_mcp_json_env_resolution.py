@@ -105,11 +105,6 @@ def test_init_runtime_expands_allowlisted_ai_paths(monkeypatch: pytest.MonkeyPat
             "features": {"audit_log_path": "${HOME}/logs/audit.jsonl"},
             "network": {"ca_bundle": "${HOME}/certs/ca.pem"},
             "office2pdf": {"libreoffice_exec": {"libreoffice_path": "${HOME}/bin/soffice"}},
-            "file_server": {
-                "allowed_roots": [
-                    {"name": "root", "path": "${HOME}/data"}
-                ]
-            },
         }
     }
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
@@ -124,7 +119,6 @@ def test_init_runtime_expands_allowlisted_ai_paths(monkeypatch: pytest.MonkeyPat
     assert cfg.features.audit_log_path == f"{tmp_path.as_posix()}/logs/audit.jsonl"
     assert cfg.network.ca_bundle == f"{tmp_path.as_posix()}/certs/ca.pem"
     assert cfg.office2pdf.libreoffice_exec.libreoffice_path == f"{tmp_path.as_posix()}/bin/soffice"
-    assert cfg.file_server.allowed_roots[0].path == f"{tmp_path.as_posix()}/data"
 
 
 def test_init_runtime_supports_method_based_office2pdf_config(
@@ -191,3 +185,51 @@ def test_init_runtime_rejects_unresolved_path_env(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ConfigError):
         runtime_mod.init_runtime(str(cfg_path))
+
+
+def test_init_runtime_rejects_removed_file_server_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "ai_chat_util_config": {
+                    "llm": {"api_key": "os.environ/LLM_API_KEY"},
+                    "file_server": {"enabled": False},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LLM_API_KEY", "dummy-key")
+    runtime_mod._runtime_state = None  # type: ignore[attr-defined]
+
+    with pytest.raises(ConfigError) as e:
+        runtime_mod.init_runtime(str(cfg_path))
+
+    assert "ai_chat_util_config.file_server" in str(e.value)
+
+
+def test_init_coding_runtime_rejects_removed_compose_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg_path = tmp_path / "ai-chat-util-config.yml"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "ai_chat_util_config": {
+                    "llm": {"api_key": "os.environ/LLM_API_KEY"},
+                },
+                "coding_agent_util": {
+                    "backend": {"task_backend": "process"},
+                    "process": {"command": "echo hello"},
+                    "compose": {"file": "docker-compose.yml"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LLM_API_KEY", "dummy-key")
+    runtime_mod._coding_runtime_state = None  # type: ignore[attr-defined]
+
+    with pytest.raises(ConfigError) as e:
+        runtime_mod.init_coding_runtime(str(cfg_path))
+
+    assert "coding_agent_util.compose" in str(e.value)

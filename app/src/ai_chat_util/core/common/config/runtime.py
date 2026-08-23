@@ -313,23 +313,6 @@ def _expand_allowlisted_ai_paths(raw: dict[str, Any], *, config_path: Path) -> d
             field_prefix=f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.",
         )
 
-    file_server = copied.get("file_server")
-    if isinstance(file_server, dict):
-        allowed_roots = file_server.get("allowed_roots")
-        if isinstance(allowed_roots, list):
-            for idx, root in enumerate(allowed_roots):
-                if not isinstance(root, dict):
-                    continue
-                value = root.get("path")
-                if isinstance(value, str) and value.strip():
-                    root["path"] = resolve_path_placeholders(
-                        value,
-                        config_path=config_path,
-                        field_path=(
-                            f"{AI_CHAT_UTIL_CONFIG_ROOT_KEY}.file_server.allowed_roots[{idx}].path"
-                        ),
-                    )
-
     return copied
 
 
@@ -340,8 +323,6 @@ def _expand_allowlisted_coding_paths(raw: dict[str, Any], *, config_path: Path) 
         ("paths", "workspace_root"),
         ("paths", "host_projects_root"),
         ("paths", "executor_allowed_workspace_root"),
-        ("compose", "directory"),
-        ("compose", "file"),
         ("logging", "file"),
     ):
         _expand_mapping_path_field(
@@ -381,6 +362,12 @@ def _build_ai_chat_util_config(*, raw_root: dict[str, Any], resolved: Path) -> A
             "設定ファイルの形式が古いか、キーが誤っています: "
             f"{resolved}\n"
             "'ai_chat_util_config.paths' はサポートされません。'ai_chat_util_config.mcp' に移行してください。"
+        )
+
+    if "file_server" in raw_section:
+        raise ConfigError(
+            "設定キー 'ai_chat_util_config.file_server' は ai-chat-util から削除されました。\n"
+            "移行先: misc-util の config.yml (misc_util_config.file_server)。"
         )
 
     # Secrets may be declared in YAML only via env reference (os.environ/VAR).
@@ -468,8 +455,8 @@ def _build_coding_agent_util_config(
             raise ConfigError(
                 f"設定ファイルの形式が不正です: {resolved}\n"
                 f"ルートに '{CODING_AGENT_UTIL_CONFIG_ROOT_KEY}:' が必要です。\n\n"
-                "旧フォーマット（ルート直下に llm/compose/backend...）はサポートされません。\n"
-                "対処: 既存の llm/compose/backend... を coding_agent_util_config: 配下へ 1段インデントして移動してください。"
+                "旧フォーマット（ルート直下に llm/backend...）はサポートされません。\n"
+                "対処: 既存の llm/backend... を coding_agent_util_config: 配下へ 1段インデントして移動してください。"
             )
 
         if standalone_section is None:
@@ -484,7 +471,6 @@ def _build_coding_agent_util_config(
     for section_key in (
         "endpoint",
         "llm",
-        "compose",
         "backend",
         "monitor",
         "paths",
@@ -495,6 +481,21 @@ def _build_coding_agent_util_config(
     ):
         if raw.get(section_key, "__missing__") is None:
             raw[section_key] = {}
+
+    if "compose" in raw:
+        raise ConfigError(
+            "設定キー 'coding_agent_util.compose' は ai-chat-util から削除されました。\n"
+            "移行先: misc-util の config.yml (misc_util_config.docker.compose)。"
+        )
+
+    backend_raw = raw.get("backend")
+    if isinstance(backend_raw, dict):
+        task_backend = str(backend_raw.get("task_backend", "")).strip().lower()
+        if task_backend in {"docker", "compose"}:
+            raise ConfigError(
+                "設定値 'coding_agent_util.backend.task_backend=docker|compose' は ai-chat-util から削除されました。\n"
+                "移行先: misc-util の config.yml (misc_util_config.docker.backend.task_backend)。"
+            )
 
     raw = _expand_allowlisted_coding_paths(raw, config_path=resolved)
 
@@ -673,82 +674,6 @@ class MCPSection(BaseModel):
 
         return self
 
-
-class FileServerSMBSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(default=False)
-    server: str | None = Field(default=None)
-    share: str | None = Field(default=None)
-    port: int = Field(default=445)
-    domain: str | None = Field(default=None)
-    username: str | None = Field(default=None)
-    password: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _validate_port(self) -> "FileServerSMBSection":
-        if self.port <= 0:
-            raise ValueError("file_server.smb.port は 1 以上である必要があります")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_credentials(self) -> "FileServerSMBSection":
-        if self.enabled and self.username and not self.password:
-            raise ValueError("file_server.smb.password を設定してください")
-        if self.enabled and self.password and not self.username:
-            raise ValueError("file_server.smb.username を設定してください")
-        return self
-
-
-class FileServerAllowedRoot(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    provider: Literal["local", "smb"] = Field(default="local")
-    path: str = Field(default=".")
-    description: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _validate_name(self) -> "FileServerAllowedRoot":
-        self.name = self.name.strip()
-        if not self.name:
-            raise ValueError("file_server.allowed_roots[].name は空文字にできません")
-        return self
-
-
-class FileServerSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(default=False)
-    default_provider: Literal["local", "smb"] = Field(default="local")
-    default_root: str | None = Field(default=None)
-    allowed_roots: list[FileServerAllowedRoot] = Field(default_factory=list)
-    max_depth: int = Field(default=3)
-    max_entries: int = Field(default=1000)
-    include_hidden_default: bool = Field(default=False)
-    follow_symlinks: bool = Field(default=False)
-    include_mime_default: bool = Field(default=False)
-    smb: FileServerSMBSection = Field(default_factory=FileServerSMBSection)
-
-    @model_validator(mode="after")
-    def _validate_limits(self) -> "FileServerSection":
-        if self.max_depth < 0:
-            raise ValueError("file_server.max_depth は 0 以上である必要があります")
-        if self.max_entries <= 0:
-            raise ValueError("file_server.max_entries は 1 以上である必要があります")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_roots(self) -> "FileServerSection":
-        names: set[str] = set()
-        for root in self.allowed_roots:
-            if root.name in names:
-                raise ValueError(f"file_server.allowed_roots の name が重複しています: {root.name}")
-            names.add(root.name)
-
-        if self.default_root and self.default_root not in names:
-            raise ValueError("file_server.default_root は allowed_roots の name と一致する必要があります")
-        return self
 
 class FeaturesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -987,13 +912,6 @@ class CodingAgentUtilLLMSection(BaseModel):
     base_model: str | None = Field(default=None)
 
 
-class CodingComposeSection(BaseModel):
-    directory: str = Field(default=".")
-    file: str = Field(default="docker-compose.yml")
-    service_name: str = Field(default="executor-service")
-    command: str = Field(default="")
-
-
 class CodingBackendSection(BaseModel):
     # NOTE:
     # - `process` is the only local execution backend name.
@@ -1006,9 +924,9 @@ class CodingBackendSection(BaseModel):
         b = (self.task_backend or "process").strip().lower()
         if b == "subprocess":
             b = "process"
-        if b not in {"docker", "compose", "process", "windows_process", "linux_process"}:
+        if b not in {"process", "windows_process", "linux_process"}:
             raise ValueError(
-                "backend.task_backend は 'docker' | 'compose' | 'process' | 'windows_process' | 'linux_process' のいずれかである必要があります"
+                "backend.task_backend は 'process' | 'windows_process' | 'linux_process' のいずれかである必要があります"
             )
         if b == "windows_process" and os.name != "nt":
             raise ValueError("backend.task_backend=windows_process は Windows 上でのみ使用できます")
@@ -1094,7 +1012,6 @@ class AiChatUtilConfig(BaseModel):
 
     llm: LLMSection = Field(default_factory=LLMSection)
     mcp: MCPSection = Field(default_factory=MCPSection)
-    file_server: FileServerSection = Field(default_factory=FileServerSection)
     features: FeaturesSection = Field(default_factory=FeaturesSection)
     logging: LoggingSection = Field(default_factory=LoggingSection)
     network: NetworkSection = Field(default_factory=NetworkSection)
@@ -1212,9 +1129,10 @@ class AiChatUtilConfig(BaseModel):
 
 
 class CodingAgentUtilConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     endpoint: CodingEndpointSection = Field(default_factory=CodingEndpointSection)
     llm: CodingAgentUtilLLMSection = Field(default_factory=CodingAgentUtilLLMSection)
-    compose: CodingComposeSection = Field(default_factory=CodingComposeSection)
     backend: CodingBackendSection = Field(default_factory=CodingBackendSection)
     monitor: CodingMonitorSection = Field(default_factory=CodingMonitorSection)
     paths: CodingPathsSection = Field(default_factory=CodingPathsSection)
@@ -1272,19 +1190,14 @@ class CodingAgentUtilConfig(BaseModel):
         fields = set(getattr(self, "model_fields_set", set()) or set())
         backend_explicit = "backend" in fields
         process_explicit = "process" in fields or "subprocess" in fields
-        compose_explicit = "compose" in fields
 
         backend = (self.backend.task_backend or "process").strip().lower()
         proc_cmd = (self.process.command or "").strip() if self.process else ""
-        compose_cmd = (self.compose.command or "").strip() if self.compose else ""
 
-        if backend_explicit or process_explicit or compose_explicit:
+        if backend_explicit or process_explicit:
             if backend in {"process", "windows_process", "linux_process"}:
                 if not proc_cmd:
                     raise ValueError("process 系バックエンドでは process.command を設定してください")
-            if backend in {"docker", "compose"}:
-                if not compose_cmd:
-                    raise ValueError("docker/compose バックエンドでは compose.command を設定してください")
         return self
 
     @model_validator(mode="after")
@@ -1298,23 +1211,6 @@ class CodingAgentUtilConfig(BaseModel):
                 "'llm.api_key: os.environ/ENV_VAR_NAME' の形式にしてください。"
             )
         return self
-
-    def get_compose_paths(self) -> list[str]:
-        raw = (self.compose.file or "").strip()
-        if not raw:
-            return [str(Path(self.compose.directory) / "docker-compose.yml")]
-
-        parts = [p.strip() for p in raw.split(os.pathsep) if p.strip()]
-        if len(parts) == 1 and "," in parts[0]:
-            parts = [p.strip() for p in parts[0].split(",") if p.strip()]
-
-        paths: list[str] = []
-        for part in parts:
-            if os.path.isabs(part):
-                paths.append(part)
-            else:
-                paths.append(str(Path(self.compose.directory) / part))
-        return paths
 
 class AppConfigSection(BaseModel):
     ai_chat_util_config: AiChatUtilConfig = Field(default_factory=AiChatUtilConfig)

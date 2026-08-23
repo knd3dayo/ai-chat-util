@@ -1,14 +1,9 @@
 from contextlib import asynccontextmanager
-from typing import Optional
-
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI
 
 from ai_chat_util.core.common.config.runtime import init_runtime
-from ai_chat_util.core.analysis.model import FileServerProvider
 
 from ai_chat_util.core.analysis.base import (
-    list_file_server_roots,
-    list_file_server_entries,
     get_document_type,
     get_mime_type,
     get_sheet_names,
@@ -32,36 +27,6 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 router = APIRouter()
-
-
-async def _list_file_server_entries_api(
-    provider: Optional[FileServerProvider] = None,
-    root_name: Optional[str] = None,
-    path: str = ".",
-    recursive: bool = False,
-    max_depth: Optional[int] = None,
-    include_hidden: Optional[bool] = None,
-    include_mime: Optional[bool] = None,
-):
-    try:
-        return await list_file_server_entries(
-            provider=provider,
-            root_name=root_name,
-            path=path,
-            recursive=recursive,
-            max_depth=max_depth,
-            include_hidden=include_hidden,
-            include_mime=include_mime,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-async def _list_file_server_roots_api():
-    try:
-        return await list_file_server_roots()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 # get_document_type
 router.add_api_route(path='/get_document_type', endpoint=get_document_type, methods=['GET'])
@@ -96,10 +61,6 @@ router.add_api_route(path='/export_data_to_excel', endpoint=export_data_to_excel
 
 # import_data_from_excel
 router.add_api_route(path='/import_data_from_excel', endpoint=import_data_from_excel, methods=['GET'])
-
-# file server directory listing
-router.add_api_route(path='/list_file_server_roots', endpoint=_list_file_server_roots_api, methods=['GET'])
-router.add_api_route(path='/list_file_server_entries', endpoint=_list_file_server_entries_api, methods=['GET'])
 
 app.include_router(router, prefix="/api/file_util")
 if __name__ == "__main__":

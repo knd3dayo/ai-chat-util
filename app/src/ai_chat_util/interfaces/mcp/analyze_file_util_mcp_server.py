@@ -8,9 +8,6 @@ from pydantic import Field
 
 from ai_chat_util.core.common.config.runtime import init_runtime
 from ai_chat_util.core.analysis.model import (
-    FileServerListResponse,
-    FileServerProvider,
-    FileServerRootListResponse,
     MCPBooleanResult,
     MCPDetectExcelTablesResult,
     MCPDocumentTypeResult,
@@ -21,8 +18,6 @@ from ai_chat_util.core.analysis.model import (
     MCPZipContentsResult,
 )
 from ai_chat_util.core.analysis.base import (
-    list_file_server_roots as base_list_file_server_roots,
-    list_file_server_entries as base_list_file_server_entries,
     get_document_type as base_get_document_type,
     get_mime_type as base_get_mime_type,
     get_sheet_names as base_get_sheet_names,
@@ -133,30 +128,6 @@ async def import_data_from_excel(
     data = await base_import_data_from_excel(input_file, sheet_name)
     return MCPImportExcelDataResult(data=data)
 
-
-async def list_file_server_roots() -> FileServerRootListResponse:
-    return await base_list_file_server_roots()
-
-
-async def list_file_server_entries(
-    provider: Annotated[Optional[FileServerProvider], Field(description="Storage provider to use. Omit to use default_root")] = None,
-    root_name: Annotated[Optional[str], Field(description="Configured root name to browse")] = None,
-    path: Annotated[str, Field(description="Path relative to the configured root")] = ".",
-    recursive: Annotated[bool, Field(description="Whether to return child directories recursively")] = False,
-    max_depth: Annotated[Optional[int], Field(description="Maximum child depth when recursive is true")] = None,
-    include_hidden: Annotated[Optional[bool], Field(description="Whether to include dotfiles and hidden entries")] = None,
-    include_mime: Annotated[Optional[bool], Field(description="Whether to detect MIME type for files")] = None,
-) -> FileServerListResponse:
-    return await base_list_file_server_entries(
-        provider=provider,
-        root_name=root_name,
-        path=path,
-        recursive=recursive,
-        max_depth=max_depth,
-        include_hidden=include_hidden,
-        include_mime=include_mime,
-    )
-
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCP server with specified mode and APP_DATA_PATH.")
@@ -204,8 +175,6 @@ async def main():
         mcp.tool()(extract_base64_to_text)
         mcp.tool()(export_data_to_excel)
         mcp.tool()(import_data_from_excel)
-        mcp.tool()(list_file_server_roots)
-        mcp.tool()(list_file_server_entries)
 
     if mode == "stdio":
         await mcp.run_async()
